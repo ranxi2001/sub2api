@@ -188,17 +188,22 @@ func issue914WSNode(t *testing.T, kind, mode, upstream string, cache service.Gat
 func TestIssue914LegacyWSCompatibility(t *testing.T) {
 	for _, kind := range []string{service.AccountTypeOAuth, service.AccountTypeAPIKey} {
 		for _, mode := range []string{service.OpenAIWSIngressModeCtxPool, service.OpenAIWSIngressModePassthrough, service.OpenAIWSIngressModeHTTPBridge} {
-			for _, change := range []string{"metadata", "declaration_id", "compaction_order", "custom_bridge", "instructions", "window"} {
+			for _, change := range []string{"metadata", "declaration_id", "compaction_order", "custom_bridge", "instructions", "window", "plaintext_instructions"} {
 				t.Run(kind+"/"+mode+"/"+change, func(t *testing.T) {
 					clients := issue805Redis(t)
 					u := &issue805Oracle{}
 					srv := u.server(t)
 					h := issue914WSNode(t, kind, mode, srv.URL, repository.NewGatewayCache(clients()))
 					body := issue914Body(t, change, true)
+					if change == "plaintext_instructions" {
+						var err error
+						body, err = sjson.Delete(body, "input.0")
+						require.NoError(t, err)
+					}
 					body, err := sjson.Set(body, "type", "response.create")
 					require.NoError(t, err)
 					turns := 1
-					if change == "instructions" || change == "window" {
+					if change == "instructions" || change == "window" || change == "plaintext_instructions" {
 						turns = 2
 					}
 					for turn := 0; turn < turns; turn++ {
