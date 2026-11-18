@@ -1,4 +1,4 @@
-# Tests changed by 4b78bceae..12065e8d9 upstream import. Historical overlays only.
+# Upstream import (4b78bceae..12065e8d9) and later independent tests. Historical overlays only.
 backend/cmd/server/wire_gen_test.go
 backend/internal/config/config_test.go
 backend/internal/domain/constants_test.go
@@ -138,3 +138,7 @@ backend/internal/web/embed_test.go
 backend/internal/web/html_cache_headers_test.go
 backend/migrations/group_force_openai_ultrafast_migration_test.go
 backend/migrations/group_usage_rollup_migration_test.go
+# Later profit-consumption APIs are absent from the complete historical trees.
+# Restore existing profit tests; omit provider-site tests only when absent there.
+backend/internal/service/profit_operations_test.go
+backend/internal/service/provider_profit_site_test.go

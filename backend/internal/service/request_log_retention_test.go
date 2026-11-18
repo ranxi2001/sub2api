@@ -9,7 +9,6 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/stretchr/testify/require"
 )
 
@@ -115,9 +114,10 @@ func TestRuntimeLogConfig_RequestRetentionCompatibility(t *testing.T) {
 }
 
 func TestRequestLogRetention_CutoffAlignsToConfiguredDayStart(t *testing.T) {
-	previous := timezone.Name()
-	require.NoError(t, timezone.Init("Asia/Shanghai"))
-	t.Cleanup(func() { require.NoError(t, timezone.Init(previous)) })
+	// Keep the configured location explicit: timezone.Init also writes time.Local,
+	// which background goroutines (including the ants pool) read via time.Now.
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	require.NoError(t, err)
 
 	for _, tt := range []struct {
 		name      string
@@ -135,7 +135,7 @@ func TestRequestLogRetention_CutoffAlignsToConfiguredDayStart(t *testing.T) {
 				Retention: config.DashboardAggregationRetentionConfig{UsageLogsDays: 90, UsageBillingDedupDays: tt.dedupDays, HourlyDays: 180, DailyDays: 730},
 			}})
 			now := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
-			svc.maybeCleanupRetention(context.Background(), now)
+			svc.maybeCleanupRetentionInLocation(context.Background(), now, loc)
 
 			require.Equal(t, time.Date(2026, 6, 16, 16, 0, 0, 0, time.UTC), repo.cleanupUsageCutoff)
 			require.Equal(t, tt.wantDedup, repo.cleanupDedupCutoff)
@@ -145,38 +145,35 @@ func TestRequestLogRetention_CutoffAlignsToConfiguredDayStart(t *testing.T) {
 
 // 夏令时在零点跳变的日期没有 00:00：日界取该日期实际开始的时刻，而不是前一天的 23:00。
 func TestGroupUsageDayBoundariesSkipMidnightDSTGap(t *testing.T) {
-	previous := timezone.Name()
-	require.NoError(t, timezone.Init("America/Santiago"))
-	t.Cleanup(func() { require.NoError(t, timezone.Init(previous)) })
-	loc := timezone.Location()
+	loc, err := time.LoadLocation("America/Santiago")
+	require.NoError(t, err)
 
 	noon := time.Date(2026, 9, 6, 12, 0, 0, 0, loc)
-	start := GroupUsageTodayStart(noon)
-	require.Equal(t, "2026-09-06", GroupUsageDate(start))
-	require.Equal(t, "2026-09-05", GroupUsageDate(start.Add(-time.Nanosecond)))
+	start := groupUsageTodayStartInLocation(noon, loc)
+	require.Equal(t, "2026-09-06", groupUsageDateInLocation(start, loc))
+	require.Equal(t, "2026-09-05", groupUsageDateInLocation(start.Add(-time.Nanosecond), loc))
 
-	parsed, err := ParseGroupUsageDate("2026-09-06")
+	parsed, err := parseGroupUsageDateInLocation("2026-09-06", loc)
 	require.NoError(t, err)
 	require.True(t, parsed.Equal(start), "parsed=%s start=%s", parsed, start)
 
 	nextNoon := time.Date(2026, 9, 7, 12, 0, 0, 0, loc)
-	require.True(t, GroupUsageYesterdayStart(nextNoon).Equal(start))
+	require.True(t, groupUsageYesterdayStartInLocation(nextNoon, loc).Equal(start))
 
 	// 普通日期仍是本地零点。
-	regular, err := ParseGroupUsageDate("2026-09-08")
+	regular, err := parseGroupUsageDateInLocation("2026-09-08", loc)
 	require.NoError(t, err)
 	require.True(t, regular.Equal(time.Date(2026, 9, 8, 0, 0, 0, 0, loc)))
 }
 
 // 零点出现两次的日期（Asia/Gaza 2020-10-24 在 01:00 回拨到 00:00）：日界取第一次出现的 00:00。
 func TestGroupUsageDayBoundariesUseFirstOfRepeatedMidnight(t *testing.T) {
-	previous := timezone.Name()
-	require.NoError(t, timezone.Init("Asia/Gaza"))
-	t.Cleanup(func() { require.NoError(t, timezone.Init(previous)) })
-
-	start, err := ParseGroupUsageDate("2020-10-24")
+	loc, err := time.LoadLocation("Asia/Gaza")
 	require.NoError(t, err)
-	require.Equal(t, "2020-10-24", GroupUsageDate(start))
-	require.Equal(t, "2020-10-23", GroupUsageDate(start.Add(-time.Nanosecond)))
-	require.True(t, GroupUsageTodayStart(start.Add(90*time.Minute)).Equal(start))
+
+	start, err := parseGroupUsageDateInLocation("2020-10-24", loc)
+	require.NoError(t, err)
+	require.Equal(t, "2020-10-24", groupUsageDateInLocation(start, loc))
+	require.Equal(t, "2020-10-23", groupUsageDateInLocation(start.Add(-time.Nanosecond), loc))
+	require.True(t, groupUsageTodayStartInLocation(start.Add(90*time.Minute), loc).Equal(start))
 }
