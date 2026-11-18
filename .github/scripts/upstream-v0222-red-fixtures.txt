@@ -142,3 +142,21 @@ backend/migrations/group_usage_rollup_migration_test.go
 # Restore existing profit tests; omit provider-site tests only when absent there.
 backend/internal/service/profit_operations_test.go
 backend/internal/service/provider_profit_site_test.go
+
+# Later cache-tier, relogin and model-policy tests need their matching production APIs.
+# Full old-source overlays use baseline fixtures; current-head GREEN retains them.
+backend/internal/service/anthropic_prompt_total_test.go
+backend/internal/service/antigravity_gateway_service_test.go
+backend/internal/service/channel_pricing_multipliers_test.go
+backend/internal/service/codex_account_availability_test.go
+backend/internal/service/gateway_cache_compatibility_boundary_test.go
+backend/internal/service/gateway_cache_creation_usage_test.go
+backend/internal/service/gateway_cache_ttl_override_test.go
+backend/internal/service/openai_cache_write_ttl_test.go
+backend/internal/service/openai_gateway_native_cache_creation_test.go
+backend/internal/service/openai_gpt62_fork_test.go
+backend/internal/service/openai_json_object_field_edit_test.go
+backend/internal/service/openai_relogin_settings_test.go
+backend/internal/service/openai_subscription_long_context_test.go
+backend/internal/service/openai_two_fa_login_test.go
+backend/internal/service/upstream_batch_whitelist_identity_policy_test.go
