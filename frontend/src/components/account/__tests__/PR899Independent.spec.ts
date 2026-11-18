@@ -2370,7 +2370,7 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock.mock.calls[0]?.[1]?.upstream_billing_probe_enabled).toBe(true)
   })
 
-  it('keeps New API multipliers manual despite legacy automatic sync flags', async () => {
+  it('keeps New API customer billing manual and allows disabling cost sync', async () => {
     const account = buildAccount()
     account.extra = {
       upstream_billing_provider: 'new_api',
@@ -2383,9 +2383,11 @@ describe('EditAccountModal', () => {
     checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
     const wrapper = mountModal(account)
     expect(wrapper.find('[data-testid="upstream-billing-rate-sync"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="account-cost-auto-sync"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="account-cost-auto-sync"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('admin.accounts.upstreamBilling.newAPI.groupRatioHint')
     expect(wrapper.get<HTMLInputElement>('[data-testid="account-rate-multiplier"]').element.disabled).toBe(false)
+    expect(wrapper.get<HTMLInputElement>('[data-testid="account-cost-multiplier"]').element.disabled).toBe(true)
+    await wrapper.get('[data-testid="account-cost-auto-sync"]').trigger('click')
     expect(wrapper.get<HTMLInputElement>('[data-testid="account-cost-multiplier"]').element.disabled).toBe(false)
     expect(wrapper.get('[data-testid="upstream-billing-auto-probe"]').attributes('aria-checked')).toBe('true')
     await wrapper.get('[data-testid="account-rate-multiplier"]').setValue(0.7)
