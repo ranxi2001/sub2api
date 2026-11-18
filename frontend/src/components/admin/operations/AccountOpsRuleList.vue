@@ -63,6 +63,7 @@
               <p class="mt-1 max-w-72 truncate text-xs text-gray-500" :title="row.memberNames">{{ row.memberNames || t('accountOps.noAccountGroups') }}</p>
               <a v-if="row.group.provider_id" href="/admin/channel-operations" class="mt-1 inline-block text-xs text-primary-600">{{ t('accountOps.providerBalanceSource') }} #{{ row.group.provider_id }}</a>
               <p v-if="row.balanceAccounts.length > 1" class="mt-1 text-xs text-gray-500">{{ t('accountOps.sharedBalanceHint') }}</p>
+              <AccountOpsBalanceNotification v-for="account in row.balanceAccounts" :key="`balance-${account.account_id}`" :account="account" :config="config" :user-id="userId" :disabled="selectionUnavailable" @saved="emit('saved', $event)" />
               <AccountOpsLifecycleSelector v-for="account in row.quotaAccounts" :key="account.account_id" :account="account" :user-id="userId" :disabled="selectionUnavailable" @updated="emit('refresh')" />
             </td>
             <td class="px-4 py-4 text-xs text-gray-500">
@@ -107,6 +108,7 @@
 import { computed, ref, watch } from 'vue'
 import AccountOpsBalanceStatus from './AccountOpsBalanceStatus.vue'
 import AccountOpsLifecycleSelector from './AccountOpsLifecycleSelector.vue'
+import AccountOpsBalanceNotification from './AccountOpsBalanceNotification.vue'
 import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
 import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import { useI18n } from 'vue-i18n'
@@ -126,7 +128,7 @@ interface GroupRow {
 }
 
 const props = withDefaults(defineProps<{ userId?: number | null; accounts: AccountOpsThresholdAccount[]; groups?: AccountOpsGroup[]; config: AccountOpsConfig; loading: boolean; ready: boolean; error: string; busy?: boolean }>(), { groups: () => [] })
-const emit = defineEmits<{ (event: 'refresh'): void; (event: 'batch-edit', accounts: AccountOpsThresholdAccount[]): void; (event: 'edit-group', group: AccountOpsGroup): void; (event: 'toggle', group: AccountOpsGroup, accounts: AccountOpsThresholdAccount[], enabled: boolean): void }>()
+const emit = defineEmits<{ (event: 'refresh'): void; (event: 'saved', config: AccountOpsConfig): void; (event: 'batch-edit', accounts: AccountOpsThresholdAccount[]): void; (event: 'edit-group', group: AccountOpsGroup): void; (event: 'toggle', group: AccountOpsGroup, accounts: AccountOpsThresholdAccount[], enabled: boolean): void }>()
 const { t } = useI18n()
 const search = ref(''), type = ref('all'), state = ref('all'), selectedIds = ref(new Set<string>())
 const states = ['warning', 'normal', 'unknown', 'unconfigured', 'disabled']

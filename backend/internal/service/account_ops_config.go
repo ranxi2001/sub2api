@@ -124,6 +124,7 @@ func (c AccountOpsConfig) public() AccountOpsConfig {
 		c.Groups[i].AccountIDs = append([]int64{}, c.Groups[i].AccountIDs...)
 	}
 	c.UngroupedAccountIDs = append([]int64{}, c.UngroupedAccountIDs...)
+	c.BalanceLowDisabledAccountIDs = append([]int64{}, c.BalanceLowDisabledAccountIDs...)
 	c.BalanceThresholds = append([]AccountOpsBalanceRule{}, c.BalanceThresholds...)
 	c.QuotaThresholds = append([]AccountOpsQuotaRule{}, c.QuotaThresholds...)
 	normalizeOpsFlags(&c, AccountOpsConfig{})
@@ -167,6 +168,16 @@ func validateAccountOpsURL(provider, raw string) error {
 	return nil
 }
 func validateAccountOpsExtras(c AccountOpsConfig) error {
+	if len(c.BalanceLowDisabledAccountIDs) > 10000 {
+		return errors.New("too many balance notification overrides")
+	}
+	muted := make(map[int64]bool, len(c.BalanceLowDisabledAccountIDs))
+	for _, id := range c.BalanceLowDisabledAccountIDs {
+		if id <= 0 || muted[id] {
+			return errors.New("invalid balance notification account IDs")
+		}
+		muted[id] = true
+	}
 	if err := validateAccountOpsChannelName(c.EmailName); err != nil {
 		return err
 	}
@@ -343,6 +354,10 @@ func (s *AccountOpsService) saveConfigWithRuleScope(ctx context.Context, c Accou
 	if err != nil {
 		return err
 	}
+	if c.BalanceLowDisabledAccountIDs == nil {
+		c.BalanceLowDisabledAccountIDs = old.BalanceLowDisabledAccountIDs
+	}
+	c.BalanceLowDisabledAccountIDs = append([]int64{}, c.BalanceLowDisabledAccountIDs...)
 	normalizeOpsFlags(&c, old)
 	byID := map[string]AccountOpsWebhook{}
 	for _, w := range old.Webhooks {
