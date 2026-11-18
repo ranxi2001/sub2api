@@ -78,11 +78,35 @@ jobs:
           grep -F 'stale native cache cannot authorize a replacement whitelist' "$RUNNER_TEMP/read-policy-red.log"
           grep -F 'BPS fresh cache must also be bypassed' "$RUNNER_TEMP/read-policy-red.log"
           if grep -Eq 'build failed|setup failed|undefined:|no tests to run|panic:|WARNING: DATA RACE|--- SKIP:' "$RUNNER_TEMP/read-policy-red.log"; then exit 1; fi
+      - name: OAuth credential lifecycle oracle on frozen reviewed head
+        shell: bash
+        run: |
+          set -euo pipefail
+          reviewed=2f6e9cd7eeb9e7093fa37e1f7ae9d4bd1db7ac79
+          git worktree add --detach "$RUNNER_TEMP/whitelist-oauth-before" "$reviewed"
+          # Preserve the complete historical production tree and its helpers.
+          # Only the new oracle crosses into the frozen baseline.
+          file=backend/internal/service/upstream_batch_whitelist_oauth_policy_test.go
+          cp "$file" "$RUNNER_TEMP/whitelist-oauth-before/$file"
+          cd "$RUNNER_TEMP/whitelist-oauth-before/backend"
+          if go test -v -tags=unit ./internal/service -run '^TestBatchWhitelistOAuthCredentialLifecycleRejected$' -count=1 > "$RUNNER_TEMP/oauth-policy-red.log" 2>&1; then exit 1; fi
+          cat "$RUNNER_TEMP/oauth-policy-red.log"
+          grep -F 'whitelist-only OAuth discovery must not enter token providers' "$RUNNER_TEMP/oauth-policy-red.log"
+          grep -F 'whitelist-only OAuth discovery must not refresh credentials' "$RUNNER_TEMP/oauth-policy-red.log"
+          for platform in antigravity gemini; do
+            for state in expired_refresh_success expired_refresh_error missing_expiry missing_project ready cached_token; do
+              grep -F -- "--- FAIL: TestBatchWhitelistOAuthCredentialLifecycleRejected/$platform/$state" "$RUNNER_TEMP/oauth-policy-red.log"
+            done
+          done
+          if grep -Eq 'build failed|setup failed|undefined:|no tests to run|panic:|WARNING: DATA RACE|--- SKIP:' "$RUNNER_TEMP/oauth-policy-red.log"; then exit 1; fi
       - name: Candidate handler and catalog policies
         working-directory: backend
         run: |
           set -o pipefail
           go test -v -tags=unit ./internal/handler/admin ./internal/service ./internal/server/middleware -run 'Test(AccountHandler(Batch|SyncUpstreamModels)|BatchWhitelist|ApplyUpstreamModels|AutomaticUpstreamModels|FetchUpstreamSupportedModels|FetchOpenAIModelsList|FetchCodexModelsManifest(OAuth|AgentIdentity401|APIKey401)|SyncUpstreamModelCatalog|ReconciledUpstreamModels|ExcelBPSAccess|ExcelBPSMixed|ExcelOAuthRefresh|AdminAuth)' -count=1 | tee "$RUNNER_TEMP/handler-green.log"
+          for name in OAuthCredentialLifecycleRejected OAuthLegacySyncStillUsesTokenProvider OAuthPlatformAPIKeyStillApplies; do
+            grep -F -- "--- PASS: TestBatchWhitelist$name " "$RUNNER_TEMP/handler-green.log"
+          done
       - name: Build production server
         run: make -C backend build
       - name: PostgreSQL application, scheduler invalidation and stale edit protection
@@ -101,6 +125,7 @@ jobs:
             ${{ runner.temp }}/handler-green.log
             ${{ runner.temp }}/catalog-red.log
             ${{ runner.temp }}/read-policy-red.log
+            ${{ runner.temp }}/oauth-policy-red.log
             ${{ runner.temp }}/postgres.log
   browser:
     runs-on: ubuntu-24.04

@@ -152,6 +152,12 @@ func (s *AccountTestService) fetchWhitelistCatalog(ctx context.Context, account 
 		// Whitelist-only edits never own that credential lifecycle.
 		return nil, newUpstreamModelSyncUnsupportedError("Read-only model discovery does not support agent identity accounts", nil)
 	}
+	if account.Type == AccountTypeOAuth && (account.Platform == PlatformAntigravity || account.Platform == PlatformGemini) {
+		// These providers can refresh credentials, backfill project IDs and
+		// update cooldowns while obtaining a token. They have no read-only
+		// catalog policy, so reject before entering their credential lifecycle.
+		return nil, newUpstreamModelSyncUnsupportedError("Read-only model discovery does not support Gemini or Antigravity OAuth accounts", nil)
+	}
 	var models []string
 	var body []byte
 	var err error
