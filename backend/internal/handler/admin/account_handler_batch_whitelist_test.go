@@ -13,6 +13,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
+	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -133,4 +134,39 @@ func TestAccountHandlerBatchUpstreamWhitelist(t *testing.T) {
 	require.Equal(t, 400, post("46", `{"whitelist_only":true}`, false).Code)
 	require.Equal(t, 400, post("46", `{"whitelist_only":true,"apply":true,"automatic":true}`, false).Code)
 	require.Equal(t, []int64{43, 41, 44, 42, 45}, up.lookups)
+}
+
+type whitelistActor struct {
+	service.UserRepository
+	user *service.User
+}
+
+func (r *whitelistActor) GetByID(context.Context, int64) (*service.User, error) { return r.user, nil }
+
+func TestAccountHandlerBatchWhitelistAuthentication(t *testing.T) {
+	for _, tc := range []struct {
+		role string
+		code int
+	}{{"", 401}, {service.RoleUser, 403}, {service.RoleObserver, 403}, {service.RoleAdmin, 404}} {
+		t.Run(tc.role, func(t *testing.T) {
+			cfg := &config.Config{JWT: config.JWTConfig{Secret: "synthetic-whitelist", ExpireHour: 1}}
+			auth := service.NewAuthService(nil, nil, nil, nil, cfg, nil, nil, nil, nil, nil, nil, nil, nil)
+			actor := &service.User{ID: 19, Role: tc.role, Status: service.StatusActive}
+			user := service.NewUserService(&whitelistActor{user: actor}, nil, nil, nil)
+			h := NewAccountHandler(&whitelistAdmin{newStubAdminService(), &whitelistStore{accounts: map[int64]*service.Account{}}}, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+			r := gin.New()
+			r.Use(gin.HandlerFunc(middleware.NewAdminAuthMiddleware(auth, user, nil, nil)))
+			r.POST("/api/v1/admin/accounts/:id/models/sync-upstream", h.SyncUpstreamModels)
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/41/models/sync-upstream", strings.NewReader(`{"apply":true,"whitelist_only":true}`))
+			req.Header.Set("Content-Type", "application/json")
+			if tc.role != "" {
+				token, err := auth.GenerateToken(context.Background(), actor)
+				require.NoError(t, err)
+				req.Header.Set("Authorization", "Bearer "+token)
+			}
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			require.Equal(t, tc.code, w.Code, w.Body.String())
+		})
+	}
 }

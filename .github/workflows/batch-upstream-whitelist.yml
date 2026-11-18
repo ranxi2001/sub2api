@@ -19,6 +19,10 @@ jobs:
   contract:
     runs-on: ubuntu-latest
     timeout-minutes: 55
+    env:
+      CI: true
+      GOMAXPROCS: 4
+      GOFLAGS: -p=4
     steps:
       - uses: actions/checkout@v6
         with:
@@ -40,16 +44,30 @@ jobs:
           cat "$RUNNER_TEMP/handler-red.log"
           grep -F 'whitelist-only apply must not persist catalog metadata or quality state' "$RUNNER_TEMP/handler-red.log"
           grep -F -- '--- FAIL: TestAccountHandlerBatchUpstreamWhitelist' "$RUNNER_TEMP/handler-red.log"
+      - name: Same incomplete-catalog oracle on baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          file=backend/internal/service/upstream_batch_whitelist_test.go
+          cp "$file" "$RUNNER_TEMP/before/$file"
+          cd "$RUNNER_TEMP/before/backend"
+          if go test -v -tags=unit ./internal/service -run 'TestBatchWhitelistSafety/unconsumed|TestBatchWhitelistBPSPartialCatalog' -count=1 > "$RUNNER_TEMP/catalog-red.log" 2>&1; then exit 1; fi
+          cat "$RUNNER_TEMP/catalog-red.log"
+          grep -F -- '--- FAIL: TestBatchWhitelistSafety/unconsumed' "$RUNNER_TEMP/catalog-red.log"
+          grep -F 'partial BPS/native catalogs cannot replace the entire whitelist' "$RUNNER_TEMP/catalog-red.log"
       - name: Candidate handler and catalog policies
         working-directory: backend
-        run: go test -v -tags=unit ./internal/handler/admin ./internal/service -run 'Test(AccountHandler(BatchUpstreamWhitelist|SyncUpstreamModels)|ApplyUpstreamModels|AutomaticUpstreamModels|FetchUpstreamSupportedModels|SyncUpstreamModelCatalog|ReconciledUpstreamModels)' -count=1
+        run: |
+          set -o pipefail
+          go test -v -tags=unit ./internal/handler/admin ./internal/service ./internal/server/middleware -run 'Test(AccountHandler(Batch|SyncUpstreamModels)|BatchWhitelist|ApplyUpstreamModels|AutomaticUpstreamModels|FetchUpstreamSupportedModels|SyncUpstreamModelCatalog|ReconciledUpstreamModels|ExcelBPSAccess|ExcelBPSMixed|AdminAuth)' -count=1 | tee "$RUNNER_TEMP/handler-green.log"
       - name: Build production server
         run: make -C backend build
       - name: PostgreSQL application, scheduler invalidation and stale edit protection
         working-directory: backend
         run: |
           set -o pipefail
-          go test -v -tags=integration ./internal/repository -run '^TestApplyUpstreamModelsPreservesCredentialsAndInvalidatesScheduler$' -count=1 | tee "$RUNNER_TEMP/postgres.log"
+          go test -v -tags=integration ./internal/repository -run '^Test(BatchWhitelistPostgresHandlerReadback|ApplyUpstreamModelsPreservesCredentialsAndInvalidatesScheduler)$' -count=1 | tee "$RUNNER_TEMP/postgres.log"
+          grep -F -- '--- PASS: TestBatchWhitelistPostgresHandlerReadback' "$RUNNER_TEMP/postgres.log"
           grep -F -- '--- PASS: TestApplyUpstreamModelsPreservesCredentialsAndInvalidatesScheduler' "$RUNNER_TEMP/postgres.log"
       - uses: actions/upload-artifact@v7
         if: always()
@@ -57,4 +75,61 @@ jobs:
           name: whitelist-contract-${{ github.event.pull_request.head.sha }}
           path: |
             ${{ runner.temp }}/handler-red.log
+            ${{ runner.temp }}/handler-green.log
+            ${{ runner.temp }}/catalog-red.log
             ${{ runner.temp }}/postgres.log
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Mounted action before and after
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/evidence"
+          mkdir -p "$out"
+          base="$RUNNER_TEMP/before"
+          git worktree add --detach "$base" "$BASE"
+          pnpm --dir "$base/frontend" install --frozen-lockfile
+          oracle=src/components/account/__tests__/BatchUpstreamWhitelist.spec.ts
+          cp "frontend/$oracle" "$base/frontend/$oracle"
+          if pnpm --dir "$base/frontend" exec vitest run "$oracle" -t 'submits each selected ID' > "$out/ui-red.log" 2>&1; then exit 1; fi
+          grep -F 'selected accounts need a per-account upstream action: expected false to be true' "$out/ui-red.log"
+          pnpm --dir frontend exec vitest run "$oracle" src/views/admin/__tests__/AccountsView.bulkEdit.spec.ts | tee "$out/ui-green.log"
+      - name: Install isolated Chromium
+        run: |
+          npm install --prefix "$RUNNER_TEMP/browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/browser/node_modules/.bin/playwright" install --with-deps chromium
+          sudo apt-get install -y fonts-noto-cjk
+      - name: Render original and candidate components
+        env:
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/browser
+        run: |
+          script="$PWD/.github/scripts/batch-whitelist-ui.mjs"
+          (cd "$RUNNER_TEMP/before/frontend" && node "$script" before "$RUNNER_TEMP/evidence")
+          (cd frontend && node "$script" after "$RUNNER_TEMP/evidence")
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: whitelist-ui-${{ github.event.pull_request.head.sha }}
+          path: |
+            ${{ runner.temp }}/evidence/*.png
+            ${{ runner.temp }}/evidence/*.json
+            ${{ runner.temp }}/evidence/*.log
+      - name: Build production frontend
+        run: pnpm --dir frontend run build
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144

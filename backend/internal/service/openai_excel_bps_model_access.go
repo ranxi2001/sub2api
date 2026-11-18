@@ -281,12 +281,16 @@ func applyExcelBPSEffortsToManifest(body, access []byte, account *Account) ([]by
 // Independent BPS discovery applies to the actual selected model route. Native
 // models keep their own source; a native source failure cannot invent BPS access.
 func (s *OpenAIGatewayService) fetchExcelBPSAccountModels(ctx context.Context, account *Account) (*OpenAIModelsResponse, error) {
+	return s.fetchExcelBPSAccountModelsWithPolicy(ctx, account, false)
+}
+
+func (s *OpenAIGatewayService) fetchExcelBPSAccountModelsWithPolicy(ctx context.Context, account *Account, requireComplete bool) (*OpenAIModelsResponse, error) {
 	access, accessErr := s.FetchExcelBPSModelsList(ctx, account)
 	if accessErr != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		if account.IsExcelOAuth() || account.isExcelBPSAllModelsEnabled() {
+		if requireComplete || account.IsExcelOAuth() || account.isExcelBPSAllModelsEnabled() {
 			return nil, accessErr
 		}
 		access = &OpenAIModelsResponse{Body: []byte(`{"object":"list","data":[]}`)}
@@ -296,6 +300,8 @@ func (s *OpenAIGatewayService) fetchExcelBPSAccountModels(ctx context.Context, a
 		response, err := s.fetchNativeOpenAIModelsList(ctx, account)
 		if err == nil {
 			native = response.Body
+		} else if requireComplete {
+			return nil, err
 		} else if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
