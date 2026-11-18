@@ -35,3 +35,16 @@ func TestHTTPBridgeAcceptedHistoryRequiresCompletedDelivery(t *testing.T) {
 		})
 	}
 }
+
+func TestHTTPBridgeAcceptedHistoryRejectsRegeneratedCallID(t *testing.T) {
+	svc := &OpenAIGatewayService{cfg: &config.Config{}}
+	manager, _, account := issue715WSManager(t, svc, context.Background())
+	defer manager.abort()
+	source := `{"model":"gpt-6-astra","store":false,"input":[{"type":"function_call","call_id":"old_call","name":"fixture","arguments":"{}","status":"completed"},{"type":"function_call_output","call_id":"old_call","output":"receipt"}]}`
+	require.NoError(t, issue715WSBegin(t, manager, account, source, "http_bridge"))
+	event := `{"type":"response.completed","response":{"id":"resp_reused_id","status":"completed","output":[{"type":"function_call","call_id":"old_call","name":"fixture","arguments":"{}","status":"completed"}]}}`
+	require.NoError(t, manager.write([]byte(event), func() error { return nil }))
+	observed, found := manager.deliveredTools["gpt-6-astra\x00old_call"]
+	require.True(t, found)
+	require.True(t, observed.conflicted, "a newly delivered call cannot reuse an old accepted call ID")
+}
