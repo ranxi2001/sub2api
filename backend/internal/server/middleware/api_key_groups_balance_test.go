@@ -64,7 +64,7 @@ func TestMultiGroupInsufficientBalanceResponse(t *testing.T) {
 				case "access":
 					g.IsExclusive = true
 				case "inactive":
-					g.Status = service.StatusInactive
+					g.Status = "inactive"
 				}
 			}
 			key := &service.APIKey{ID: 7, UserID: 8, Status: service.StatusActive, GroupID: &id, GroupIDs: []int64{1, 2}, Group: groups[1], User: &service.User{ID: 8, Status: service.StatusActive, Balance: tc.balance}}
