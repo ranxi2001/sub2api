@@ -102,6 +102,16 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
+      - name: Fixed production baseline continuation and transfer regressions
+        run: |
+          set -euo pipefail
+          if ! command -v redis-server >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends redis-server
+          fi
+          mkdir -p evidence
+          (cd backend && go test -race -json -tags=unit,unsentdelta,continuationmissing ./internal/service ./internal/handler -run '^Test(OpenAIWSUnsentDeltaRequestsCanonicalHistory|OpenAIWSMissingHistorySendsCanonicalRetry|OpenAIImageRouting|SelectionFailureImageCapabilityDoesNotHideTextModel|OpsServerlessCancellationIsClientOutcome)' -count=1 -timeout=5m) | tee evidence/continuation-routing-regression.jsonl
+          (cd backend && go test -race -json ./internal/serverless -count=1 -timeout=5m) | tee evidence/serverless-regression.jsonl
       - name: Fixed v2.22.0 bridge warmup and continuation regression
         run: |
           set -euo pipefail
