@@ -17,6 +17,7 @@ const { chromium } = createRequire(resolve(process.env.PLAYWRIGHT_ROOT, 'package
 const vue = require('@vitejs/plugin-vue')
 const html = 'batch-whitelist-evidence.html'
 const entry = 'batch-whitelist-evidence.js'
+execFileSync('git', ['diff', '--quiet', 'HEAD', '--', 'src'])
 const sha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
 const manifest = { sha, mode, screenshots: [], fixture: 'Real BulkEditAccountModal and CSS. Synthetic admin, selected IDs and Axios adapter.' }
 let browser, server

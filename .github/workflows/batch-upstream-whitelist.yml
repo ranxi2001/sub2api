@@ -66,7 +66,7 @@ jobs:
         working-directory: backend
         run: |
           set -o pipefail
-          go test -v -tags=integration ./internal/repository -run '^Test(BatchWhitelistPostgresHandlerReadback|ApplyUpstreamModelsPreservesCredentialsAndInvalidatesScheduler)$' -count=1 | tee "$RUNNER_TEMP/postgres.log"
+          go test -v -tags=integration ./internal/repository ./internal/handler/admin -run '^Test(BatchWhitelistPostgresHandlerReadback|ApplyUpstreamModelsPreservesCredentialsAndInvalidatesScheduler)$' -count=1 | tee "$RUNNER_TEMP/postgres.log"
           grep -F -- '--- PASS: TestBatchWhitelistPostgresHandlerReadback' "$RUNNER_TEMP/postgres.log"
           grep -F -- '--- PASS: TestApplyUpstreamModelsPreservesCredentialsAndInvalidatesScheduler' "$RUNNER_TEMP/postgres.log"
       - uses: actions/upload-artifact@v7
@@ -79,7 +79,7 @@ jobs:
             ${{ runner.temp }}/catalog-red.log
             ${{ runner.temp }}/postgres.log
   browser:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6

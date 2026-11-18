@@ -11,6 +11,8 @@ import { i18n, loadLocaleMessages } from '@/i18n'
 
 const adapter = apiClient.defaults.adapter
 const calls: number[] = []
+let checkRisk: (() => Promise<object>) | undefined
+const bulkWrites: object[] = []
 const wrappers: { unmount(): void }[] = []
 const start = '[data-testid="batch-upstream-start"]'
 const row = (id: number) => `[data-sync-account="${id}"]`
@@ -20,7 +22,12 @@ function fixture(ids: number[], sync: (id: number) => Promise<object>, role = 'a
   useAuthStore(pinia).user = { id: 17, role } as ReturnType<typeof useAuthStore>['user']
   apiClient.defaults.adapter = (async config => {
     let data = {}
-    if (config.method === 'post') {
+    if (config.url === '/admin/accounts/check-mixed-channel') {
+      data = await checkRisk!()
+    } else if (config.url === '/admin/accounts/bulk-update') {
+      bulkWrites.push(JSON.parse(config.data))
+      data = { success: 2, failed: 0, results: [] }
+    } else if (config.method === 'post') {
       const match = /^\/admin\/accounts\/(\d+)\/models\/sync-upstream$/.exec(config.url ?? '')
       expect(match).toBeTruthy()
       expect(JSON.parse(config.data)).toEqual({ apply: true, whitelist_only: true })
@@ -40,6 +47,8 @@ function fixture(ids: number[], sync: (id: number) => Promise<object>, role = 'a
 const applied = (id: number) => ({ models: ['fixture-' + id], applied: true, changed: true })
 beforeEach(async () => {
   calls.length = 0
+  bulkWrites.length = 0
+  checkRisk = undefined
   localStorage.clear()
   await loadLocaleMessages('en')
   i18n.global.locale.value = 'en'
@@ -80,6 +89,41 @@ describe('batch upstream whitelist', () => {
     expect(calls).toEqual([41, 42])
     expect(w.get(row(42)).text()).toContain('Saved')
     expect(w.find('[data-testid="batch-upstream-retry"]').exists()).toBe(false)
+  })
+
+  it('serializes the ordinary form preflight with immediate whitelist writes', async () => {
+    let release!: (value: object) => void
+    checkRisk = () => new Promise(resolve => { release = resolve })
+    const w = fixture([41,42], async id => applied(id))
+    await w.get('#bulk-edit-groups-enabled').setValue(true)
+    const groupSelector = w.findComponent({ name: 'GroupSelector' })
+    groupSelector.vm.$emit('update:modelValue', [5])
+    await flushPromises()
+    await w.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(release).toBeTypeOf('function')
+    expect(w.get(start).attributes('disabled'), 'preflight must own the write lock').toBeDefined()
+    await w.get(start).trigger('click')
+    expect(calls).toEqual([])
+    release({has_risk:false})
+    await flushPromises()
+    expect(bulkWrites).toHaveLength(1)
+  })
+
+  it('does not submit an old preflight after closing and reopening another selection', async () => {
+    let release!: (value: object) => void
+    checkRisk = () => new Promise(resolve => { release = resolve })
+    const w = fixture([41,42], async id => applied(id))
+    await w.get('#bulk-edit-groups-enabled').setValue(true)
+    w.findComponent({ name: 'GroupSelector' }).vm.$emit('update:modelValue', [5])
+    await flushPromises()
+    await w.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    await w.setProps({show:false})
+    await w.setProps({show:true,accountIds:[77]})
+    release({has_risk:false})
+    await flushPromises()
+    expect(bulkWrites, 'old preflight cannot target the new selection').toEqual([])
   })
 
   it('retains the frozen selection across a table refresh and retries only failures', async () => {
@@ -131,7 +175,7 @@ describe('batch upstream whitelist', () => {
     const w = fixture([41], async id => applied(id), 'observer')
     expect(w.find(start).exists()).toBe(false)
     const admin = fixture([41], async id => applied(id))
-    await admin.setProps({ filteredPreview: true } as never)
+    await admin.setProps({ filteredPreview: true })
     expect(admin.find(start).exists()).toBe(false)
     expect(calls).toEqual([])
   })

@@ -1208,7 +1208,7 @@ export default {
         unknown: 'Check the account before retrying',
         draining: 'Waiting for previously submitted accounts.',
         start: 'Batch sync upstream models',
-        hint: 'Save each selected account’s own upstream whitelist immediately. Other edits are saved separately.',
+        hint: 'Save each selected account’s own upstream whitelist immediately using its saved connection. Valid aliases are kept; empty or unsupported catalogs keep the old whitelist. Stopping or closing stops queued accounts; submitted requests can still save. Other edits are saved separately.',
         saved: 'Saved',
         failed: 'Failed',
         pending: 'Waiting',

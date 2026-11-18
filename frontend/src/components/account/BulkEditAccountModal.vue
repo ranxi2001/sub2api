@@ -411,9 +411,9 @@
 
         <BatchUpstreamWhitelist
           v-if="syncAdminId != null"
-          v-show="modelRestrictionMode === 'whitelist' && !isOpenAIModelRestrictionDisabled"
+          v-show="syncBusy || syncRows.length > 0 || (modelRestrictionMode === 'whitelist' && !isOpenAIModelRestrictionDisabled)"
           :rows="syncRows" :busy="syncBusy" :valid="syncValid" :user-id="syncAdminId"
-          :disabled="submitting || showMixedChannelWarning"
+          :disabled="submitting || checkingSubmit || showMixedChannelWarning"
           @run="startWhitelistSync" @stop="stopSync"
         />
         <div
@@ -1544,7 +1544,7 @@
         <button
           type="submit"
           form="bulk-edit-account-form"
-          :disabled="submitting || syncBusy"
+          :disabled="submitting || checkingSubmit || syncBusy"
           class="btn btn-primary"
         >
           <svg
@@ -1690,7 +1690,7 @@ const { rows: syncRows, busy: syncBusy, valid: syncValid, run: runSync, stop: st
   () => emit('whitelistsSaved')
 )
 function startWhitelistSync(retry: boolean) {
-  if (submitting.value || showMixedChannelWarning.value || syncBusy.value || !syncValid.value || syncAdminId.value == null) return
+  if (submitting.value || checkingSubmit.value || showMixedChannelWarning.value || syncBusy.value || !syncValid.value || syncAdminId.value == null) return
   // A subsequent form submit must not overwrite individual results with the shared draft.
   enableModelRestriction.value = false
   void runSync(retry)
@@ -1832,6 +1832,8 @@ const enableRpmLimit = ref(false)
 
 // State - field values
 const submitting = ref(false)
+const checkingSubmit = ref(false)
+let dialogGeneration = 0
 const showMixedChannelWarning = ref(false)
 const mixedChannelWarningMessage = ref('')
 const pendingUpdatesForConfirm = ref<Record<string, unknown> | null>(null)
@@ -2400,6 +2402,7 @@ const canPreCheck = () =>
   (targetSelectedPlatforms.value[0] === 'antigravity' || targetSelectedPlatforms.value[0] === 'anthropic')
 
 const handleClose = () => {
+  dialogGeneration++
   leaveSync()
   showMixedChannelWarning.value = false
   mixedChannelWarningMessage.value = ''
@@ -2431,7 +2434,7 @@ const preCheckMixedChannelRisk = async (built: Record<string, unknown>): Promise
 }
 
 const handleSubmit = async () => {
-  if (bpsDefaults.loading.value || syncBusy.value) return
+  if (bpsDefaults.loading.value || syncBusy.value || submitting.value || checkingSubmit.value) return
   if (targetMode.value === 'selected' && targetAccountIds.value.length === 0) {
     appStore.showError(t('admin.accounts.bulkEdit.noSelection'))
     return
@@ -2523,10 +2526,15 @@ const handleSubmit = async () => {
     return
   }
 
-  const canContinue = await preCheckMixedChannelRisk(built)
-  if (!canContinue) return
-
-  await submitBulkUpdate(built)
+  checkingSubmit.value = true
+  const generation = dialogGeneration
+  try {
+    const canContinue = await preCheckMixedChannelRisk(built)
+    if (!canContinue || !props.show || generation !== dialogGeneration) return
+    await submitBulkUpdate(built)
+  } finally {
+    checkingSubmit.value = false
+  }
 }
 
 const submitBulkUpdate = async (baseUpdates: Record<string, unknown>) => {
@@ -2609,6 +2617,7 @@ const handleMixedChannelCancel = () => {
 watch(
   () => props.show,
   (newShow) => {
+    dialogGeneration++
     if (!newShow) {
       // Reset all enable flags
       enableBaseUrl.value = false

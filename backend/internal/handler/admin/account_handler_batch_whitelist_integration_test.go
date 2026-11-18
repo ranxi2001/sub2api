@@ -1,6 +1,6 @@
 //go:build integration
 
-package repository
+package admin
 
 import (
 	"context"
@@ -12,12 +12,19 @@ import (
 	"strings"
 	"testing"
 
+	"database/sql"
+	"entgo.io/ent/dialect"
+	entsql "entgo.io/ent/dialect/sql"
+	dbent "github.com/Wei-Shaw/sub2api/ent"
+	_ "github.com/Wei-Shaw/sub2api/ent/runtime"
 	"github.com/Wei-Shaw/sub2api/internal/config"
-	adminhandler "github.com/Wei-Shaw/sub2api/internal/handler/admin"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
+	"github.com/Wei-Shaw/sub2api/internal/repository"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
+	_ "github.com/lib/pq"
 	"github.com/stretchr/testify/require"
+	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 )
 
 type batchWhitelistAdmin struct {
@@ -51,21 +58,32 @@ func (u *batchWhitelistHTTP) DoWithTLS(req *http.Request, proxy string, id int64
 
 func TestBatchWhitelistPostgresHandlerReadback(t *testing.T) {
 	ctx := context.Background()
-	tx := testEntTx(t)
-	repo := newAccountRepositoryWithSQL(tx.Client(), tx, nil)
+	container, err := tcpostgres.Run(ctx, "postgres:18.1-alpine3.23",
+		tcpostgres.WithDatabase("whitelist"), tcpostgres.WithUsername("fixture"), tcpostgres.WithPassword("fixture"), tcpostgres.BasicWaitStrategies())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = container.Terminate(context.Background()) })
+	dsn, err := container.ConnectionString(ctx, "sslmode=disable", "TimeZone=UTC")
+	require.NoError(t, err)
+	db, err := sql.Open("postgres", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	require.NoError(t, repository.ApplyMigrations(ctx, db))
+	client := dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres, db)))
+	repo := repository.NewAccountRepository(client, db, nil)
 	ids := make([]int64, 0, 4)
 	for range 4 {
-		a := mustCreateAccount(t, tx.Client(), &service.Account{
+		a := &service.Account{
 			Name: "synthetic-whitelist", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true,
 			Credentials: map[string]any{"api_key": "synthetic", "model_mapping": map[string]any{"old": "old"}},
 			Extra:       map[string]any{"keep": "unchanged"}, Concurrency: 3, Priority: 19,
-		})
+		}
+		require.NoError(t, repo.Create(ctx, a))
 		a.Credentials["base_url"] = fmt.Sprintf("https://up-%d.example/v1", a.ID)
 		require.NoError(t, repo.Update(ctx, a))
 		ids = append(ids, a.ID)
 	}
 	svc := service.NewAccountTestService(repo, nil, nil, nil, nil, &batchWhitelistHTTP{t: t, failID: ids[1]}, &config.Config{}, nil)
-	h := adminhandler.NewAccountHandler(&batchWhitelistAdmin{repo: repo}, nil, nil, nil, nil, nil, nil, nil, svc, nil, nil, nil, nil, nil)
+	h := NewAccountHandler(&batchWhitelistAdmin{repo: repo}, nil, nil, nil, nil, nil, nil, nil, svc, nil, nil, nil, nil, nil)
 	r := gin.New()
 	r.POST("/accounts/:id/models/sync-upstream", h.SyncUpstreamModels)
 	r.GET("/accounts/:id", h.GetByID)
