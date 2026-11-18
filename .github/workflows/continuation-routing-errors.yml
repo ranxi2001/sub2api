@@ -29,6 +29,12 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
+      - name: Isolated Redis dependency
+        run: |
+          if ! command -v redis-server >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends redis-server
+          fi
       - name: Unsent delta recovery, image routing and Pod cancellation attribution
         working-directory: backend
         run: go test -race -tags=unit,unsentdelta,continuationmissing ./internal/service ./internal/handler -run '^Test(OpenAIWSUnsentDeltaRequestsCanonicalHistory|OpenAIWSMissingHistorySendsCanonicalRetry|OpenAIImageRouting|SelectionFailureImageCapabilityDoesNotHideTextModel|OpsServerlessCancellationIsClientOutcome)' -count=1 -timeout=5m
