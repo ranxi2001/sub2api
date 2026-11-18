@@ -143,6 +143,10 @@ type whitelistActor struct {
 
 func (r *whitelistActor) GetByID(context.Context, int64) (*service.User, error) { return r.user, nil }
 
+func (r *whitelistActor) GetUserAvatar(context.Context, int64) (*service.UserAvatar, error) {
+	return nil, nil
+}
+
 func TestAccountHandlerBatchWhitelistAuthentication(t *testing.T) {
 	for _, tc := range []struct {
 		role string
