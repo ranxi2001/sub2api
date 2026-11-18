@@ -41,6 +41,9 @@ func (s *OpenAIGatewayService) prepareOpenAI400HistoryRecovery(ctx context.Conte
 	if d.Applied || attempts >= 3 {
 		return refuse("retry_exhausted")
 	}
+	if s.openAILegacyCompatibility() {
+		return refuse("legacy_compatibility")
+	}
 	if s == nil || !s.settingService.IsOpenAI400OmitEncryptedHistoryEnabled(ctx) {
 		return refuse("disabled")
 	}

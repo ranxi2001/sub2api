@@ -1173,8 +1173,12 @@ type GatewayConfig struct {
 	// DisableEncryptedAgentOwnerBinding permits completed opaque agent history
 	// on another normally eligible native Responses account. Delivery fences,
 	// response pointers, authorization and no-replay protections still apply.
-	DisableEncryptedAgentOwnerBinding bool                 `mapstructure:"disable_encrypted_agent_owner_binding"`
-	UpstreamRouting                   upstreamroute.Config `mapstructure:"upstream_routing"`
+	DisableEncryptedAgentOwnerBinding bool `mapstructure:"disable_encrypted_agent_owner_binding"`
+	// OpenAILegacyCompatibilityMode bypasses the post-v2.20 agent recovery
+	// ownership, immutable projections and no-replay gates. Startup-only; false
+	// retains the current policy. Explicit history rebuild settings are ignored.
+	OpenAILegacyCompatibilityMode bool                 `mapstructure:"openai_legacy_compatibility_mode"`
+	UpstreamRouting               upstreamroute.Config `mapstructure:"upstream_routing"`
 	// PrismBrowser is the server-managed browser-session adapter for prism.openai.com.
 	// Account settings only select this route; cookies, sandbox state and the adapter
 	// API key remain outside account credentials.
@@ -2332,6 +2336,7 @@ func configureConfigSource(setConfigFile, addConfigPath func(string)) {
 
 func setDefaults() {
 	viper.SetDefault("gateway.disable_encrypted_agent_owner_binding", false)
+	viper.SetDefault("gateway.openai_legacy_compatibility_mode", false)
 	viper.SetDefault("gateway.upstream_routing.enabled", false)
 	viper.SetDefault("runtime.role", RuntimeRoleFull)
 	viper.SetDefault("runtime.node_id", "")
@@ -4372,4 +4377,9 @@ func (c *Config) OpenAIWSClientHistoryRecoveryEnabled() bool {
 
 func (c *Config) OpenAILossyHistoryRestartEnabled() bool {
 	return c != nil && c.Gateway.OpenAIWS.LossyHistoryRestartEnabled
+}
+
+// OpenAILegacyCompatibilityEnabled exposes the startup policy to gateway adapters.
+func (c *Config) OpenAILegacyCompatibilityEnabled() bool {
+	return c != nil && c.Gateway.OpenAILegacyCompatibilityMode
 }

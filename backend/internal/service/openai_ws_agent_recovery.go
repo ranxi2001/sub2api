@@ -1264,6 +1264,9 @@ func openAIWSHistoryItemFailure(item gjson.Result) string {
 // carried only as user-supplied data. Callers invoke this exclusively before
 // dispatch and run the normal current-turn authorization/moderation again.
 func (s *OpenAIGatewayService) restartOpenAIWSClientReadableHistory(ctx context.Context, c *gin.Context, body []byte, session, model string, cause error) (context.Context, []byte, bool) {
+	if s.openAILegacyCompatibility() {
+		return ctx, body, false
+	}
 	if s == nil || s.cfg == nil || s.settingService == nil || ctx.Err() != nil {
 		return ctx, body, false
 	}
