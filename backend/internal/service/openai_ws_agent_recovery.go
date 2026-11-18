@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"io"
@@ -67,6 +68,8 @@ type openAIWSAgentRecovery struct {
 	completedBridge                  openAIWSBridgeResponseAnchor
 	acceptedHistoryTools             map[string]openAIWSAcceptedToolHistory
 	pendingHistoryTools              map[string]openAIWSAcceptedToolHistory
+	historicalToolIDs                map[[32]byte]struct{}
+	historicalToolIDsExhausted        bool
 	deliveredTools                   map[string]openAIWSDeliveredTool
 	pendingTools                     map[string]openAIWSDeliveredTool
 	localHistory                     openAIWSLocalHistory
@@ -378,6 +381,9 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 			if kind != "function_call" && kind != "custom_tool_call" && kind != "tool_search_call" {
 				continue
 			}
+			if r.historicalToolIDsExhausted {
+				return openAIRecoveryDiagnosticError("owner_conflict", "tool_provenance_unknown", r.request)
+			}
 			fingerprint, valid := openAIToolFingerprint(item)
 			observed, found := r.deliveredTools[r.request.model+"\x00"+item.Get("call_id").String()]
 			if !found && acceptsPriorToolPair(r.acceptedHistoryTools, account, r.request.model, item, proof.history) {
@@ -548,6 +554,26 @@ func (r *openAIWSAgentRecovery) write(payload []byte, write func() error) error 
 		r.finish(completed)
 		if completed {
 			if r.pendingHistoryTools != nil {
+				// Context can be replaced by an independent task, but an old
+				// call ID must never become a fresh delivery on this manager.
+				// Keep only bounded identity hashes, separate from both the
+				// current accepted pairs and actual delivery evidence.
+				if r.historicalToolIDs == nil {
+					r.historicalToolIDs = make(map[[32]byte]struct{})
+				}
+				for key := range r.pendingHistoryTools {
+					id := sha256.Sum256([]byte(key))
+					if _, exists := r.historicalToolIDs[id]; exists {
+						continue
+					}
+					if len(r.historicalToolIDs) >= 1024 {
+						// Never evict collision evidence to grant a new proof.
+						// Ordinary independent tasks remain available.
+						r.historicalToolIDsExhausted = true
+						break
+					}
+					r.historicalToolIDs[id] = struct{}{}
+				}
 				r.acceptedHistoryTools = r.pendingHistoryTools
 			}
 			r.completedResponse, r.completedAccount, r.completedModel = responseID, request.delivery.binding.accountID, request.model
@@ -588,8 +614,9 @@ func (r *openAIWSAgentRecovery) write(payload []byte, write func() error) error 
 				// pendingTools coalesces item.done and terminal observations
 				// within one generation. An existing delivered identity is a
 				// later generation reusing the call ID, even if bytes match.
-				_, reusedHistoricalID := r.acceptedHistoryTools[key]
-				observed.conflicted = observed.conflicted || old.conflicted || exists || reusedHistoricalID
+				// Historical identities also survive replaced accepted context.
+				_, reusedHistoricalID := r.historicalToolIDs[sha256.Sum256([]byte(key))]
+				observed.conflicted = observed.conflicted || old.conflicted || exists || reusedHistoricalID || r.historicalToolIDsExhausted
 				r.deliveredTools[key] = observed
 			}
 			for _, key := range request.keys {
