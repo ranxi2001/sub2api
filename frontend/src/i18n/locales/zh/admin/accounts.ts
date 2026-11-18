@@ -317,7 +317,7 @@ export default {
           group: "分组：{name}",
           groupRatio: "分组倍率",
           ratio: "分组倍率：{value}x",
-          groupRatioHint: '上游分组倍率未包含模型价格；采购成本仅在启用换算后自动同步，不改变客户售价。',
+          groupRatioHint: '上游分组倍率未包含模型价格；采购成本按账号的汇率与自动同步设置更新，不改变客户售价。',
         costConversion: '采购成本倍率换算',
         costConversionHint: '默认应用美元汇率：CN 平台 ×1，非 CN 平台 ×7。取消勾选则按上游倍率 ×1 作为采购成本，不改变客户售价。',
         applyUSDRate: '应用美元汇率',
