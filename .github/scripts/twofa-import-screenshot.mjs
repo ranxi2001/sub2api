@@ -61,10 +61,10 @@ try {
           const path=request.url;const method=request.method;state.requests.push({path,method});let data;
           const payload=typeof request.data==='string'?JSON.parse(request.data):request.data;
           if(path==='/admin/account-ops/token-guard-v2/encryption'&&method==='get')data={configured:true,source:'server_config'};
-          else if(path==='/admin/account-ops/token-guard/two-fa-login'&&method==='post'){
+          else if(path==='${mode === 'before' ? '/admin/account-ops/token-guard/two-fa-login' : '/admin/account-ops/relogin/two-fa-login'}'&&method==='post'){
             state.starts.push(payload.email);data={id:payload.email,status:'running'};
-          }else if(path.startsWith('/admin/account-ops/token-guard/two-fa-login/')&&method==='delete')data={};
-          else if(path.startsWith('/admin/account-ops/token-guard/two-fa-login/')&&method==='get'){
+          }else if(path.startsWith('${mode === 'before' ? '/admin/account-ops/token-guard/two-fa-login' : '/admin/account-ops/relogin/two-fa-login'}/')&&method==='delete')data={};
+          else if(path.startsWith('${mode === 'before' ? '/admin/account-ops/token-guard/two-fa-login' : '/admin/account-ops/relogin/two-fa-login'}/')&&method==='get'){
             const email=path.split('/').at(-1);
             data=await new Promise((resolve,reject)=>{
               const fail=error=>{request.signal?.removeEventListener('abort',abort);pending.delete(email);failures.delete(email);reject(error)};

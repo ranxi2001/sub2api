@@ -14,7 +14,7 @@ const { chromium } = await import(pathToFileURL(join(process.env.PLAYWRIGHT_ROOT
 mkdirSync(output, { recursive: true })
 const manifest = {
   base_commit: base, head_commit: head,
-  boundary: 'Separate complete base/head frontend trees; original AppSidebar, SmartOpsSidebarSettings, adminSettings store, Toggle, FeatureSearch, locales and CSS. Synthetic admin/API and component harness with explicit fixture apply (not the real SettingsView save). No backend, login, production or paid calls. Counts cover the configurable paths (14 before, 15 after); the unrelated AI operations link remains visible.',
+  boundary: 'Separate complete base/head frontend trees; original AppSidebar, SmartOpsSidebarSettings, adminSettings store, Toggle, FeatureSearch, locales and CSS. Synthetic admin/API and component harness with explicit fixture apply (not the real SettingsView save). No backend, login, production or paid calls. Counts cover the configurable paths (14 before, 13 after); the unrelated AI operations link remains visible.',
   results: [], errors: [], screenshots: [],
 }
 const browser = await chromium.launch({ headless: true })
@@ -44,7 +44,7 @@ try {
         const params=new URLSearchParams(location.search),scenario=params.get('scenario')||'missing';
         const settings={request_capture_enabled:true};
         if(scenario==='empty')settings.smart_ops_hidden_menu_items=[];
-        if(scenario==='saved')settings.smart_ops_hidden_menu_items=['/admin/token-guard'];
+        if(scenario==='saved')settings.smart_ops_hidden_menu_items=['/admin/account-ops'];
         const state={requests:[],unexpected:[]};window.__sidebarFixture=state;
         apiClient.defaults.adapter=async request=>{
           const path=request.url.split('?')[0];state.requests.push({method:request.method,path});let data;
@@ -98,7 +98,11 @@ try {
         '/admin/controlled-experiments', '/admin/account-ops', '/admin/token-guard', '/admin/group-cache-tests',
         '/admin/request-captures', '/admin/harvest-flow',
       ]
-      if (mode === 'after') paths.push('/admin/qqbot/overview')
+      if (mode === 'after') {
+        paths.splice(paths.indexOf('/admin/token-guard'), 1)
+        paths.splice(paths.indexOf('/admin/harvest-flow'), 1)
+        paths.push('/admin/qqbot/overview')
+      }
       const sidebarPaths = () => page.locator('aside nav a').evaluateAll((links, candidates) => links.map(a => a.getAttribute('href')).filter(path => candidates.includes(path)), paths)
       const screenshot = async name => {
         await page.screenshot({ path: join(output, name), animations: 'disabled' })
@@ -117,11 +121,11 @@ try {
         assert.equal(await page.locator('aside nav a[href="/admin/ai-ops"]').count(), 1)
         manifest.results.push({ mode, scenario, selected: expected, sidebar_paths: await sidebarPaths(), ...snapshot })
         await screenshot(`${mode}-${scenario}.png`)
-        const label = await panel().locator('label[for="smart-ops-sidebar-token-guard"]').innerText()
+        const label = await panel().locator('label[for="smart-ops-sidebar-account-ops"]').innerText()
         await page.locator('aside button[aria-haspopup="dialog"]').click()
-        await page.getByRole('combobox').fill('/admin/token-guard')
+        await page.getByRole('combobox').fill('/admin/account-ops')
         const result = page.getByRole('option').filter({ has: page.getByText(label, { exact: true }) })
-        assert.equal(await result.count(), snapshot.hidden.includes('/admin/token-guard') ? 0 : 1)
+        assert.equal(await result.count(), snapshot.hidden.includes('/admin/account-ops') ? 0 : 1)
         await page.keyboard.press('Escape')
         await page.getByRole('combobox').waitFor({ state: 'hidden' })
       }
@@ -138,16 +142,18 @@ try {
         await panel().getByRole('button', { name: '全部隐藏', exact: true }).click()
         assert.equal(await visibleCount(), 0)
         await page.getByTestId('fixture-apply').click()
-        await page.waitForFunction(() => window.__sidebarFixture.snapshot().hidden.length === 15)
+        await page.waitForFunction(count => window.__sidebarFixture.snapshot().hidden.length === count, paths.length)
         assert.deepEqual(await sidebarPaths(), [])
         await screenshot('after-hide-all.png')
         await panel().getByRole('button', { name: '全部显示', exact: true }).click()
-        assert.equal(await visibleCount(), 15)
+        assert.equal(await visibleCount(), paths.length)
         await page.getByTestId('fixture-apply').click()
         await page.waitForFunction(() => window.__sidebarFixture.snapshot().hidden.length === 0)
-        assert.equal((await sidebarPaths()).length, 15)
+        assert.equal((await sidebarPaths()).length, paths.length)
+        assert.equal(await page.locator('aside nav a[href="/admin/token-guard"], aside nav a[href="/admin/harvest-flow"]').count(), 0)
+        assert.equal(await panel().locator('#smart-ops-sidebar-token-guard, #smart-ops-sidebar-harvest-flow').count(), 0)
         await screenshot('after-show-all.png')
-        manifest.results.push({ interaction: 'enable QQ bot -> seven; hide all -> zero; show all -> fifteen', passed: true })
+        manifest.results.push({ interaction: 'enable QQ bot -> seven; hide all -> zero; show all -> thirteen', passed: true })
         await page.goto(`${url}?scenario=missing&lang=en`)
         await page.waitForFunction(() => window.__sidebarFixture?.ready)
         assert.equal(await visibleCount(), 6)
