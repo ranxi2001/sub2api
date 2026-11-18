@@ -114,6 +114,12 @@ func (s *GeminiMessagesCompatService) forwardGeminiOpenAICompat(
 	if err != nil {
 		return nil, writeError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 	}
+	if responses != nil {
+		geminiReq, err = applyGeminiResponsesToolChoice(geminiReq, responses.toolChoice)
+		if err != nil {
+			return nil, writeError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		}
+	}
 	if geminiImageGenerationDenied(c, geminiReq, originalModel, req.Model, mappedModel) {
 		return nil, writeError(c, http.StatusBadRequest, "invalid_request_error", ImageGenerationPermissionMessage())
 	}
@@ -725,7 +731,7 @@ func (s *GeminiMessagesCompatService) handleGeminiOpenAIStreamingResponse(
 		scanner.Buffer(make([]byte, 0, 64*1024), maxLineSize)
 		pump := newAnthropicNativeLinePump(scanner, anthropicNativeStreamInterval(s.cfg))
 		defer pump.stop()
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		readLine = func() (string, error) { return pump.nextOrClientGone(c.Request.Context().Done()) }
 	}
 	failResponses := func(err error, code, message string) (*geminiStreamResult, error) {
@@ -924,7 +930,7 @@ func (s *GeminiMessagesCompatService) handleGeminiOpenAIStreamingResponse(
 			return streamResult(), c.Request.Context().Err()
 		}
 		if finishReason == "" {
-			err := errors.New("Gemini stream ended before finishReason")
+			err := errors.New("gemini stream ended before finishReason")
 			return failResponses(err, "incomplete_stream", err.Error())
 		}
 	}

@@ -113,7 +113,7 @@ jobs:
           python3 - "$evidence/handler.jsonl" <<'PY'
           import json, pathlib, sys
           events = [json.loads(line) for line in pathlib.Path(sys.argv[1]).read_text().splitlines()]
-          cases = ('json', 'sse', 'function_json', 'function_sse', 'schema_json', 'invalid_200_json', 'empty_200_json', 'early_eof_usage', 'read_error_usage', 'empty_eof', 'idle_usage', 'cancel_usage', 'cancel_no_usage', 'upstream_400', 'continuation_rejected', 'missing_service', 'missing_service_heartbeat', 'oauth_rejected')
+          cases = ('json', 'sse', 'function_json', 'function_sse', 'schema_json', 'invalid_200_json', 'empty_200_json', 'early_eof_usage', 'read_error_usage', 'empty_eof', 'idle_usage', 'cancel_usage', 'cancel_no_usage', 'upstream_400', 'continuation_rejected', 'missing_service', 'missing_service_heartbeat', 'oauth_rejected', 'choice_none_json', 'choice_none_sse', 'choice_auto_json', 'choice_auto_sse', 'choice_required_json', 'choice_required_sse', 'choice_function_json', 'choice_function_sse', 'choice_undeclared_rejected', 'choice_invalid_rejected', 'choice_empty_required_rejected')
           for case in cases:
               name = 'TestGatewayResponsesGeminiVertexHTTP/' + case
               assert any(e.get('Test') == name and e.get('Action') == 'run' for e in events), 'missing run: ' + name

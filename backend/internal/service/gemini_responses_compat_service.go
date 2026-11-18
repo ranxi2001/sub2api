@@ -17,6 +17,7 @@ import (
 
 type geminiResponsesOptions struct {
 	clientTools apicompat.ResponsesClientToolMapping
+	toolChoice  json.RawMessage
 }
 
 // ForwardAsResponses uses Gemini's native request builder and token provider,
@@ -79,7 +80,53 @@ func (s *GeminiMessagesCompatService) ForwardAsResponses(ctx context.Context, c 
 			}
 		}
 	}
-	return s.forwardGeminiOpenAICompat(ctx, c, account, claudeBody, responseFormat, request.Model, request.Stream, false, startTime, &geminiResponsesOptions{clientTools: mapping})
+	return s.forwardGeminiOpenAICompat(ctx, c, account, claudeBody, responseFormat, request.Model, request.Stream, false, startTime, &geminiResponsesOptions{clientTools: mapping, toolChoice: request.ToolChoice})
+}
+
+// Apply the adapted client tool choice after conversion, whose Messages path
+// does not carry tool_choice. Validate against the actual native declarations.
+func applyGeminiResponsesToolChoice(body []byte, raw json.RawMessage) ([]byte, error) {
+	if len(raw) == 0 || strings.TrimSpace(string(raw)) == "null" {
+		return body, nil
+	}
+	choice := gjson.ParseBytes(raw)
+	mode, name := "", ""
+	if choice.Type == gjson.String {
+		switch choice.String() {
+		case "auto":
+			mode = "AUTO"
+		case "none":
+			mode = "NONE"
+		case "required":
+			mode = "ANY"
+		}
+	} else if choice.IsObject() && choice.Get("type").String() == "function" {
+		name = choice.Get("name").String()
+		if name == "" {
+			name = choice.Get("function.name").String()
+		}
+		if name != "" {
+			mode = "ANY"
+		}
+	}
+	if mode == "" {
+		return nil, fmt.Errorf("unsupported tool_choice for Gemini Responses")
+	}
+	declared, found := 0, false
+	for _, tool := range gjson.GetBytes(body, "tools").Array() {
+		for _, function := range tool.Get("functionDeclarations").Array() {
+			declared++
+			found = found || function.Get("name").String() == name
+		}
+	}
+	if mode == "ANY" && (declared == 0 || name != "" && !found) {
+		return nil, fmt.Errorf("tool_choice requires a declared function")
+	}
+	config := map[string]any{"mode": mode}
+	if name != "" {
+		config["allowedFunctionNames"] = []string{name}
+	}
+	return sjson.SetBytes(body, "toolConfig.functionCallingConfig", config)
 }
 
 func (s *GeminiMessagesCompatService) handleResponsesNonStreamingResponseFromGemini(c *gin.Context, resp *http.Response, model string, isOAuth bool, options *geminiResponsesOptions) (*ClaudeUsage, error) {
@@ -108,7 +155,7 @@ func (s *GeminiMessagesCompatService) handleResponsesNonStreamingResponseFromGem
 
 func validateGeminiResponsesResult(upstream map[string]any) error {
 	if upstream["error"] != nil || extractGeminiFinishReason(upstream) == "" {
-		return fmt.Errorf("Gemini response has no valid completion result")
+		return fmt.Errorf("gemini response has no valid completion result")
 	}
 	return nil
 }

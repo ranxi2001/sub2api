@@ -67,10 +67,11 @@ const responsesVertexUsage = `"usageMetadata":{"promptTokenCount":12,"cachedCont
 // provider endpoint is a local HTTP server and the token cache is synthetic.
 func TestGatewayResponsesGeminiVertexHTTP(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	for _, name := range []string{"json", "sse", "function_json", "function_sse", "schema_json", "invalid_200_json", "empty_200_json", "early_eof_usage", "read_error_usage", "empty_eof", "idle_usage", "cancel_usage", "cancel_no_usage", "upstream_400", "continuation_rejected", "missing_service", "missing_service_heartbeat", "oauth_rejected"} {
+	for _, name := range []string{"json", "sse", "function_json", "function_sse", "schema_json", "invalid_200_json", "empty_200_json", "early_eof_usage", "read_error_usage", "empty_eof", "idle_usage", "cancel_usage", "cancel_no_usage", "upstream_400", "continuation_rejected", "missing_service", "missing_service_heartbeat", "oauth_rejected", "choice_none_json", "choice_none_sse", "choice_auto_json", "choice_auto_sse", "choice_required_json", "choice_required_sse", "choice_function_json", "choice_function_sse", "choice_undeclared_rejected", "choice_invalid_rejected", "choice_empty_required_rejected"} {
 		t.Run(name, func(t *testing.T) {
 			stream := !strings.HasSuffix(name, "json")
-			tool := strings.HasPrefix(name, "function_")
+			tool := strings.HasPrefix(name, "function_") || strings.HasPrefix(name, "choice_required_") || strings.HasPrefix(name, "choice_function_")
+			choiceCase := strings.HasPrefix(name, "choice_")
 			var wireCanceled atomic.Bool
 			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				body, err := io.ReadAll(r.Body)
@@ -86,6 +87,26 @@ func TestGatewayResponsesGeminiVertexHTTP(t *testing.T) {
 				}
 				if tool && !strings.Contains(string(body), "functionDeclarations") {
 					t.Error("function declaration lost")
+				}
+				if choiceCase {
+					mode := "AUTO"
+					if strings.HasPrefix(name, "choice_none_") {
+						mode = "NONE"
+					}
+					if tool {
+						mode = "ANY"
+					}
+					if got := gjson.GetBytes(body, "toolConfig.functionCallingConfig.mode").String(); got != mode {
+						t.Errorf("tool_choice lost on Vertex wire: got %q want %q", got, mode)
+					}
+					allowed := gjson.GetBytes(body, "toolConfig.functionCallingConfig.allowedFunctionNames")
+					if strings.HasPrefix(name, "choice_function_") {
+						if allowed.Raw != `["lookup"]` {
+							t.Errorf("forced function choice lost on Vertex wire: %s", body)
+						}
+					} else if allowed.Exists() {
+						t.Error("unforced choice unexpectedly restricted functions")
+					}
 				}
 				if name == "schema_json" {
 					if gjson.GetBytes(body, "generationConfig.responseJsonSchema.properties.id.minimum").Raw != "9007199254740993" {
@@ -200,8 +221,24 @@ func TestGatewayResponsesGeminiVertexHTTP(t *testing.T) {
 			if name == "schema_json" {
 				input["text"] = json.RawMessage(`{"format":{"type":"json_schema","name":"fixture","schema":{"type":"object","properties":{"id":{"type":"integer","minimum":9007199254740993}}}}}`)
 			}
-			if tool {
+			if tool || choiceCase && name != "choice_empty_required_rejected" {
 				input["tools"] = []any{map[string]any{"type": "function", "name": "lookup", "parameters": map[string]any{"type": "object", "properties": map[string]any{"city": map[string]any{"type": "string"}}}}}
+			}
+			if choiceCase {
+				switch {
+				case strings.HasPrefix(name, "choice_none_"):
+					input["tool_choice"] = "none"
+				case strings.HasPrefix(name, "choice_auto_"):
+					input["tool_choice"] = "auto"
+				case strings.HasPrefix(name, "choice_required_"), name == "choice_empty_required_rejected":
+					input["tool_choice"] = "required"
+				case strings.HasPrefix(name, "choice_function_"):
+					input["tool_choice"] = map[string]any{"type": "function", "name": "lookup"}
+				case name == "choice_undeclared_rejected":
+					input["tool_choice"] = map[string]any{"type": "function", "name": "missing"}
+				default:
+					input["tool_choice"] = "unsupported"
+				}
 			}
 			if name == "continuation_rejected" {
 				input["previous_response_id"] = "resp_synthetic"
@@ -220,13 +257,17 @@ func TestGatewayResponsesGeminiVertexHTTP(t *testing.T) {
 			}
 			router.ServeHTTP(responseWriter, req)
 			out := recorder.Body.String()
-			localReject := name == "continuation_rejected" || strings.HasPrefix(name, "missing_service") || name == "oauth_rejected"
+			choiceReject := choiceCase && strings.HasSuffix(name, "_rejected")
+			localReject := choiceReject || name == "continuation_rejected" || strings.HasPrefix(name, "missing_service") || name == "oauth_rejected"
 			require.Equal(t, int32(1), atomic.LoadInt32(&slots.releaseUserCalled))
 			require.Equal(t, int32(1), atomic.LoadInt32(&slots.releaseAccountCalled))
 			if localReject {
 				require.Zero(t, wire.calls.Load())
 				require.Empty(t, usage.created)
-				if name == "continuation_rejected" {
+				if choiceReject {
+					require.Equal(t, 400, recorder.Code)
+					require.Contains(t, out, "tool_choice")
+				} else if name == "continuation_rejected" {
 					require.Equal(t, 400, recorder.Code)
 					require.Contains(t, out, "previous_response_id")
 				} else if name == "oauth_rejected" {
