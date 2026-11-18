@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestGeminiResponseToChatCompletionsPreservesInlineData(t *testing.T) {
@@ -222,4 +223,33 @@ func TestConvertGeminiToClaudeMessageOmitsThoughtParts(t *testing.T) {
 	require.Equal(t, "tool_use", toolUse["type"])
 	require.Equal(t, "get_weather", toolUse["name"])
 	require.Equal(t, "tool_use", got["stop_reason"])
+}
+
+// Gemini promptTokenCount includes cached input; both JSON wires must expose
+// the total while the internal billing buckets remain mutually exclusive.
+func TestGeminiResponseToChatCompletionsCacheUsage(t *testing.T) {
+	raw := []byte(`{"candidates":[{"content":{"parts":[{"text":"OK"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":12,"cachedContentTokenCount":3,"candidatesTokenCount":5,"thoughtsTokenCount":2}}`)
+	for _, override := range []bool{false, true} {
+		t.Run(map[bool]string{false: "native_json", true: "collected_usage"}[override], func(t *testing.T) {
+			var upstream map[string]any
+			require.NoError(t, json.Unmarshal(raw, &upstream))
+			var observed *ClaudeUsage
+			if override {
+				observed = &ClaudeUsage{InputTokens: 17, CacheReadInputTokens: 4, OutputTokens: 8}
+			}
+			response, usage, err := geminiResponseToChatCompletions(upstream, "gemini-test", raw, observed)
+			require.NoError(t, err)
+			data, err := json.Marshal(response)
+			require.NoError(t, err)
+			prompt, cached, output := 12, 3, 7
+			if override {
+				prompt, cached, output = 21, 4, 8
+			}
+			require.EqualValues(t, prompt, gjson.GetBytes(data, "usage.prompt_tokens").Int())
+			require.EqualValues(t, cached, gjson.GetBytes(data, "usage.prompt_tokens_details.cached_tokens").Int())
+			require.EqualValues(t, output, gjson.GetBytes(data, "usage.completion_tokens").Int())
+			require.Equal(t, prompt-cached, usage.InputTokens)
+			require.Equal(t, cached, usage.CacheReadInputTokens)
+		})
+	}
 }

@@ -1,0 +1,142 @@
+name: Gemini Vertex Responses
+
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/internal/handler/gateway_handler_responses.go'
+      - 'backend/internal/handler/gateway_responses_gemini_vertex_test.go'
+      - 'backend/internal/handler/gateway_handler.go'
+      - 'backend/internal/handler/gateway_helper*.go'
+      - 'backend/internal/service/gemini*'
+      - 'backend/internal/service/vertex*'
+      - 'backend/internal/service/gateway*'
+      - 'backend/internal/pkg/apicompat/**'
+      - 'backend/internal/server/middleware/api_key*'
+      - 'backend/go.mod'
+      - 'backend/go.sum'
+      - '.github/workflows/gemini-responses.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gemini-responses-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+  RED_BASE_SHA: 73b958ad07babaf56a3f998d8c682e0f84525f4a
+
+jobs:
+  red:
+    name: RED - authenticated Vertex routing on frozen production
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: 73b958ad07babaf56a3f998d8c682e0f84525f4a
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Require the intended wire assertion to fail, with unchanged base source
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/gemini-responses-red"
+          mkdir -p "$evidence"
+          test "$(git rev-parse HEAD)" = "$RED_BASE_SHA"
+          git diff --exit-code
+          test -z "$(git status --porcelain)"
+          git fetch --no-tags --depth=1 origin "$EXPECTED_HEAD_SHA"
+          test "$(git rev-parse FETCH_HEAD)" = "$EXPECTED_HEAD_SHA"
+          regression=backend/internal/handler/gateway_responses_gemini_vertex_test.go
+          test ! -e "$regression"
+          restore() {
+            rm -f -- "$regression"
+            git diff --exit-code
+            test -z "$(git status --porcelain)"
+          }
+          trap restore EXIT
+          git show "$EXPECTED_HEAD_SHA:$regression" > "$regression"
+          { git rev-parse HEAD HEAD^{tree}; go version; sha256sum "$regression"; } > "$evidence/metadata.txt"
+          set +e
+          (cd backend && go test -json -tags=unit ./internal/handler -run '^TestGatewayResponsesGeminiVertexHTTP$/^sse$' -count=1 -timeout=5m) > "$evidence/red.jsonl" 2> "$evidence/red.stderr"
+          result=$?
+          set -e
+          cat "$evidence/red.jsonl" "$evidence/red.stderr"
+          test "$result" -eq 1
+          python3 - "$evidence/red.jsonl" <<'PY'
+          import json, pathlib, sys
+          events = [json.loads(line) for line in pathlib.Path(sys.argv[1]).read_text().splitlines()]
+          name = 'TestGatewayResponsesGeminiVertexHTTP/sse'
+          assert any(e.get('Test') == name and e.get('Action') == 'run' for e in events), 'regression did not run'
+          assert any(e.get('Test') == name and e.get('Action') == 'fail' for e in events), 'intended regression did not fail'
+          output = ''.join(e.get('Output', '') for e in events)
+          assert 'gemini_vertex_926_wire' in output, 'wrong failure reason'
+          assert 'expected: 1' in output and 'actual  : 0' in output, 'Vertex was not the failed assertion'
+          assert not any(e.get('Action') == 'skip' for e in events), 'skip is not RED evidence'
+          assert not any(s in output for s in ('[build failed]', 'panic:', 'no tests to run')), 'invalid RED evidence'
+          PY
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: gemini-responses-red-${{ env.EXPECTED_HEAD_SHA }}
+          path: ${{ runner.temp }}/gemini-responses-red/
+          if-no-files-found: error
+
+  candidate:
+    name: Candidate - Vertex wire, protocol guards and production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Authenticated handler regressions with race detection
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/gemini-responses-candidate"
+          mkdir -p "$evidence"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          { git rev-parse HEAD HEAD^{tree}; go version; } > "$evidence/metadata.txt"
+          (cd backend && go test -race -json -tags=unit ./internal/handler -run '^TestGatewayResponsesGeminiVertexHTTP$' -count=1 -timeout=5m) | tee "$evidence/handler.jsonl"
+          python3 - "$evidence/handler.jsonl" <<'PY'
+          import json, pathlib, sys
+          events = [json.loads(line) for line in pathlib.Path(sys.argv[1]).read_text().splitlines()]
+          cases = ('json', 'sse', 'function_json', 'function_sse', 'schema_json', 'invalid_200_json', 'empty_200_json', 'early_eof_usage', 'read_error_usage', 'empty_eof', 'idle_usage', 'cancel_usage', 'cancel_no_usage', 'upstream_400', 'continuation_rejected', 'missing_service', 'missing_service_heartbeat', 'oauth_rejected', 'choice_none_json', 'choice_none_sse', 'choice_auto_json', 'choice_auto_sse', 'choice_required_json', 'choice_required_sse', 'choice_function_json', 'choice_function_sse', 'choice_undeclared_rejected', 'choice_invalid_rejected', 'choice_empty_required_rejected')
+          for case in cases:
+              name = 'TestGatewayResponsesGeminiVertexHTTP/' + case
+              assert any(e.get('Test') == name and e.get('Action') == 'run' for e in events), 'missing run: ' + name
+              assert any(e.get('Test') == name and e.get('Action') == 'pass' for e in events), 'missing pass: ' + name
+          assert not any(e.get('Action') == 'skip' for e in events), 'unexpected skip'
+          PY
+      - name: Existing Gemini, Anthropic and Antigravity protocol guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd backend
+          go test -tags=unit ./internal/service -run '^Test(GeminiResponseToChatCompletions.*|GeminiParallelToolStreams|HandleResponses(Streaming|BufferedStreaming)Response.*|AntigravityCompatOAuthUsesNativeTokenAndRoute|AntigravityCompatRejectsUnsupportedAccountType|AntigravityCompatChatStreamMapsToolCallAndUsage)$' -count=1 -v -timeout=5m 2>&1 | tee "$RUNNER_TEMP/gemini-responses-candidate/service.log"
+          go test -tags=unit ./internal/handler -run '^Test(GatewayCompatibilityHandlersReasoningEffortPolicy|GatewayCompatibilityHandlers_StreamUsageRecordedOnceWithTerminalEvent|APIKeyAdmissionRealForwardingHandlersRejectBeforeUpstream|GatewayChatCompletions_GeminiClientCancelBeforeUpstreamResponseMarks499)$' -count=1 -v -timeout=5m 2>&1 | tee "$RUNNER_TEMP/gemini-responses-candidate/guards.log"
+      - name: Build candidate production server without test tags
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd backend && go build -o "$RUNNER_TEMP/gemini-responses-server" ./cmd/server) 2>&1 | tee "$RUNNER_TEMP/gemini-responses-candidate/build.log"
+          git diff --exit-code
+          test -z "$(git status --porcelain)"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: gemini-responses-candidate-${{ env.EXPECTED_HEAD_SHA }}
+          path: ${{ runner.temp }}/gemini-responses-candidate/
+          if-no-files-found: error
