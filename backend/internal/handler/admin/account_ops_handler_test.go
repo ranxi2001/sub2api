@@ -346,3 +346,18 @@ func TestAccountOpsGroupedBatchHandlerIsAtomicAndRejectsAmbiguousPayloads(t *tes
 		})
 	}
 }
+
+func TestAccountOpsBalanceNotificationRequiresExplicitBoolean(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, body := range []string{`{}`, `{"enabled":null}`, `{"enabled":"false"}`} {
+		settings := &opsHandlerWritableSettings{}
+		svc := service.NewAccountOpsService(settings, opsHandlerQueue{}, nil)
+		handler := NewAccountOpsHandler(svc, nil)
+		router := gin.New()
+		router.PUT("/accounts/:id/balance-notification", handler.SetBalanceLowNotification)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest("PUT", "/accounts/7/balance-notification", strings.NewReader(body)))
+		require.Equal(t, 400, rec.Code)
+		require.Zero(t, settings.writes)
+	}
+}
