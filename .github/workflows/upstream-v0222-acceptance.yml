@@ -102,6 +102,11 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
+      - name: Multi-group balance rejection and subscription fallback
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          (cd backend && go test -race -json -tags=unit ./internal/server/middleware ./internal/handler -run '^Test(MultiGroupInsufficientBalanceResponse|VipCreditNoConfigPreservesSubscriptionGroupFallback|VipCreditBelowReservePreservesSubscriptionFallback|OpsErrorLoggerMiddleware_UserBalanceIsolation)$' -count=1 -timeout=3m) | tee evidence/multigroup-balance-regression.jsonl
       - name: Fixed production baseline continuation and transfer regressions
         run: |
           set -euo pipefail
