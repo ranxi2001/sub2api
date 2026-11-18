@@ -122,6 +122,10 @@ func issue914HTTPNode(t *testing.T, u *issue805Oracle, legacy bool, accounts []s
 func TestIssue914LegacyHTTPCompatibility(t *testing.T) {
 	for _, change := range []string{"metadata", "schema", "reserved_name", "lite_namespace", "lite_search", "system", "namespace", "orphan", "empty_image", "compaction", "spark", "spark_image"} {
 		for _, stream := range []bool{false, true} {
+			// Non-streaming compaction is a separate unary endpoint, not native v2.
+			if change == "compaction" && !stream {
+				continue
+			}
 			t.Run(fmt.Sprintf("%s/stream=%t", change, stream), func(t *testing.T) {
 				u := &issue805Oracle{}
 				h, usage := issue914HTTPNode(t, u, true, issue715Accounts()[:1])
@@ -291,4 +295,35 @@ func TestIssue914LegacyAccountPoolAndCancellation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestIssue914LegacyAPIKeyHTTP(t *testing.T) {
+	for _, change := range []string{"schema", "namespace", "empty_image", "custom_bridge"} {
+		t.Run(change, func(t *testing.T) {
+			u := &issue805Oracle{}
+			h, usage := issue914HTTPNode(t, u, true, issue715AccountsOfType(service.AccountTypeAPIKey)[:1])
+			answer := issue758Request(t, h, issue914Body(t, change, true))
+			require.Equal(t, http.StatusOK, answer.Code, answer.Body.String())
+			issue758CompletedResponse(t, answer.Body.String(), true)
+			u.mu.Lock()
+			count := len(u.frames)
+			u.mu.Unlock()
+			require.Equal(t, 1, count)
+			require.Eventually(t, func() bool { return len(usage.snapshot()) == 1 }, 2*time.Second, 10*time.Millisecond)
+			require.EqualValues(t, 5, usage.snapshot()[0].InputTokens)
+		})
+	}
+}
+
+func TestIssue914LegacyKeepsImagePermission(t *testing.T) {
+	u := &issue805Oracle{}
+	h, _ := issue914HTTPNode(t, u, true, issue715Accounts()[:1])
+	body := issue914Body(t, "metadata", false)
+	body, err := sjson.SetRaw(body, "tools", `[{"type":"image_generation"}]`)
+	require.NoError(t, err)
+	answer := issue758Request(t, h, body)
+	require.Equal(t, http.StatusForbidden, answer.Code, answer.Body.String())
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	require.Empty(t, u.frames)
 }
