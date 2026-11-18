@@ -90,9 +90,6 @@ func IsExplicitImageGenerationIntent(endpoint string, requestedModel string, bod
 	if len(body) == 0 || !mayContainExplicitImageGenerationIntent(body) || !gjson.ValidBytes(body) {
 		return false
 	}
-	// A native tool declaration is not callable when this turn disables tools.
-	// Read choice first: JSON field order must not change account eligibility.
-	toolsDisabled := gjson.GetBytes(body, "tool_choice").String() == "none"
 	var modelSeen, toolsSeen, toolChoiceSeen bool
 	imageIntent := false
 	parseRawJSONView(body).ForEach(func(key, value gjson.Result) bool {
@@ -105,7 +102,7 @@ func IsExplicitImageGenerationIntent(endpoint string, requestedModel string, bod
 		case "tools":
 			if !toolsSeen {
 				toolsSeen = true
-				imageIntent = !toolsDisabled && openAIJSONToolsContainNativeImageGeneration(value)
+				imageIntent = openAIJSONToolsContainNativeImageGeneration(value)
 			}
 		case "tool_choice":
 			if !toolChoiceSeen {
