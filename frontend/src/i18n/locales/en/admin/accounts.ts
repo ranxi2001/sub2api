@@ -984,7 +984,7 @@ export default {
           'Disabled by default. Enable only when this account\'s upstream charges OpenAI API long-context rates above the model threshold.',
         ultrafastBilling: 'UltraFast tier billing',
         ultrafastBillingDesc:
-          'Disabled by default. When enabled, read service_tier from upstream responses; every model on this account uses its standard price ×6 for ultrafast, including cache reads and writes, then applies account/group multipliers. If the response omits the tier, bill the requested tier. Explicit ultrafast requests that settle at that tier are billed at 6× even with this switch off. This does not force UltraFast upstream.',
+          'Disabled by default. When enabled, read service_tier from upstream responses and apply the model’s UltraFast multiplier to Standard prices, including cache reads and writes. GPT-6.2 Sol/Astra cost 3× before March 1, 2027 00:00 Pacific, then 6×; other models default to 6×. Channel overrides and Free UltraFast still apply. Missing response tiers fall back to the request. Disabling this switch does not waive the premium on explicit UltraFast requests or force upstream acceleration.',
         responsesWebsocketsV2: 'Responses WebSocket v2',
         responsesWebsocketsV2Desc:
           'Disabled by default. Enable to allow responses_websockets_v2 capability (still gated by global and account-type switches).',

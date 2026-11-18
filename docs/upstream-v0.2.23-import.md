@@ -1,5 +1,7 @@
 # 上游 v0.2.23 完整引入
 
+> 后续变更：用户要求计费统一到上游后，已取消下文记录的固定 6 倍、6.2 无默认阶梯及 Sol 500k 豁免限制；当前行为见 [UltraFast 计费说明](openai-ultrafast-billing.md)。下文保留当次导入决策。
+
 - fork 基线：`657bb38d141901abcbeef2f178d9234109d37167`，版本 `2.22.0`。
 - 上次完整同步：PR #900；上游 v0.2.22 `b0fa9f3e6eeab1968a53e1289b69daa4bb40ca2b`。
 - 目标：Wei-Shaw/sub2api v0.2.23，annotated tag `ce19a640eab5c4b5ef1827c7c1fcfce49569411a`，源码 `5af9afb588c4b014b3df9db7d4073af1f8ae01b6`。

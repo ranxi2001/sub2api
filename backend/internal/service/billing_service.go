@@ -633,6 +633,9 @@ func (s *BillingService) initFallbackPricing() {
 			CacheCreation12hPricePerToken: price.CacheCreationInputTokenCost12h,
 			CacheCreationPriceExplicit:    true,
 			CacheReadPricePerToken:        price.CacheReadInputTokenCost,
+			LongContextInputThreshold:     price.LongContextInputTokenThreshold,
+			LongContextInputMultiplier:    price.LongContextInputCostMultiplier,
+			LongContextOutputMultiplier:   price.LongContextOutputCostMultiplier,
 		}
 	}
 
@@ -2100,7 +2103,7 @@ func (s *BillingService) applyModelSpecificPricingPolicy(model string, pricing *
 
 // applyModelSpecificPricingPolicyEx 与 applyModelSpecificPricingPolicy 相同，
 // 但由调用方控制是否强制 DeepSeek 官方价（forceDeepSeekRates）。
-// 保留请求时点接口；fork 的默认 Ultra Fast 倍率固定为 6。
+// GPT-6.2 UltraFast 按请求时点应用上游促销倍率。
 // calculateTokenCost 对分组/渠道自定义定价（Source 非 LiteLLM）传 false：
 // 强制覆盖会把运营者配置的售价盖回官方价，违反自定义定价语义。
 func (s *BillingService) applyModelSpecificPricingPolicyEx(model string, pricing *ModelPricing, forceDeepSeekRates bool, pricingAt time.Time) *ModelPricing {
@@ -2139,7 +2142,8 @@ func (s *BillingService) applyModelSpecificPricingPolicyEx(model string, pricing
 		(pricing.InputPricePerTokenPriority > 0 && pricing.CacheCreationPricePerTokenPriority <= 0))
 	fastRatio := openAIModelFastPricingRatio(normalized)
 	needsOpus55FastMultiplier := claude.IsOpus55(model) && pricing.FastMultiplier == nil
-	if !needsCacheCreationPolicy && fastRatio <= 0 && !needsOpus55FastMultiplier {
+	needsUltrafastPolicy := openAIModelSupportsUltrafast(normalized)
+	if !needsCacheCreationPolicy && fastRatio <= 0 && !needsOpus55FastMultiplier && !needsUltrafastPolicy {
 		return pricing
 	}
 	cloned := *pricing
@@ -2663,8 +2667,14 @@ func getDefaultGrokImagineVideoPrice(model string, resolution string) (float64, 
 	}
 }
 
-// openAIUltrafastMultiplier preserves the fork's fixed default tier pricing.
-// A positive channel UltrafastMultiplierOverride remains authoritative.
-func openAIUltrafastMultiplier(_ string, _ time.Time) float64 {
+// openAIUltrafastMultiplier uses the request instant, including for delayed
+// settlement. March 1, 2027 00:00 Pacific is 08:00 UTC (before DST).
+func openAIUltrafastMultiplier(model string, at time.Time) float64 {
+	if at.IsZero() {
+		at = timezone.Now()
+	}
+	if openai.GPT62ModelID(model) != "" && at.Before(time.Date(2027, time.March, 1, 8, 0, 0, 0, time.UTC)) {
+		return 3
+	}
 	return 6
 }
