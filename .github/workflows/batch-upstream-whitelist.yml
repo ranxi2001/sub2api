@@ -1,0 +1,60 @@
+name: Batch upstream whitelist
+on:
+  pull_request:
+    paths:
+      - 'frontend/src/components/account/*UpstreamWhitelist*'
+      - 'frontend/src/components/account/__tests__/BatchUpstreamWhitelist*'
+      - 'backend/internal/**/**batch_whitelist*'
+      - 'backend/internal/service/upstream_model_mapping_sync.go'
+      - '.github/workflows/batch-upstream-whitelist.yml'
+      - '.github/scripts/batch-whitelist-ui.mjs'
+permissions:
+  contents: read
+concurrency:
+  group: batch-upstream-whitelist-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+env:
+  BASE: 701612f6e9f7b697eb36397b9fb49bf7324e56a1
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Same handler oracle on baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          git worktree add --detach "$RUNNER_TEMP/before" "$BASE"
+          file=backend/internal/handler/admin/account_handler_batch_whitelist_test.go
+          cp "$file" "$RUNNER_TEMP/before/$file"
+          cd "$RUNNER_TEMP/before/backend"
+          if go test -v -tags=unit ./internal/handler/admin -run '^TestAccountHandlerBatchUpstreamWhitelist$' -count=1 > "$RUNNER_TEMP/handler-red.log" 2>&1; then exit 1; fi
+          cat "$RUNNER_TEMP/handler-red.log"
+          grep -F 'whitelist-only apply must not persist catalog metadata or quality state' "$RUNNER_TEMP/handler-red.log"
+          grep -F -- '--- FAIL: TestAccountHandlerBatchUpstreamWhitelist' "$RUNNER_TEMP/handler-red.log"
+      - name: Candidate handler and catalog policies
+        working-directory: backend
+        run: go test -v -tags=unit ./internal/handler/admin ./internal/service -run 'Test(AccountHandler(BatchUpstreamWhitelist|SyncUpstreamModels)|ApplyUpstreamModels|AutomaticUpstreamModels|FetchUpstreamSupportedModels|SyncUpstreamModelCatalog|ReconciledUpstreamModels)' -count=1
+      - name: Build production server
+        run: make -C backend build
+      - name: PostgreSQL application, scheduler invalidation and stale edit protection
+        working-directory: backend
+        run: |
+          set -o pipefail
+          go test -v -tags=integration ./internal/repository -run '^TestApplyUpstreamModelsPreservesCredentialsAndInvalidatesScheduler$' -count=1 | tee "$RUNNER_TEMP/postgres.log"
+          grep -F -- '--- PASS: TestApplyUpstreamModelsPreservesCredentialsAndInvalidatesScheduler' "$RUNNER_TEMP/postgres.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: whitelist-contract-${{ github.event.pull_request.head.sha }}
+          path: |
+            ${{ runner.temp }}/handler-red.log
+            ${{ runner.temp }}/postgres.log
