@@ -68,6 +68,9 @@ type ScheduledTestPlan struct {
 
 // ScheduledTestResult represents a single test execution result.
 type ScheduledTestResult struct {
+	// Attempt-local Grok recovery evidence; never accepted from or stored in JSON.
+	grokRecovery *grokTestRecovery
+
 	// Runtime-only; set solely from an actual own-credential OAuth HTTP 401.
 	DirectOAuth401        bool `json:"-"`
 	DirectOAuthRevoked401 bool `json:"-"`

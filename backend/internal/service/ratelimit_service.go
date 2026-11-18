@@ -66,6 +66,9 @@ type SuccessfulTestRecoveryResult struct {
 type AccountRecoveryOptions struct {
 	InvalidateToken          bool
 	preserveGrokScopedBlocks bool
+	// Scheduled Grok tests recover only the observed rate-limit generation after
+	// saving. The generic callback must not clear newer or separately owned state.
+	preserveGrokRuntimeState bool
 }
 
 type geminiUsageCacheEntry struct {
@@ -2456,7 +2459,7 @@ func (s *RateLimitService) RecoverAccountState(ctx context.Context, accountID in
 
 	hasScopedGrokState := account.IsGrok() && !options.preserveGrokScopedBlocks &&
 		(hasGrokModelQuotaBlockForAccount(account.ID) || hasGrokTeamModelRateLimitForAccount(account))
-	if hasRecoverableRuntimeState(account) || hasScopedGrokState {
+	if (hasRecoverableRuntimeState(account) || hasScopedGrokState) && (!account.IsGrok() || !options.preserveGrokRuntimeState) {
 		if err := s.clearRateLimit(ctx, accountID, options.preserveGrokScopedBlocks && account.IsGrok()); err != nil {
 			return nil, err
 		}
