@@ -60,7 +60,7 @@
 - 缓存明细引入时保留 `CacheReadKnown` 与媒体观测、BPS 缓存写入按普通输入计费、请求级定价时点、区域计费和 journal 路径。Anthropic 首事件的输出量保留；终态嵌套 usage 优先，同时继承媒体信息。
 - 原 fork 内存测试已使用独立进程与负控；保留其隔离方式，接入上游 resolver 复用与 fixture KeepAlive。
 - Go 1.27.4 与依赖修复已覆盖；保留 fork CI 分片、嵌入收款模块 replace、release owner 地址。
-- 新功能提示 `channelUltrafastPricing` 接入渠道创建/编辑共用 `PricingEntryCard`，补入已有 A→B→C、多入口和持久化回归参数集。
+- 新功能提示 `channelUltrafastPricing` 接入渠道创建/编辑/批量编辑共用 `PricingEntryCard`，补入已有 A→B→C、多入口和持久化回归参数集。
 - 292 ticket/harvest 身份、加密历史、DeepSeek compaction、账号调度文件没有被上游替换；共享请求体、usage 与 SSE 代码的修改仍需最终 CI 回归验证。代码差异审查不等同生产验收。
 
 ## 迁移与验证边界
@@ -68,3 +68,7 @@
 新增 `252_channel_pricing_ultrafast_multiplier.sql`，添加可空字段和正数约束；旧记录 NULL 继续模型默认倍率。二进制回退不自动移除数据库字段/约束。未连接生产数据库，未发真实模型请求，未发布或部署。
 
 已执行：提交范围/来源/merge 差异检查、Go 格式化、`git diff --check`。本地测试、lint、类型检查与构建未运行，交由 PR CI。最终 head 的 CI 状态和实际 UI 证据以 PR 正文为准。
+
+CI 首轮发现缺少 GPT-6.2 描述解析 helper；补入上游旧依赖 `bea67f412` 中的 `codexInstructionsTemplate`，仅补当前 GPT-6.2 调用所需 helper，不改 fork 的 GPT-6.1 Sol 默认 instructions 策略。
+
+补齐 fork 渠道价卡导入/导出和批量编辑的 Ultra Fast 字段保留，沿用正数校验；增加往返与批量提交回归。为上游渠道视图测试补充 fork 已有的管理员 store fixture。

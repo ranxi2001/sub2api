@@ -1,3 +1,5 @@
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ user: { id: 41 } }) }))
+vi.mock('@/components/common/NewFeatureBadge.vue', () => ({ default: { props: ['noticeId'], template: '<span :data-notice-id="noticeId" />' } }))
 import { defineComponent } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'

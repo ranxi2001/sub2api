@@ -146,6 +146,20 @@ func CanonicalizeOpenAIModelAliasSpelling(model string) string {
 	return normalized
 }
 
+// codexInstructionsTemplate returns the base prompt bundled in an official
+// Codex model descriptor.
+func codexInstructionsTemplate(descriptor []byte) string {
+	var metadata struct {
+		ModelMessages struct {
+			InstructionsTemplate string `json:"instructions_template"`
+		} `json:"model_messages"`
+	}
+	if err := json.Unmarshal(descriptor, &metadata); err != nil {
+		panic(err)
+	}
+	return metadata.ModelMessages.InstructionsTemplate
+}
+
 // CodexBaseInstructionsForModel 按模型返回最匹配的真实 Codex base instructions：
 //   - gpt-6 / gpt-6-astra（含供应商前缀与日期变体）→ GPT-6 Astra prompt
 //   - 含 "codex" 的模型（gpt-5-codex / gpt-5.x-codex / codex-max / spark 等）→ GPT-5-Codex prompt
