@@ -61,7 +61,7 @@ func TestFreeFastCustomerCostVariants(t *testing.T) {
 		{name: "whole request above threshold", input: 272001, output: 19, long: true},
 		{name: "cache crosses context tier", input: 271990, output: 19, write30m: 5, write12h: 6, read: 7, long: true},
 		{name: "context gate disabled above threshold", input: 272001, output: 19, contextDisabled: true},
-		{name: "subscription exemption above 500k", input: 500001, output: 19, accountType: kind},
+		{name: "subscription exemption above 500k", input: 500001, output: 19, accountType: AccountTypeOAuth},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			kind := tc.accountType
