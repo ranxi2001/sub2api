@@ -66,7 +66,13 @@ jobs:
           assert helper is not None
           target = pathlib.Path('backend/internal/service/connection_type_red_compat.go')
           assert not target.exists()
-          target.write_text('package service\nimport ("context"; infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors")\n' + helper.group(0) + '\n')
+          # Whitelist discovery also calls the current maintenance guard. Keep
+          # its exact implementation; do not alter the historical List/Create
+          # methods whose account-type rejection is the RED oracle.
+          oauth = subprocess.check_output(['git', 'show', 'HEAD:backend/internal/service/openai_auth_connection_oauth.go'], text=True)
+          guard = re.search(r'func \(s \*OpenAIOAuthReauthService\) validateConnectionMaintenanceProxyMode\(.*?\n\}', oauth, re.S)
+          assert guard is not None
+          target.write_text('package service\nimport ("context"; infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors")\n' + helper.group(0) + '\n' + guard.group(0) + '\n')
           PYCODE
           fi
           git rev-parse HEAD | tee "$RUNNER_TEMP/connection-proof/head.txt"

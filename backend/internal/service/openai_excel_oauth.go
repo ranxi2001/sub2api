@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -410,6 +411,80 @@ func (s *OpenAIGatewayService) getExcelBPSAccessToken(ctx context.Context, accou
 		token, _, err = s.GetAccessToken(ctx, account)
 	}
 	return token, err
+}
+
+// A whitelist edit may read a saved grant, but must not refresh/rotate it or
+// change its authorization state. Unready credentials fail this edit only.
+func (s *OpenAIGatewayService) getExcelBPSAccessTokenReadOnly(ctx context.Context, account *Account) (string, error) {
+	if account == nil {
+		return "", errors.New("account is missing")
+	}
+	if err := validateOpenAIConnectionKind(account); err != nil {
+		return "", err
+	}
+	if s.excelOAuthReauth != nil {
+		if err := s.excelOAuthReauth.validateAuthConnectionPolicy(ctx, account); err != nil {
+			return "", err
+		}
+	}
+	if account.AuthConnectionID != "" {
+		reauth := s.excelOAuthReauth
+		if reauth == nil {
+			return "", errors.New("authorization connection service unavailable")
+		}
+		if err := reauth.validateConnectionMaintenanceProxyMode(ctx, account.ID); err != nil {
+			return "", err
+		}
+		if err := reauth.ValidateAuthConnectionSend(ctx, account); err != nil {
+			return "", err
+		}
+		connection, err := reauth.authConnection(ctx, account.ID, account.AuthConnectionID)
+		if err != nil {
+			return "", err
+		}
+		if connection.Legacy || connection.Kind != "bps" || connection.Revision != account.AuthConnectionRevision ||
+			connection.Status != "active" || (connection.RefreshState != "" && connection.RefreshState != "idle") ||
+			connection.RefreshCandidateCiphertext != "" || len(connection.Capabilities) == 0 ||
+			(connection.CooldownUntil != nil && time.Now().Before(*connection.CooldownUntil)) {
+			return "", connectionRefreshUnavailable()
+		}
+		credentials, err := reauth.readConnectionCredentials(connection)
+		if err != nil {
+			return "", err
+		}
+		expiry, _ := strconv.ParseInt(stringCredential(credentials, "expires_at"), 10, 64)
+		token := strings.TrimSpace(stringCredential(credentials, "access_token"))
+		if token == "" || expiry <= time.Now().Add(openAITokenRefreshSkew).Unix() {
+			return "", connectionRefreshUnavailable()
+		}
+		return token, nil
+	}
+	if account.HasManagedOpenAIConnections() || account.IsOpenAIAgentIdentity() {
+		return "", errors.New("read-only BPS discovery requires a saved authorization")
+	}
+	if s.excelOAuthReauth != nil {
+		_, credentials, fresh, err := s.excelOAuthReauth.readExcelGrant(ctx, account)
+		if !errors.Is(err, errExcelLegacyCredentials) {
+			if err != nil {
+				return "", err
+			}
+			claims, err := openai.DecodeIDToken(reauthMapString(credentials, "access_token"))
+			if err != nil || credentials[excelAccessTokenRejectedKey] == true || claims.Exp <= time.Now().Add(openAITokenRefreshSkew).Unix() {
+				return "", errors.New("saved Excel access token requires refresh")
+			}
+			return validatedExcelAccessToken(fresh, credentials)
+		}
+	}
+	// Legacy/pure gateway accounts already carry their saved token. Do not
+	// enter GetAccessToken: its provider may refresh or disable the account.
+	if expiry := account.GetCredentialAsTime("expires_at"); expiry != nil && !expiry.After(time.Now().Add(openAITokenRefreshSkew)) {
+		return "", errors.New("saved BPS access token requires refresh")
+	}
+	token := strings.TrimSpace(account.GetOpenAIAccessToken())
+	if token == "" {
+		return "", errors.New("saved BPS access token is unavailable")
+	}
+	return token, nil
 }
 
 // Reject only the access token actually used by this request. Preserve its RT

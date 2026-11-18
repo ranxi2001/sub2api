@@ -648,6 +648,7 @@ export interface SyncUpstreamModelsResult {
 }
 
 export interface SyncUpstreamModelsOptions {
+  whitelist_only?: boolean
   apply?: boolean
   automatic?: boolean
 }
@@ -678,7 +679,7 @@ export interface UpstreamModelMetadata {
 export async function syncUpstreamModels(
   id: number,
   options?: SyncUpstreamModelsOptions,
-  request?: { signal?: AbortSignal }
+  request?: { signal?: AbortSignal; timeout?: number }
 ): Promise<SyncUpstreamModelsResult> {
   const { data } = await apiClient.post<SyncUpstreamModelsResult>(`/admin/accounts/${id}/models/sync-upstream`, options, request)
   return data

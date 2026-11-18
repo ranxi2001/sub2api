@@ -23,16 +23,29 @@ type UpstreamModelMappingSyncRepository interface {
 }
 
 type UpstreamModelSyncOptions struct {
-	Apply     bool `json:"apply"`
-	Automatic bool `json:"automatic"`
+	Apply         bool `json:"apply"`
+	Automatic     bool `json:"automatic"`
+	WhitelistOnly bool `json:"whitelist_only"`
+}
+
+// Validate rejects combinations that could silently turn a mapping-only edit
+// into metadata discovery or an automatic refresh window.
+func (options UpstreamModelSyncOptions) Validate() error {
+	if options.WhitelistOnly && (!options.Apply || options.Automatic) {
+		return newUpstreamModelSyncConfigError("Whitelist-only sync requires an explicit manual apply", nil)
+	}
+	if options.Automatic && !options.Apply {
+		return newUpstreamModelSyncConfigError("Automatic model sync requires apply=true", nil)
+	}
+	return nil
 }
 
 // SyncUpstreamModelCatalogWithOptions preserves the original discovery-only API
 // unless Apply is explicitly requested. An automatic attempt claims its window
 // before any upstream request; failures therefore cannot cause a polling storm.
 func (s *AccountTestService) SyncUpstreamModelCatalogWithOptions(ctx context.Context, account *Account, options UpstreamModelSyncOptions) (*UpstreamModelCatalog, error) {
-	if options.Automatic && !options.Apply {
-		return nil, newUpstreamModelSyncConfigError("Automatic model sync requires apply=true", nil)
+	if err := options.Validate(); err != nil {
+		return nil, err
 	}
 	if !options.Apply {
 		return s.SyncUpstreamModelCatalog(ctx, account)
@@ -83,7 +96,13 @@ func (s *AccountTestService) SyncUpstreamModelCatalogWithOptions(ctx context.Con
 
 	ctx, cancel := context.WithTimeout(ctx, upstreamModelSyncTimeout)
 	defer cancel()
-	catalog, err := s.SyncUpstreamModelCatalog(ctx, account)
+	var catalog *UpstreamModelCatalog
+	var err error
+	if options.WhitelistOnly {
+		catalog, err = s.fetchWhitelistCatalog(ctx, account)
+	} else {
+		catalog, err = s.SyncUpstreamModelCatalog(ctx, account)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -91,6 +110,9 @@ func (s *AccountTestService) SyncUpstreamModelCatalogWithOptions(ctx context.Con
 		return skippedUpstreamModelSync("empty", nextSyncAt), nil
 	}
 	catalog.NextSyncAt = nextSyncAt
+	if catalog.Skipped != "" {
+		return catalog, nil
+	}
 	if catalog.DiscoverySource != "upstream" {
 		catalog.Skipped = "unverified_catalog"
 		return catalog, nil
@@ -120,6 +142,50 @@ func (s *AccountTestService) SyncUpstreamModelCatalogWithOptions(ctx context.Con
 	catalog.Applied = true
 	catalog.Changed = true
 	return catalog, nil
+}
+
+// Mapping-only edits never refresh capability snapshots, observations, quality
+// state or the automatic cooldown. Use only the authenticated live listing.
+func (s *AccountTestService) fetchWhitelistCatalog(ctx context.Context, account *Account) (*UpstreamModelCatalog, error) {
+	if account.IsOpenAIAgentIdentity() {
+		// The non-BPS request builder can register and persist an identity task.
+		// Whitelist-only edits never own that credential lifecycle.
+		return nil, newUpstreamModelSyncUnsupportedError("Read-only model discovery does not support agent identity accounts", nil)
+	}
+	if account.Type == AccountTypeOAuth && (account.Platform == PlatformAntigravity || account.Platform == PlatformGemini) {
+		// These providers can refresh credentials, backfill project IDs and
+		// update cooldowns while obtaining a token. They have no read-only
+		// catalog policy, so reject before entering their credential lifecycle.
+		return nil, newUpstreamModelSyncUnsupportedError("Read-only model discovery does not support Gemini or Antigravity OAuth accounts", nil)
+	}
+	var models []string
+	var body []byte
+	var err error
+	if account.IsExcelBPSEnabled() && s.openaiGatewayService != nil {
+		// The display catalog tolerates one source failing. A replacement
+		// whitelist needs both native and BPS sources when both routes apply.
+		response, fetchErr := s.openaiGatewayService.fetchExcelBPSAccountModelsWithPolicy(ctx, account, true)
+		if fetchErr != nil {
+			return nil, newUpstreamModelSyncUpstreamError("Excel BPS model discovery failed", fetchErr)
+		}
+		body = response.Body
+		models, _, err = extractUpstreamModelCatalog(body, false)
+	} else {
+		models, body, err = s.fetchUpstreamModelList(ctx, account)
+	}
+	if err != nil {
+		return nil, err
+	}
+	// Vertex's list reader consumes every page and returns no raw envelope.
+	// Do not replace an entire mapping with a partial single-page catalog.
+	var page struct {
+		HasMore       bool   `json:"has_more"`
+		NextPageToken string `json:"nextPageToken"`
+	}
+	if len(body) > 0 && json.Unmarshal(body, &page) == nil && (page.HasMore || page.NextPageToken != "") {
+		return skippedUpstreamModelSync("unverified_catalog", nil), nil
+	}
+	return &UpstreamModelCatalog{DiscoverySource: "upstream", Models: visibleUpstreamModelIDs(account, models)}, nil
 }
 
 func skippedUpstreamModelSync(reason string, next *time.Time) *UpstreamModelCatalog {
