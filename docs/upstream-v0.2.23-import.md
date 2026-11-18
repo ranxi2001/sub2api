@@ -80,3 +80,5 @@ CI 首轮发现缺少 GPT-6.2 描述解析 helper；补入上游旧依赖 `bea67
 - 保留 GPT-6.2 显式 priority 缓存写入价；上游模型策略不可将已配置的写入价强制翻倍，原 Free Fast 账单回归作为验收。
 - 分组 tier 与套餐 helper 仍放在 fork 的独立文件；用量投影和原计费包装器独立保留，避免历史 RED 恢复旧网关文件时丢失新调用依赖。
 - OAuth 429 与 Issue715 历史 RED 只向经过完整 blob 核对的旧 `OpenAIUsage` 添加缺失的零值存储字段；移除新增字段后必须逐字节还原旧文件。源级自测验证原字节、字段唯一性和脏文件拒绝。没有跳过、删除或弱化历史业务断言，候选 GREEN 不使用该补丁。
+
+完整单元回归补充：原生 Anthropic→Responses/Chat 缓冲转换现在复用既有终态检查；仅有缓存 usage 后 EOF 返回 502 并保留 usage，不再伪装成功。保留 stop_reason 兼容收尾、HTTP/2 reset 特殊处理与语义错误路径。上游对应测试保留，错误码按 fork 的 `stream_incomplete` 契约适配。

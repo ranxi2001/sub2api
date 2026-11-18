@@ -686,7 +686,8 @@ func TestAnthropicCacheOnlyBufferedSSEUsage(t *testing.T) {
 						if strings.HasSuffix(adapter, "chat") {
 							errorField = "type"
 						}
-						require.JSONEq(t, fmt.Sprintf(`{"error":{%q:"server_error","message":"upstream stream ended without a terminal event"}}`, errorField), recorder.Body.String())
+						// The fork exposes its precise stream failure code on both adapters.
+						require.JSONEq(t, fmt.Sprintf(`{"error":{%q:"stream_incomplete","message":"upstream stream ended without a terminal event"}}`, errorField), recorder.Body.String())
 						return
 					}
 					require.NoError(t, err)

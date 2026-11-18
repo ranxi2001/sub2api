@@ -190,6 +190,7 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 	// 读间隔上限：上游挂住 SSE 时中止组装（缓冲路径尚未提交响应头，可回 502）。
 	streamInterval := anthropicNativeStreamInterval(s.cfg)
 	pump := newAnthropicNativeLinePump(scanner, streamInterval)
+	streamStatus := &anthropicCompatStream{body: resp.Body, pump: pump, maxLineSize: maxLineSize, requestID: requestID}
 	defer pump.stop()
 
 	logReadErr := func(err error) {
@@ -217,6 +218,7 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 				return onIdle()
 			}
 			logReadErr(rerr)
+			streamStatus.readErr = rerr
 			if !terminalSeen {
 				if resetErr, handled := handleOpenAIHTTP2PeerReset(c, account, requestID, rerr); handled {
 					return resultWithUsage(), resetErr
@@ -236,6 +238,7 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 				return onIdle()
 			}
 			logReadErr(rerr)
+			streamStatus.readErr = rerr
 			if !terminalSeen {
 				if resetErr, handled := handleOpenAIHTTP2PeerReset(c, account, requestID, rerr); handled {
 					return resultWithUsage(), resetErr
@@ -256,6 +259,7 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 		if event.Type == "error" {
 			return resultWithUsage(), writeNativeAnthropicSemanticFailure(c, []byte(payload), originalModel)
 		}
+		streamStatus.observe(&event, payload)
 		terminalSeen = terminalSeen || event.Type == "message_stop"
 
 		if event.Type == "message_start" && event.Message != nil {
@@ -286,6 +290,12 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 				}
 			}
 		}
+	}
+
+	if failure := streamStatus.failure(); failure != nil {
+		_ = resp.Body.Close()
+		writeChatCompletionsError(c, http.StatusBadGateway, failure.errType, failure.message)
+		return resultWithUsage(), failure.err
 	}
 
 	if finalResp == nil {
