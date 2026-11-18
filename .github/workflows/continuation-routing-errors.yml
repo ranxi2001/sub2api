@@ -1,0 +1,40 @@
+name: Continuation routing errors
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/internal/service/openai_ws_readable_continuation.go'
+      - 'backend/internal/service/openai_agent_message_recovery_error.go'
+      - 'backend/internal/service/openai_ws_continuation_missing_test.go'
+      - 'backend/internal/service/image_generation_intent.go'
+      - 'backend/internal/service/openai_image_routing_test.go'
+      - 'backend/internal/handler/openai_ws_continuation_missing_test.go'
+      - 'backend/internal/handler/openai_ws_unsent_delta_test.go'
+      - 'backend/internal/handler/no_account_error*'
+      - 'backend/internal/handler/ops_error_logger*'
+      - 'backend/internal/serverless/**'
+      - '.github/workflows/continuation-routing-errors.yml'
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Isolated Redis dependency
+        run: |
+          if ! command -v redis-server >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends redis-server
+          fi
+      - name: Unsent delta recovery, image routing and Pod cancellation attribution
+        working-directory: backend
+        run: go test -race -tags=unit,unsentdelta,continuationmissing ./internal/service ./internal/handler -run '^Test(OpenAIWSUnsentDeltaRequestsCanonicalHistory|OpenAIWSMissingHistorySendsCanonicalRetry|OpenAIImageRouting|SelectionFailureImageCapabilityDoesNotHideTextModel|OpsServerlessCancellationIsClientOutcome)' -count=1 -timeout=5m
