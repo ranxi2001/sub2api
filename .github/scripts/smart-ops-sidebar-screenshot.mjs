@@ -14,12 +14,13 @@ const { chromium } = await import(pathToFileURL(join(process.env.PLAYWRIGHT_ROOT
 mkdirSync(output, { recursive: true })
 const manifest = {
   base_commit: base, head_commit: head,
-  boundary: 'Separate complete base/head frontend trees; original AppSidebar, SmartOpsSidebarSettings, adminSettings store, Toggle, FeatureSearch, locales and CSS. Synthetic admin/API and component harness with explicit fixture apply (not the real SettingsView save). No backend, login, production or paid calls. Counts cover the configurable paths (14 before, 13 after); the unrelated AI operations link remains visible.',
+  boundary: 'Separate complete base/head frontend trees; original AppSidebar, SmartOpsSidebarSettings, adminSettings store, Toggle, FeatureSearch, locales and CSS. Synthetic admin/API and component harness with explicit fixture apply (not the real SettingsView save). No backend, login, production or paid calls. Counts cover the configurable paths (14 on the historical baseline, 11 after); the unrelated AI operations link remains visible.',
   results: [], errors: [], screenshots: [],
 }
 const browser = await chromium.launch({ headless: true })
 try {
   for (const mode of ['before', 'after']) {
+    const channelPath = mode === 'before' ? '/admin/account-ops' : '/admin/channel-config'
     const root = resolve(mode === 'before' ? process.env.BASELINE_ROOT : 'frontend')
     const require = createRequire(join(root, 'package.json'))
     const { build, preview } = await import(pathToFileURL(join(root, 'node_modules/vite/dist/node/index.js')).href)
@@ -44,7 +45,7 @@ try {
         const params=new URLSearchParams(location.search),scenario=params.get('scenario')||'missing';
         const settings={request_capture_enabled:true};
         if(scenario==='empty')settings.smart_ops_hidden_menu_items=[];
-        if(scenario==='saved')settings.smart_ops_hidden_menu_items=['/admin/account-ops'];
+        if(scenario==='saved')settings.smart_ops_hidden_menu_items=['${channelPath}'];
         const state={requests:[],unexpected:[]};window.__sidebarFixture=state;
         apiClient.defaults.adapter=async request=>{
           const path=request.url.split('?')[0];state.requests.push({method:request.method,path});let data;
@@ -99,8 +100,10 @@ try {
         '/admin/request-captures', '/admin/harvest-flow',
       ]
       if (mode === 'after') {
-        paths.splice(paths.indexOf('/admin/token-guard'), 1)
-        paths.splice(paths.indexOf('/admin/harvest-flow'), 1)
+        paths[paths.indexOf('/admin/profit-operations')] = channelPath
+        for (const retired of ['/admin/channel-operations', '/admin/account-ops', '/admin/token-guard', '/admin/harvest-flow']) {
+          paths.splice(paths.indexOf(retired), 1)
+        }
         paths.push('/admin/qqbot/overview')
       }
       const sidebarPaths = () => page.locator('aside nav a').evaluateAll((links, candidates) => links.map(a => a.getAttribute('href')).filter(path => candidates.includes(path)), paths)
@@ -121,11 +124,11 @@ try {
         assert.equal(await page.locator('aside nav a[href="/admin/ai-ops"]').count(), 1)
         manifest.results.push({ mode, scenario, selected: expected, sidebar_paths: await sidebarPaths(), ...snapshot })
         await screenshot(`${mode}-${scenario}.png`)
-        const label = await panel().locator('label[for="smart-ops-sidebar-account-ops"]').innerText()
+        const label = await panel().locator(`label[for="smart-ops-sidebar-${channelPath.split('/').pop()}"]`).innerText()
         await page.locator('aside button[aria-haspopup="dialog"]').click()
-        await page.getByRole('combobox').fill('/admin/account-ops')
+        await page.getByRole('combobox').fill(channelPath)
         const result = page.getByRole('option').filter({ has: page.getByText(label, { exact: true }) })
-        assert.equal(await result.count(), snapshot.hidden.includes('/admin/account-ops') ? 0 : 1)
+        assert.equal(await result.count(), snapshot.hidden.includes(channelPath) ? 0 : 1)
         await page.keyboard.press('Escape')
         await page.getByRole('combobox').waitFor({ state: 'hidden' })
       }
@@ -153,7 +156,7 @@ try {
         assert.equal(await page.locator('aside nav a[href="/admin/token-guard"], aside nav a[href="/admin/harvest-flow"]').count(), 0)
         assert.equal(await panel().locator('#smart-ops-sidebar-token-guard, #smart-ops-sidebar-harvest-flow').count(), 0)
         await screenshot('after-show-all.png')
-        manifest.results.push({ interaction: 'enable QQ bot -> seven; hide all -> zero; show all -> thirteen', passed: true })
+        manifest.results.push({ interaction: 'enable QQ bot -> seven; hide all -> zero; show all -> eleven', passed: true })
         await page.goto(`${url}?scenario=missing&lang=en`)
         await page.waitForFunction(() => window.__sidebarFixture?.ready)
         assert.equal(await visibleCount(), 6)

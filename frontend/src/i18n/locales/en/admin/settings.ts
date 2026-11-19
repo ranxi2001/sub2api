@@ -23,7 +23,7 @@ export default {
           showAll: 'Show all',
           hideAll: 'Hide all',
           count: '{visible} / {total} entries selected',
-          hint: 'The sidebar group disappears when all entries are hidden. Existing feature requirements, such as request capture being enabled, still apply.'
+          hint: 'Hide all applies to the entries listed here. Existing feature requirements, such as request capture being enabled, still apply.'
         },
         excelBpsImages: {
           mode: 'Image transport',

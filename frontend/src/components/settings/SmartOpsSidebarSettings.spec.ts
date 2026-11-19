@@ -25,18 +25,24 @@ describe('smart operations sidebar settings', () => {
       template: '<form><Panel v-model="hidden"/></form>',
     })
     const wrapper = mount(Harness, { global: setup().global })
-    expect(wrapper.findAll('[role="switch"]')).toHaveLength(13)
+    expect(wrapper.findAll('[role="switch"]')).toHaveLength(11)
     expect(wrapper.findAll('[role="switch"][aria-checked="true"]')).toHaveLength(6)
-    expect(wrapper.text()).toContain('已选择 6 / 13 个入口')
+    expect(wrapper.text()).toContain('已选择 6 / 11 个入口')
     expect(wrapper.findAll('button').every(button => button.attributes('type') === 'button')).toBe(true)
     expect(wrapper.get('#smart-ops-sidebar-overview').attributes('aria-checked')).toBe('false')
     await wrapper.get('#smart-ops-sidebar-overview').trigger('click')
     expect(wrapper.vm.hidden).not.toContain('/admin/qqbot/overview')
     await wrapper.get('#smart-ops-sidebar-overview').trigger('click')
     expect(wrapper.vm.hidden).toContain('/admin/qqbot/overview')
-    await wrapper.get('#smart-ops-sidebar-account-ops').trigger('click')
-    expect([...wrapper.vm.hidden].sort()).toEqual([...DEFAULT_SMART_OPS_HIDDEN_MENU_ITEMS.filter(path => path !== '/admin/account-ops'), '/admin/future-entry'].sort())
-    expect(wrapper.get('#smart-ops-sidebar-account-ops').attributes('aria-checked')).toBe('true')
+    for (const former of ['channel-operations', 'profit-operations', 'account-ops']) {
+      expect(wrapper.find(`#smart-ops-sidebar-${former}`).exists()).toBe(false)
+    }
+    const channelConfig = wrapper.get('#smart-ops-sidebar-channel-config')
+    expect(channelConfig.attributes('aria-label')).toBe('渠道配置')
+    expect(channelConfig.attributes('aria-checked')).toBe('true')
+    await channelConfig.trigger('click')
+    expect(wrapper.vm.hidden).toContain('/admin/channel-config')
+    expect(channelConfig.attributes('aria-checked')).toBe('false')
     expect(wrapper.get('#smart-ops-sidebar-token-guard-v2').attributes('aria-checked')).toBe('true')
     await wrapper.findAll('button').find(button => button.text() === '全部隐藏')!.trigger('click')
     expect(SMART_OPS_MENU_ITEMS.every(item => wrapper.vm.hidden.includes(item.path))).toBe(true)
@@ -47,7 +53,7 @@ describe('smart operations sidebar settings', () => {
   it.each(['zh', 'en'])('renders translated labels and scope explanation in %s', locale => {
     const wrapper = mount(Panel, { props: { modelValue: [] }, global: setup(locale).global })
     expect(wrapper.text()).not.toMatch(/admin\.settings\.|\.title\b/)
-    expect(wrapper.text()).toContain('13')
+    expect(wrapper.text()).toContain('11')
   })
   it('shares its new notice ID and keeps dismissals across refresh without hiding future notices', async () => {
     const { pinia, global } = setup()
