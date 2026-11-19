@@ -303,7 +303,7 @@ func (r *channelRepository) ReadProfitOperations(ctx context.Context, f service.
 		return nil, err
 	}
 	size, offset := f.PageSize, (f.Page-1)*f.PageSize
-	if f.CollectProfitRows {
+	if service.CollectProfitRows(ctx) {
 		size, offset = 10001, 0
 	}
 	args := []any{f.From, f.Until, string(raw), f.Upstream, f.AccountID, f.GroupID, f.Model, f.ModelScope, size, offset, f.ChannelID}

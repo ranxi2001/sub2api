@@ -50,10 +50,10 @@ async function load(next: number) {
 function begin(p: ProfitProvider) {
   message.value = ''; actionError.value = ''; editing.value = editing.value === p.provider_id ? null : p.provider_id
 }
-async function linkResult(providerId: number, channelId: number, state: 'written' | 'conflict' | 'failed') {
+async function linkResult(providerId: number, channelId: number, state: 'written' | 'conflict' | 'failed', mode?: 'estimate'|'wallet') {
   await load(page.value)
   if (lifetime.signal.aborted) return
-  if (state === 'written' && result.value?.items.some(p => p.provider_id === providerId && p.channel_id === channelId)) message.value = t('upstreamEntities.saved')
+  if (state === 'written' && result.value?.items.some(p => p.provider_id === providerId && p.channel_id === channelId && (!mode || p.cost_mode===mode))) message.value = t('upstreamEntities.saved')
   else actionError.value = t(state === 'conflict' ? 'profitOps.linkConflict' : 'profitOps.linkUnconfirmed')
   emit('changed')
 }
@@ -66,7 +66,7 @@ async function setCostMode(p: ProfitProvider, event: Event) {
  try { await linkProfitChannel(p.provider_id,p.channel_id,p.revision,mode) }
  catch(cause){state=(cause as {status?:number})?.status===409?'conflict':'failed'}
  finally{writing.value=false}
- await linkResult(p.provider_id,p.channel_id,state)
+ await linkResult(p.provider_id,p.channel_id,state,mode)
 }
 onMounted(() => load(1))
 onBeforeUnmount(() => lifetime.abort())

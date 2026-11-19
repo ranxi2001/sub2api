@@ -29,7 +29,6 @@ func newProfitChargeFixture(t *testing.T) *profitChargeFixture {
 	db, _ := UpstreamChannelsTestDatabase(t)
 	f := &profitChargeFixture{t: t, db: db, r: &channelRepository{db: db}}
 	f.pid = f.provider()
-	f.exec(`UPDATE provider_profit_links SET cost_mode='wallet',revision=revision+1 WHERE provider_id=$1`, f.pid)
 	f.channel = f.id(`SELECT channel_id FROM provider_profit_links WHERE provider_id=$1`, f.pid)
 	var err error
 	f.epoch, err = f.r.ProviderProfitIdentityFrom(context.Background(), f.pid)
@@ -51,7 +50,9 @@ func (f *profitChargeFixture) exec(q string, args ...any) {
 	require.NoError(f.t, err)
 }
 func (f *profitChargeFixture) provider() int64 {
-	return f.id(`INSERT INTO mature_providers(name,site_type,base_url) VALUES('fixture','sub2api',$1) RETURNING id`, profitChargeBase)
+	pid := f.id(`INSERT INTO mature_providers(name,site_type,base_url) VALUES('fixture','sub2api',$1) RETURNING id`, profitChargeBase)
+	f.exec(`UPDATE provider_profit_links SET cost_mode='wallet',revision=revision+1 WHERE provider_id=$1`, pid)
+	return pid
 }
 func (f *profitChargeFixture) imported(provider, key int64) int64 {
 	return f.id(`INSERT INTO accounts(name,type,platform,extra,credentials) VALUES('fixture','apikey','openai',jsonb_build_object('provider_binding',jsonb_build_object('provider_id',$1::bigint,'key_id',$2::text,'provider_revision',(SELECT revision FROM mature_providers WHERE id=$1))),jsonb_build_object('base_url',(SELECT rtrim(base_url,'/') FROM mature_providers WHERE id=$1),'api_key','fixture-only')) RETURNING id`, provider, fmt.Sprint(key))

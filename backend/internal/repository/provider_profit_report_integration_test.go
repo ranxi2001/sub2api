@@ -153,6 +153,7 @@ func TestProviderProfitReportRegisterSiteAfterUsage(t *testing.T) {
 	check(rows[api], map[string]string{"requests": "1", "upstream_cost": "6", "supplier_requests": "0"})
 	check(s, map[string]string{"requests": "2", "request_income": "100", "upstream_cost": "12"})
 	pid := f.id(`INSERT INTO mature_providers(name,site_type,base_url) VALUES('Later supplier','sub2api',$1) RETURNING id`, site)
+	f.exec(`UPDATE provider_profit_links SET cost_mode='wallet',revision=revision+1 WHERE provider_id=$1`, pid)
 	channel := f.id(`SELECT channel_id FROM provider_profit_links WHERE provider_id=$1`, pid)
 	key := fmt.Sprintf("channel:%d", channel)
 	s, rows = read()
@@ -467,7 +468,7 @@ func TestProviderProfitLegacyIncomeUnchangedByFirstLink(t *testing.T) {
 func TestProviderProfitNamingPreservesEstimateUntilWalletOptIn(t *testing.T) {
 	f := newProfitChargeFixture(t)
 	// A new URL/name record defaults to estimates, even without credentials.
-	pid := f.provider()
+	pid := f.id(`INSERT INTO mature_providers(name,site_type,base_url) VALUES('new estimate','sub2api','https://estimate.invalid') RETURNING id`)
 	var mode string
 	require.NoError(t, f.db.QueryRow(`SELECT cost_mode FROM provider_profit_links WHERE provider_id=$1`, pid).Scan(&mode))
 	require.Equal(t, "estimate", mode)

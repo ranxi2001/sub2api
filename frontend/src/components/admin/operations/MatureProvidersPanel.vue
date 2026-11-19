@@ -133,7 +133,7 @@ async function save() {
   const input = { ...draft.value, cost_multiplier: cost.value === '' ? null : Number(cost.value), low_balance_threshold: threshold.value === '' ? null : Number(threshold.value) }
   if (credential.value) { if (input.auth_mode === 'password') input.password = credential.value; else input.access_token = credential.value }
   if (refreshToken.value && input.auth_mode === 'token' && input.site_type === 'sub2api') input.refresh_token = refreshToken.value
-  try { await saveProvider(editID.value, input); formOpen.value = false; credential.value = ''; refreshToken.value = ''; await load() }
+  try { await saveProvider(editID.value, input); formOpen.value = false; credential.value = ''; refreshToken.value = ''; await load(); emit('changed') }
   catch (e) { error.value = message(e) }
   finally { saving.value = false }
 }
@@ -145,7 +145,7 @@ async function refresh(p: MatureProvider) {
 async function remove() {
   if (!deleting.value || busy.value !== null) return
   busy.value = deleting.value.id; error.value = ''
-  try { await deleteProvider(deleting.value); deleting.value = null; await load() } catch (e) { error.value = message(e); deleting.value = null } finally { busy.value = null }
+  try { await deleteProvider(deleting.value); deleting.value = null; await load(); emit('changed') } catch (e) { error.value = message(e); deleting.value = null } finally { busy.value = null }
 }
 onMounted(load)
 onBeforeUnmount(() => { alive = false; generation++; controller?.abort(); credential.value = ''; refreshToken.value = '' })

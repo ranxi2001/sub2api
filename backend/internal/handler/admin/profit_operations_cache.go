@@ -38,7 +38,6 @@ func (c *profitReportCache) read(ctx context.Context, f service.UpstreamOperatio
 	key.PageSize = 20
 	key.Sort = "requests"
 	key.Direction = "desc"
-	key.CollectProfitRows = false
 	key.From = key.From.UTC()
 	key.Until = key.Until.UTC()
 	c.mu.Lock()
@@ -131,7 +130,6 @@ func pageProfitReport(raw []byte, f service.UpstreamOperationsFilter) (*service.
 		return nil, err
 	}
 	out.Scope = f
-	out.Scope.CollectProfitRows = false
 	var usage map[string]json.RawMessage
 	if err := json.Unmarshal(out.Usage, &usage); err != nil {
 		return nil, err

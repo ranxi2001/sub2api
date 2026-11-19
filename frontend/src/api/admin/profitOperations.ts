@@ -64,3 +64,7 @@ export async function readProfitSync(providerId: number, jobId: string, signal: 
 export async function readExplicitChannelProfitOperations(query: OperationsQuery, channelId: number, signal?: AbortSignal): Promise<OperationsSnapshot> {
  return readProfitOperations({ ...query, upstream: '', channel_id: channelId }, signal)
 }
+
+export async function readProfitChannelAccountIDs(channelId: number) {
+ return (await apiClient.get<{account_ids:number[]}>('/admin/profit-operations/channel-accounts', {params:{channel_id:channelId}})).data.account_ids
+}

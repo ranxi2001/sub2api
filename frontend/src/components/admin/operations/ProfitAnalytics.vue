@@ -77,7 +77,7 @@ import SmartOpsNav from './SmartOpsNav.vue'
 import UpstreamChannelManager from './UpstreamChannelManager.vue'
 import ProfitProviders from './ProfitProviders.vue'
 import { readProfitOperations, type OperationsQuery, type OperationsSnapshot, type OperationsRow, type ProfitMetrics } from '@/api/admin/profitOperations'
-const props = defineProps<{ embedded?: boolean; active?: boolean; scope?: Partial<OperationsQuery> }>()
+const props = withDefaults(defineProps<{ embedded?: boolean; active?: boolean; scope?: Partial<OperationsQuery> }>(), {active:true})
 const emit = defineEmits<{ scope: [value: OperationsQuery] }>()
 const { t } = useI18n()
 const auth = useAuthStore()

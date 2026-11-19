@@ -39,9 +39,10 @@ func (h *ChannelHandler) ProfitOperations(c *gin.Context) {
 	started := time.Now()
 	out, err := h.profitReports.read(c.Request.Context(), f, func(ctx context.Context, collect bool) (*service.ProfitOperationsSnapshot, error) {
 		h.refreshBoundProviderSpend(ctx, f.From, f.Until, force)
-		query := f
-		query.CollectProfitRows = collect
-		return h.channelService.ProfitOperations(ctx, query)
+		if collect {
+			ctx = service.WithProfitRowCollection(ctx)
+		}
+		return h.channelService.ProfitOperations(ctx, f)
 	})
 	if err != nil {
 		status, reason, message := http.StatusInternalServerError, "PROFIT_OPERATIONS_QUERY_FAILED", "Upstream operations query failed; retry"
@@ -55,4 +56,29 @@ func (h *ChannelHandler) ProfitOperations(c *gin.Context) {
 		return
 	}
 	response.Success(c, out)
+}
+
+func (h *ChannelHandler) ProfitChannelAccountIDs(c *gin.Context) {
+	id, err := operationsInt(c, "channel_id", 0)
+	if err != nil || id <= 0 {
+		response.ErrorFrom(c, service.ErrUpstreamOperationsValidation)
+		return
+	}
+	repo, ok := h.upstreamChannelRepo(c)
+	if !ok {
+		return
+	}
+	reader, ok := repo.(interface {
+		ProfitChannelAccountIDs(context.Context, int64) ([]int64, error)
+	})
+	if !ok {
+		response.ErrorFrom(c, service.ErrProviderProfitLinkUnavailable)
+		return
+	}
+	ids, err := reader.ProfitChannelAccountIDs(c.Request.Context(), id)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "Unable to read channel accounts")
+		return
+	}
+	response.Success(c, gin.H{"account_ids": ids})
 }

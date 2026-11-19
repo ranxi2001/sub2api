@@ -179,9 +179,9 @@ import AccountOpsGlobalSettings from '@/components/admin/operations/AccountOpsGl
 import AccountOpsGroupDialog from '@/components/admin/operations/AccountOpsGroupDialog.vue'
 import { getAccountOpsSettings, saveAccountOpsNotificationSettings, getAccountOpsEvents, getAccountOpsThresholdAccounts, getAccountOpsThresholdGroups, testAccountOpsWebhook, saveAccountOpsRuleGroups, deleteAccountOpsWebhook } from '@/api/admin/accountOps'
 import type { AccountOpsConfig, AccountOpsEvent, AccountOpsThresholdAccount, AccountOpsWebhook, AccountOpsGroup, AccountOpsRuleBatchGroup } from '@/api/admin/accountOps'
-import { readChannelBindings } from '@/api/admin/upstreamChannels'
+import { readProfitChannelAccountIDs } from '@/api/admin/profitOperations'
 import { extractApiErrorMessage } from '@/utils/apiError'
-const props = defineProps<{ embedded?: boolean; active?: boolean; channelId?: number; accountId?: number }>()
+const props = withDefaults(defineProps<{ embedded?: boolean; active?: boolean; channelId?: number; accountId?: number }>(), {active:true})
 const { t } = useI18n(), auth = useAuthStore(), app = useAppStore()
 const { remote, events, hasMore } = storeToRefs(useAccountOpsStore())
 const tabs = ['settings','records'] as const, activeTab = ref<'records'|'settings'>('settings')
@@ -204,12 +204,11 @@ watch([() => props.channelId, thresholdAccounts], async () => {
  const sequence=++membershipVersion; memberIds.value=new Set()
  if(!props.channelId) return
  try {
- const ids=thresholdAccounts.value.map(a=>a.account_id); const selected=new Set<number>()
- for(let i=0;i<ids.length;i+=100){const rows=await readChannelBindings(ids.slice(i,i+100));if(sequence!==membershipVersion)return;for(const row of rows)if(row.channel_id===props.channelId)selected.add(row.account_id)}
- if(sequence===membershipVersion)memberIds.value=selected
+ const ids=await readProfitChannelAccountIDs(props.channelId)
+ if(sequence===membershipVersion)memberIds.value=new Set(ids)
  }catch(e){if(sequence===membershipVersion)app.showError(message(e))}
 }, {immediate:true})
-const inScope=(id:number)=>(!props.accountId||id===props.accountId)&&(!props.channelId||memberIds.value.has(id))
+const inScope=(id:number)=>props.accountId ? id===props.accountId : (!props.channelId||memberIds.value.has(id))
 const scopedAccounts=computed(()=>thresholdAccounts.value.filter(a=>inScope(a.account_id)))
 const query = ref(''), kind = ref('all'), phase = ref('all'), alertKinds = ['balance_threshold','quota_threshold','balance_low','weekly_quota']
 const editingHook = ref<AccountOpsWebhook|null>(null), showWebhook = ref(false), showEmail = ref(false), testingId = ref<string|null>(null)

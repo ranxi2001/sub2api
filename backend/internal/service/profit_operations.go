@@ -11,6 +11,17 @@ import (
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
 
+// Internal collection hint for bounded report caching; never accepted from HTTP.
+type profitCollectionKey struct{}
+
+func WithProfitRowCollection(ctx context.Context) context.Context {
+	return context.WithValue(ctx, profitCollectionKey{}, true)
+}
+func CollectProfitRows(ctx context.Context) bool {
+	value, _ := ctx.Value(profitCollectionKey{}).(bool)
+	return value
+}
+
 // ProfitWalletTodaySkew is how far the profit window's end may sit behind
 // "now" and still count as today's consumption snapshot. The today preset
 // sends the browser's current time, which is slightly earlier than the server.

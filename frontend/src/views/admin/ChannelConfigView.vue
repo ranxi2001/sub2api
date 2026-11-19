@@ -19,7 +19,7 @@
               <RouterLink class="btn btn-secondary inline-block" to="/admin/channels/pricing">{{ t('channelOps.pricing') }}</RouterLink>
               <details class="rounded-lg border p-4 dark:border-dark-700" @toggle="walletOpen = ($event.target as HTMLDetailsElement).open">
                 <summary class="cursor-pointer font-semibold">{{ t('channelConfig.connections') }}</summary>
-                <div v-if="walletOpen" class="mt-4 space-y-5"><MatureProvidersPanel passive /><ProfitProviders @changed="changed" /></div>
+                <div v-if="walletOpen" class="mt-4 space-y-5"><MatureProvidersPanel passive @changed="changed" /><ProfitProviders @changed="changed" /></div>
               </details>
               <details class="rounded-lg border p-4 dark:border-dark-700" @toggle="analyticsOpen = ($event.target as HTMLDetailsElement).open"><summary class="cursor-pointer font-semibold">{{ t('upstreamOps.title') }}</summary><UpstreamAnalytics v-if="analyticsOpen" embedded class="mt-4" /></details>
             </template>
@@ -43,12 +43,12 @@ import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import { useAuthStore } from '@/stores/auth'
 import type { OperationsQuery } from '@/api/admin/profitOperations'
 import { profitScopeFromQuery } from './channelConfigScope'
-const UpstreamChannelManager=defineAsyncComponent(()=>import('@/components/admin/operations/UpstreamChannelManager.vue'))
-const ProfitProviders=defineAsyncComponent(()=>import('@/components/admin/operations/ProfitProviders.vue'))
-const MatureProvidersPanel=defineAsyncComponent(()=>import('@/components/admin/operations/MatureProvidersPanel.vue'))
-const UpstreamAnalytics=defineAsyncComponent(()=>import('@/components/admin/operations/UpstreamAnalytics.vue'))
-const ProfitAnalytics=defineAsyncComponent(()=>import('@/components/admin/operations/ProfitAnalytics.vue'))
-const AccountOpsView=defineAsyncComponent(()=>import('./AccountOpsView.vue'))
+const UpstreamChannelManager=defineAsyncComponent(()=>import('@/components/admin/operations/UpstreamChannelManager.vue').then(module=>module.default))
+const ProfitProviders=defineAsyncComponent(()=>import('@/components/admin/operations/ProfitProviders.vue').then(module=>module.default))
+const MatureProvidersPanel=defineAsyncComponent(()=>import('@/components/admin/operations/MatureProvidersPanel.vue').then(module=>module.default))
+const UpstreamAnalytics=defineAsyncComponent(()=>import('@/components/admin/operations/UpstreamAnalytics.vue').then(module=>module.default))
+const ProfitAnalytics=defineAsyncComponent(()=>import('@/components/admin/operations/ProfitAnalytics.vue').then(module=>module.default))
+const AccountOpsView=defineAsyncComponent(()=>import('./AccountOpsView.vue').then(module=>module.default))
 const { t }=useI18n(), route=useRoute(), router=useRouter(), auth=useAuthStore()
 const panels=['channels','profit','accounts'] as const
 type Panel=typeof panels[number]
