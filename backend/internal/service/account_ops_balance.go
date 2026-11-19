@@ -22,23 +22,24 @@ type AccountOpsUsageWindow struct {
 	ResetsAt    *time.Time `json:"resets_at,omitempty"`
 }
 type AccountOpsBalanceAccount struct {
-	ProviderID       int64    `json:"provider_id,omitempty"`
-	OAuthLifecycle   string   `json:"oauth_lifecycle,omitempty"`
-	AccountID        int64    `json:"account_id"`
-	AccountName      string   `json:"account_name"`
-	GroupID          string   `json:"group_id"`
-	GroupName        string   `json:"group_name"`
-	GroupMode        string   `json:"group_mode"`
-	Platform         string   `json:"platform"`
-	Type             string   `json:"type"`
-	Balance          *float64 `json:"balance"`
-	Unit             string   `json:"unit"`
-	BalanceStatus    string   `json:"balance_status"`
-	ProbeEnabled     bool     `json:"probe_enabled"`
-	LastKnownBalance *float64 `json:"last_known_balance,omitempty"`
-	rawNewAPIUSD     *float64
+	ProviderID       int64                   `json:"provider_id,omitempty"`
+	OAuthLifecycle   string                  `json:"oauth_lifecycle,omitempty"`
+	AccountID        int64                   `json:"account_id"`
+	AccountName      string                  `json:"account_name"`
+	GroupID          string                  `json:"group_id"`
+	GroupName        string                  `json:"group_name"`
+	GroupMode        string                  `json:"group_mode"`
+	Platform         string                  `json:"platform"`
+	Type             string                  `json:"type"`
+	Balance          *float64                `json:"balance"`
+	Unit             string                  `json:"unit"`
+	BalanceStatus    string                  `json:"balance_status"`
+	ProbeEnabled     bool                    `json:"probe_enabled"`
+	LastKnownBalance *float64                `json:"last_known_balance,omitempty"`
 	ReceivedAt       *time.Time              `json:"received_at"`
 	UsageWindows     []AccountOpsUsageWindow `json:"usage_windows"`
+
+	rawNewAPIUSD *float64
 }
 
 func opsNumber(v any) (float64, bool) {

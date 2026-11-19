@@ -120,6 +120,13 @@ func TestNewAPIWalletCurrencyPreservesThresholdUnits(t *testing.T) {
 	require.Equal(t, "CNY", item.Unit)
 	require.Equal(t, 90.082, *item.Balance)
 	svc := NewAccountOpsService(&accountOpsSettingsStub{}, &accountOpsRepoStub{}, nil)
+	svc.SetNotificationDependencies(opsBatchAccounts{accounts: map[int64]*Account{1: a}}, nil, false, "UTC")
+	cfg := AccountOpsConfig{}
+	threshold := 15.0
+	require.NoError(t, svc.applyRule(context.Background(), &cfg, 1, AccountOpsRuleUpdate{Metric: "balance", Enabled: true, Threshold: &threshold, Unit: "USD"}, true))
+	require.Equal(t, "USD", cfg.BalanceThresholds[0].Unit)
+	require.Equal(t, threshold, cfg.BalanceThresholds[0].Threshold)
+	require.Error(t, svc.applyRule(context.Background(), &cfg, 1, AccountOpsRuleUpdate{Metric: "balance", Enabled: true, Threshold: &threshold, Unit: "EUR"}, true))
 	for _, tt := range []struct {
 		unit      string
 		threshold float64

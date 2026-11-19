@@ -311,7 +311,7 @@ export default {
           boundUser: "已配置用户 {id}",
           preview: "预览",
           save: "验证并保存",
-          wallet: "钱包余额（标准化 USD）：{amount}",
+          wallet: "钱包余额：{amount}",
           matched: "已匹配 API Key",
           needsSelection: "请选择对应令牌",
           group: "分组：{name}",
