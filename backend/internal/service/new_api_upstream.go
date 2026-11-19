@@ -88,9 +88,12 @@ type NewAPIToken struct {
 	RouteGroups     []string `json:"route_groups"`
 }
 type newAPIData struct {
-	wallet float64
-	ratios map[string]float64
-	tokens []NewAPIToken
+	wallet     float64
+	walletUnit string
+	rawWallet  float64
+	walletRate float64
+	ratios     map[string]float64
+	tokens     []NewAPIToken
 }
 
 func matchNewAPITokens(a *Account, tokens []NewAPIToken) []NewAPIToken {
@@ -169,10 +172,8 @@ func (s *UpstreamBillingProbeService) fetchNewAPI(ctx context.Context, a *Accoun
 		return nil, ErrNewAPIConfiguration
 	}
 	var status struct {
-		Success bool `json:"success"`
-		Data    struct {
-			QuotaPerUnit *float64 `json:"quota_per_unit"`
-		} `json:"data"`
+		Success bool                 `json:"success"`
+		Data    newAPIWalletSettings `json:"data"`
 	}
 	if e := s.newAPIRequest(ctx, a, site, userID, secret, "GET", "/api/status", &status); e != nil {
 		return nil, e
@@ -198,7 +199,8 @@ func (s *UpstreamBillingProbeService) fetchNewAPI(ctx context.Context, a *Accoun
 	if !newAPIFinite(wallet) || math.Abs(wallet) > 1e12 {
 		return nil, newAPIError("invalid_user_wallet")
 	}
-	result := &newAPIData{wallet: wallet, ratios: map[string]float64{}, tokens: []NewAPIToken{}}
+	amount, currency, exchangeRate := status.Data.displayWallet(wallet)
+	result := &newAPIData{wallet: amount, walletUnit: currency, rawWallet: wallet, walletRate: exchangeRate, ratios: map[string]float64{}, tokens: []NewAPIToken{}}
 	// A missing pricing endpoint does not erase a successfully verified wallet.
 	var pricing struct {
 		Success bool               `json:"success"`
@@ -284,7 +286,17 @@ func (s *UpstreamBillingProbeService) fetchNewAPI(ctx context.Context, a *Accoun
 func newAPIFinite(n float64) bool { return !math.IsNaN(n) && !math.IsInf(n, 0) }
 func newAPISnapshot(a *Account, t NewAPIToken, d *newAPIData, interval int, now time.Time) *UpstreamBillingProbeSnapshot {
 	fresh := now.Add(2 * time.Duration(interval) * time.Minute)
-	snap := &UpstreamBillingProbeSnapshot{Status: UpstreamBillingProbeStatusUnsupported, LastAttemptAt: now, NextProbeAt: now.Add(nextProbeDelay(interval, 0)), LastError: "unsupported_group", Data: map[string]any{"provider": "new_api", "group": sanitizeUpstreamBalanceText(t.Group, 128), "token_id": t.ID, "object": "new_api.group_billing", "schema_version": 1, "billing_scope": "group"}, Balance: &UpstreamBalanceSnapshot{Status: UpstreamBillingProbeStatusOK, LastAttemptAt: now, ReceivedAt: probeTimePtr(now), FreshUntil: probeTimePtr(fresh), Data: map[string]any{"is_valid": true, "mode": "unrestricted", "wallet_balance": d.wallet, "remaining": d.wallet, "unit": "USD", "source": "new_api"}}}
+	unit := d.walletUnit
+	if unit == "" {
+		unit = "USD"
+	}
+	balance := map[string]any{"is_valid": true, "mode": "unrestricted", "wallet_balance": d.wallet, "remaining": d.wallet, "unit": unit, "source": "new_api"}
+	if d.walletRate > 0 {
+		balance["raw_wallet_balance"] = d.rawWallet
+		balance["raw_unit"] = "USD"
+		balance["display_exchange_rate"] = d.walletRate
+	}
+	snap := &UpstreamBillingProbeSnapshot{Status: UpstreamBillingProbeStatusUnsupported, LastAttemptAt: now, NextProbeAt: now.Add(nextProbeDelay(interval, 0)), LastError: "unsupported_group", Data: map[string]any{"provider": "new_api", "group": sanitizeUpstreamBalanceText(t.Group, 128), "token_id": t.ID, "object": "new_api.group_billing", "schema_version": 1, "billing_scope": "group"}, Balance: &UpstreamBalanceSnapshot{Status: UpstreamBillingProbeStatusOK, LastAttemptAt: now, ReceivedAt: probeTimePtr(now), FreshUntil: probeTimePtr(fresh), Data: balance}}
 	if rate, ok := d.ratios[t.Group]; ok && t.Group != "auto" && !t.CrossGroupRetry && len(t.RouteGroups) <= 1 {
 		snap.Status = UpstreamBillingProbeStatusOK
 		snap.LastError = ""

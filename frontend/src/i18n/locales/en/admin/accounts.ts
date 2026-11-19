@@ -474,7 +474,7 @@ export default {
           boundUser: "Configured user {id}",
           preview: "Preview",
           save: "Verify and save",
-          wallet: "Wallet balance (normalized USD): {amount}",
+          wallet: "Wallet balance: {amount}",
           matched: "API key matched",
           needsSelection: "Select the matching token",
           group: "Group: {name}",

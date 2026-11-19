@@ -124,6 +124,20 @@ describe('UpstreamBillingRateCell', () => {
     expect(wrapper.emitted('probe')).toHaveLength(1)
   })
 
+  it('shows the converted New API wallet without displaying its raw USD amount', () => {
+    const wrapper = mount(UpstreamBillingRateCell, { props: {
+      account: makeAccount({ extra: { upstream_billing_provider: 'new_api', upstream_billing_probe: {
+        status: 'ok', data: billingData, received_at: '2026-07-13T00:00:00Z', fresh_until: '2026-07-14T00:00:00Z',
+        last_attempt_at: '', next_probe_at: '', balance: {
+          status: 'ok', received_at: '2026-07-13T00:00:00Z', fresh_until: '2026-07-14T00:00:00Z', last_attempt_at: '',
+          data: { is_valid: true, remaining: 90.082, wallet_balance: 90.082, unit: 'CNY', source: 'new_api', raw_wallet_balance: 12.34, raw_unit: 'USD', display_exchange_rate: 7.3 }
+        }
+      } } }), now: Date.now()
+    } })
+    expect(wrapper.get('[data-testid="upstream-balance-value"]').text()).toBe('90.08 CNY')
+    expect(wrapper.get('[data-testid="upstream-balance-value"]').text()).not.toContain('$12.34')
+  })
+
   it('shows New API rates and wallets like other accounts while retaining configuration and tooltip context', async () => {
     const wrapper = mount(UpstreamBillingRateCell, { props: {
       account: makeAccount({ extra: { upstream_billing_provider: 'new_api', upstream_billing_probe: {
