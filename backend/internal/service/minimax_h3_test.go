@@ -44,6 +44,42 @@ func TestMiniMaxH3ForwardPreservesProtocol(t *testing.T) {
 	require.JSONEq(t, `{"id":"task-1","status":"queued"}`, w.Body.String())
 }
 
+func TestMiniMaxH3ExplicitVideoModelMapping(t *testing.T) {
+	for _, tc := range []struct {
+		name, model, source, target, want string
+	}{
+		{"standard model", "MiniMax-H3", "", "", "MiniMax-H3"},
+		{"custom alias", "h3-video", "h3-video", "relay-video-v2", "relay-video-v2"},
+		{"identity mapping", "relay-video-v2", "relay-video-v2", "relay-video-v2", "relay-video-v2"},
+		{"unmapped model", "relay-video-v2", "", "", ""},
+		{"wildcard only", "h3-video", "h3-*", "relay-video-v2", ""},
+		{"blank target", "h3-video", "h3-video", " ", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			account := miniMaxH3TestAccount()
+			delete(account.Credentials, "model_mapping")
+			if tc.source != "" {
+				account.Credentials["model_mapping"] = map[string]any{tc.source: tc.target}
+			}
+			upstream := &grokMediaContentUpstreamStub{response: grokMediaContentStatusResponse(`{"id":"task-1","status":"queued"}`)}
+			svc := &OpenAIGatewayService{httpUpstream: upstream}
+			c, _ := grokMediaContentTestContext(http.MethodPost, "/v1/videos", nil)
+			body := []byte(`{"model":"` + tc.model + `","prompt":"waves","seconds":"1"}`)
+			result, err := svc.ForwardMiniMaxH3(context.Background(), c, account, MiniMaxH3EndpointCreate, "", body)
+			if tc.want == "" {
+				require.Error(t, err)
+				require.Empty(t, upstream.requests)
+				return
+			}
+			require.NoError(t, err)
+			forwarded, err := io.ReadAll(upstream.request.Body)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, gjson.GetBytes(forwarded, "model").String())
+			require.Equal(t, tc.model, result.BillingModel)
+		})
+	}
+}
+
 func TestMiniMaxH3ValidationAndURLs(t *testing.T) {
 	for _, body := range []string{`{`, `[]`, `{}`, `{"model":"MiniMax-H3","prompt":"x","seconds":1}`, `{"model":"MiniMax-H3","prompt":"x","seconds":"0"}`, `{"model":"MiniMax-H3","prompt":"x","seconds":"16"}`, `{"model":"MiniMax-H3","prompt":"x","seconds":"01"}`, `{"model":"MiniMax-H3","prompt":" ","seconds":"1"}`, `{"model":"MiniMax-H3","prompt":"x","seconds":"1","n":2}`} {
 		_, err := ParseMiniMaxH3Request([]byte(body))
@@ -68,9 +104,22 @@ func TestMiniMaxH3ValidationAndURLs(t *testing.T) {
 }
 
 func TestMiniMaxH3StatusStates(t *testing.T) {
-	for _, status := range []string{"queued", "in_progress", "unknown", "failed", "completed"} {
-		t.Run(status, func(t *testing.T) {
-			body := `{"id":"task-1","status":"` + status + `","metadata":{"url":"https://cdn.example/output.mp4"},"seconds":"15"}`
+	const outputURL = `"url":"https://cdn.example/output.mp4"`
+	const metadataURL = `"metadata":{` + outputURL + `}`
+	for _, tc := range []struct {
+		name, status, output string
+		videos               int
+	}{
+		{"queued", "queued", metadataURL, 0},
+		{"in progress", "in_progress", metadataURL, 0},
+		{"unknown", "unknown", metadataURL, 0},
+		{"failed", "failed", outputURL, 0},
+		{"completed metadata URL", "completed", metadataURL, 1},
+		{"completed top-level URL", "completed", outputURL, 1},
+		{"completed insecure URL", "completed", `"url":"http://cdn.example/output.mp4"`, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := `{"id":"task-1","status":"` + tc.status + `","seconds":"15",` + tc.output + `}`
 			upstream := &grokMediaContentUpstreamStub{response: grokMediaContentStatusResponse(body)}
 			svc := &OpenAIGatewayService{httpUpstream: upstream}
 			c, w := grokMediaContentTestContext(http.MethodGet, "/v1/videos/task-1", nil)
@@ -78,11 +127,7 @@ func TestMiniMaxH3StatusStates(t *testing.T) {
 			require.NoError(t, err)
 			require.JSONEq(t, body, w.Body.String())
 			require.Equal(t, "/v1/videos/task-1", upstream.request.URL.Path)
-			want := 0
-			if status == "completed" {
-				want = 1
-			}
-			require.Equal(t, want, result.VideoCount)
+			require.Equal(t, tc.videos, result.VideoCount)
 			require.Zero(t, result.VideoDurationSeconds, "status must not override requested seconds")
 		})
 	}
