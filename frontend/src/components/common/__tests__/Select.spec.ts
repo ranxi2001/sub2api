@@ -36,10 +36,11 @@ const mockTriggerRect = (left: number, width: number) => {
   })
 }
 
-const openSelect = async () => {
+const openSelect = async (matchTriggerWidth = false) => {
   const wrapper = mount(Select, {
     props: {
       modelValue: null,
+      matchTriggerWidth,
       options: [
         {
           value: 'example',
@@ -76,6 +77,36 @@ describe('Select dropdown viewport constraints', () => {
     expect(dropdown?.style.left).toBe('20px')
     expect(dropdown?.style.minWidth).toBe('200px')
     expect(dropdown?.style.maxWidth).toBe('996px')
+    expect(dropdown?.style.width).toBe('')
+  })
+
+  it.each([
+    { viewport: 1440, left: 400, width: 480, expected: 480 },
+    { viewport: 375, left: 32, width: 311, expected: 311 },
+    { viewport: 320, left: 220, width: 160, expected: 92 },
+    { viewport: 320, left: 20, width: 120, expected: 120 },
+  ])('matches the trigger within the viewport: $viewport/$width', async ({ viewport, left, width, expected }) => {
+    setViewportWidth(viewport)
+    mockTriggerRect(left, width)
+
+    const dropdown = await openSelect(true)
+
+    expect(dropdown?.style.width).toBe(`${expected}px`)
+    expect(dropdown?.style.minWidth).toBe(`${expected}px`)
+  })
+
+  it('updates the matched width while the open trigger resizes', async () => {
+    setViewportWidth(1440)
+    mockTriggerRect(400, 480)
+    const dropdown = await openSelect(true)
+
+    setViewportWidth(375)
+    mockTriggerRect(32, 311)
+    window.dispatchEvent(new Event('resize'))
+    await nextTick()
+
+    expect(dropdown?.style.left).toBe('32px')
+    expect(dropdown?.style.width).toBe('311px')
   })
 
   it('shrinks the minimum width to fit near the right viewport edge', async () => {

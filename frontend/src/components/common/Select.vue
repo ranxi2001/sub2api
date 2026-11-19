@@ -155,6 +155,8 @@ interface Props {
   creatablePrefix?: string
   clearable?: boolean
   multiple?: boolean
+  /** Keep form dropdowns aligned with their trigger instead of sizing to long option content. */
+  matchTriggerWidth?: boolean
   id?: string
   ariaLabel?: string
   ariaDescribedby?: string
@@ -179,6 +181,7 @@ const props = withDefaults(defineProps<Props>(), {
   creatablePrefix: '',
   clearable: false,
   multiple: false,
+  matchTriggerWidth: false,
   valueKey: 'value',
   labelKey: 'label',
   remote: false,
@@ -227,11 +230,14 @@ const dropdownStyle = computed(() => {
     viewportRight
   )
   const availableWidth = Math.max(0, viewportRight - left)
-  const preferredMinWidth = Math.max(dropdownMinimumWidth, rect.width)
+  const preferredMinWidth = props.matchTriggerWidth
+    ? rect.width
+    : Math.max(dropdownMinimumWidth, rect.width)
   const minWidth = Math.min(preferredMinWidth, availableWidth)
   const style: Record<string, string> = {
     position: 'fixed',
     left: `${left}px`,
+    ...(props.matchTriggerWidth ? { width: `${minWidth}px` } : {}),
     minWidth: `${minWidth}px`,
     maxWidth: `${availableWidth}px`,
     zIndex: '100000020'
@@ -607,7 +613,7 @@ onUnmounted(() => {
 }
 
 .select-dropdown-portal .select-search-input {
-  @apply flex-1 bg-transparent text-sm;
+  @apply min-w-0 flex-1 bg-transparent text-sm;
   @apply text-gray-900 dark:text-gray-100;
   @apply placeholder:text-gray-400 dark:placeholder:text-dark-400;
   @apply focus:outline-none;

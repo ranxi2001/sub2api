@@ -627,6 +627,7 @@
           <Select
             :key="showEditModal ? 'edit' : createProvider"
             id="key-form-group"
+            match-trigger-width
             :aria-label="t('keys.groupLabel')"
             v-model="formData.group_id"
             :options="formGroupOptions"
