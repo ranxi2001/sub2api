@@ -30,6 +30,7 @@ describe('NewFeatureBadge', () => {
     ['force UltraFast', NEW_FEATURE_NOTICES.groupForceUltrafast],
     ['passthrough model filter', NEW_FEATURE_NOTICES.passthroughModelFilter],
     ['Vertex multi-region', NEW_FEATURE_NOTICES.vertexMultiRegion],
+    ['OpenAI Videos', NEW_FEATURE_NOTICES.openaiVideos],
     ['BPS account search', NEW_FEATURE_NOTICES.bpsAccountSearch],
     ['mature providers', NEW_FEATURE_NOTICES.matureProviders],
     ['provider key import', NEW_FEATURE_NOTICES.matureProviderImport],

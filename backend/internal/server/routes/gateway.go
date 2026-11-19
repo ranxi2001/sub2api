@@ -149,14 +149,19 @@ func RegisterGatewayRoutes(
 		}
 	}
 	videoGenerationHandler := func(c *gin.Context) {
-		if getGroupPlatform(c) == service.PlatformMiniMax {
+		platform := getGroupPlatform(c)
+		if platform == service.PlatformOpenAI && strings.HasSuffix(c.FullPath(), "/videos") &&
+			h.OpenAIGateway.TryOpenAIVideoGeneration(c) {
+			return
+		}
+		if platform == service.PlatformMiniMax {
 			h.OpenAIGateway.MiniMaxH3Videos(c)
 			return
 		}
 		// Video status/content lookups below already allow Composite groups; keep
 		// task creation aligned so composite keys that route to Grok accounts can
 		// submit video generation jobs.
-		if platform := getGroupPlatform(c); platform == service.PlatformGrok || platform == service.PlatformComposite {
+		if platform == service.PlatformGrok || platform == service.PlatformComposite {
 			h.OpenAIGateway.GrokVideoGeneration(c)
 			return
 		}
@@ -169,14 +174,20 @@ func RegisterGatewayRoutes(
 		})
 	}
 	videoStatusHandler := func(c *gin.Context) {
-		if getGroupPlatform(c) == service.PlatformMiniMax {
+		platform := getGroupPlatform(c)
+		if (platform == service.PlatformOpenAI || platform == service.PlatformComposite) &&
+			strings.HasSuffix(c.FullPath(), "/videos/:request_id") && service.IsOpenAIVideoTaskID(c.Param("request_id")) {
+			h.OpenAIGateway.OpenAIVideoLookup(c)
+			return
+		}
+		if platform == service.PlatformMiniMax {
 			h.OpenAIGateway.MiniMaxH3Videos(c)
 			return
 		}
 		// Video status requests do not carry a model, so composite groups cannot
 		// be resolved by compositeTargetPlatformMiddleware. Route them through
 		// the Grok handler and let scheduler/account selection enforce capacity.
-		if getGroupPlatform(c) == service.PlatformGrok || getGroupPlatform(c) == service.PlatformComposite {
+		if platform == service.PlatformGrok || platform == service.PlatformComposite {
 			h.OpenAIGateway.GrokVideoStatus(c)
 			return
 		}
@@ -189,14 +200,20 @@ func RegisterGatewayRoutes(
 		})
 	}
 	videoContentHandler := func(c *gin.Context) {
-		if getGroupPlatform(c) == service.PlatformMiniMax {
+		platform := getGroupPlatform(c)
+		if (platform == service.PlatformOpenAI || platform == service.PlatformComposite) &&
+			strings.HasSuffix(c.FullPath(), "/videos/:request_id/content") && service.IsOpenAIVideoTaskID(c.Param("request_id")) {
+			h.OpenAIGateway.OpenAIVideoLookup(c)
+			return
+		}
+		if platform == service.PlatformMiniMax {
 			h.OpenAIGateway.MiniMaxH3Videos(c)
 			return
 		}
 		// Video content requests do not carry a model, so composite groups cannot
 		// be resolved by compositeTargetPlatformMiddleware. Route them through
 		// the Grok handler just like video status lookups.
-		if getGroupPlatform(c) == service.PlatformGrok || getGroupPlatform(c) == service.PlatformComposite {
+		if platform == service.PlatformGrok || platform == service.PlatformComposite {
 			h.OpenAIGateway.GrokVideoContent(c)
 			return
 		}

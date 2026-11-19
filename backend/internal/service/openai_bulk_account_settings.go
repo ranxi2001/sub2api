@@ -183,11 +183,13 @@ func normalizeBulkOpenAIEndpointCapabilities(raw any) (any, bool, error) {
 		return nil, false, invalidBulkOpenAIEndpointCapabilities()
 	}
 
-	selected := make(map[string]bool, 2)
+	selected := make(map[OpenAIEndpointCapability]bool, 4)
 	for _, value := range values {
-		switch OpenAIEndpointCapability(value) {
-		case OpenAIEndpointCapabilityChatCompletions, OpenAIEndpointCapabilityEmbeddings:
-			selected[value] = true
+		capability := OpenAIEndpointCapability(value)
+		switch capability {
+		case OpenAIEndpointCapabilityChatCompletions, OpenAIEndpointCapabilityEmbeddings,
+			OpenAIEndpointCapabilitySeedance, OpenAIEndpointCapabilityVideos:
+			selected[capability] = true
 		default:
 			return nil, false, invalidBulkOpenAIEndpointCapabilities()
 		}
@@ -196,20 +198,26 @@ func normalizeBulkOpenAIEndpointCapabilities(raw any) (any, bool, error) {
 		return nil, false, invalidBulkOpenAIEndpointCapabilities()
 	}
 
-	includeChat := selected[string(OpenAIEndpointCapabilityChatCompletions)]
-	if includeChat && selected[string(OpenAIEndpointCapabilityEmbeddings)] {
+	includeChat := selected[OpenAIEndpointCapabilityChatCompletions]
+	if len(selected) == 2 && includeChat && selected[OpenAIEndpointCapabilityEmbeddings] {
 		return nil, true, nil
 	}
-	if includeChat {
-		return []string{string(OpenAIEndpointCapabilityChatCompletions)}, true, nil
+	capabilities := make([]string, 0, len(selected))
+	for _, capability := range []OpenAIEndpointCapability{
+		OpenAIEndpointCapabilityChatCompletions, OpenAIEndpointCapabilityEmbeddings,
+		OpenAIEndpointCapabilitySeedance, OpenAIEndpointCapabilityVideos,
+	} {
+		if selected[capability] {
+			capabilities = append(capabilities, string(capability))
+		}
 	}
-	return []string{string(OpenAIEndpointCapabilityEmbeddings)}, false, nil
+	return capabilities, includeChat, nil
 }
 
 func invalidBulkOpenAIEndpointCapabilities() error {
 	return infraerrors.BadRequest(
 		"OPENAI_ENDPOINT_CAPABILITIES_INVALID",
-		"openai_capabilities must contain chat_completions, embeddings, or both",
+		"openai_capabilities must contain at least one of chat_completions, embeddings, seedance, or videos",
 	)
 }
 
