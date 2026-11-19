@@ -23,21 +23,14 @@ func normalizeSmartOpsHiddenMenuItems(items []string) []string {
 	result := make([]string, 0, len(items))
 	seen := make(map[string]bool, len(items))
 	for _, item := range items {
-		if item == "" || seen[item] {
+		switch item {
+		case "", "/admin/channel-operations", "/admin/profit-operations", "/admin/account-ops":
 			continue
 		}
-		seen[item] = true
-		switch item {
-		case "/admin/channel-operations", "/admin/profit-operations", "/admin/account-ops":
-			// The three former switches now control one sidebar entry.
-		default:
+		if !seen[item] {
 			result = append(result, item)
+			seen[item] = true
 		}
-	}
-	// Keep the merged entry visible if any of its former entries was visible.
-	if !seen["/admin/channel-config"] && seen["/admin/channel-operations"] &&
-		seen["/admin/profit-operations"] && seen["/admin/account-ops"] {
-		result = append(result, "/admin/channel-config")
 	}
 	return result
 }

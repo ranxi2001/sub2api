@@ -25,7 +25,7 @@ func TestParseSmartOpsHiddenMenuItems(t *testing.T) {
 		{name: "null", raw: "null", want: defaults},
 		{name: "explicit show all", raw: "[]", want: []string{}},
 		{name: "partially hidden legacy entries", raw: `["/admin/channel-operations","/admin/account-ops","/admin/future"]`, want: []string{"/admin/future"}},
-		{name: "all legacy entries hidden", raw: `["/admin/profit-operations","/admin/account-ops","/admin/channel-operations"]`, want: []string{"/admin/channel-config"}},
+		{name: "all legacy entries hidden", raw: `["/admin/profit-operations","/admin/account-ops","/admin/channel-operations"]`, want: []string{}},
 		{name: "explicit merged selection", raw: `["/admin/channel-config","/admin/account-ops"]`, want: []string{"/admin/channel-config"}},
 		{name: "saved selection", raw: `["/admin/auto-config","/admin/future-entry","/admin/auto-config",""]`, want: []string{"/admin/auto-config", "/admin/future-entry"}},
 	} {
