@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"math/big"
 	"sort"
 	"strings"
@@ -109,7 +110,10 @@ func (c *profitReportCache) read(ctx context.Context, f service.UpstreamOperatio
 		if r.Err != nil {
 			return nil, r.Err
 		}
-		raw := r.Val.([]byte)
+		raw, ok := r.Val.([]byte)
+		if !ok {
+			return nil, errors.New("invalid profit report cache result")
+		}
 		if raw == nil {
 			select {
 			case slots <- struct{}{}:
