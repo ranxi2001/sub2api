@@ -88,6 +88,7 @@ function mountModal(extraProps: Record<string, unknown> = {}) {
         },
         ProxySelector: true,
         GroupSelector: true,
+        NewFeatureBadge: true,
         Icon: true
       }
     }

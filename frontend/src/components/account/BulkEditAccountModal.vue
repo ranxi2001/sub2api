@@ -1246,21 +1246,24 @@
           aria-labelledby="bulk-edit-openai-endpoint-capabilities-label"
         >
           <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            <label
+            <div
               v-for="option in openAIEndpointCapabilityOptions"
               :key="option.value"
-              class="flex cursor-pointer items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-dark-600"
+              class="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-dark-600"
             >
-              <input
-                type="checkbox"
-                :disabled="!enableOpenAIEndpointCapabilities"
-                class="rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500"
-                :data-testid="`bulk-edit-openai-endpoint-capability-${option.value}`"
-                :checked="openAIEndpointCapabilities.includes(option.value)"
-                @change="toggleOpenAIEndpointCapability(option.value, $event)"
-              />
-              <span class="text-gray-700 dark:text-gray-200">{{ option.label }}</span>
-            </label>
+              <label class="flex flex-1 cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  :disabled="!enableOpenAIEndpointCapabilities"
+                  class="rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500"
+                  :data-testid="`bulk-edit-openai-endpoint-capability-${option.value}`"
+                  :checked="openAIEndpointCapabilities.includes(option.value)"
+                  @change="toggleOpenAIEndpointCapability(option.value, $event)"
+                />
+                <span class="text-gray-700 dark:text-gray-200">{{ option.label }}</span>
+              </label>
+              <NewFeatureBadge v-if="option.value === 'videos'" :notice-id="NEW_FEATURE_NOTICES.openaiVideos" :user-id="authStore.user?.id" />
+            </div>
           </div>
         </div>
       </div>
@@ -1991,7 +1994,8 @@ const openAIEndpointCapabilityOptions = computed<
 >(() => [
   { value: 'chat_completions', label: openAITextEndpointCapabilityLabel.value },
   { value: 'embeddings', label: t('admin.accounts.openai.capabilityEmbeddings') },
-  { value: 'seedance', label: 'Seedance (Ark)' }
+  { value: 'seedance', label: 'Seedance (Ark)' },
+  { value: 'videos', label: 'OpenAI Videos' }
 ])
 const openAITextGenerationCapabilityEnabled = computed(() =>
   openAIEndpointCapabilities.value.includes('chat_completions')
@@ -2001,7 +2005,7 @@ const openAIResponsesModeApplicable = computed(
 )
 
 const normalizeOpenAIEndpointCapabilities = (values: OpenAIEndpointCapability[]) => {
-  const allowed: OpenAIEndpointCapability[] = ['chat_completions', 'embeddings', 'seedance']
+  const allowed: OpenAIEndpointCapability[] = ['chat_completions', 'embeddings', 'seedance', 'videos']
   const selected = allowed.filter((value) => values.includes(value))
   return selected.length > 0 ? selected : ['chat_completions', 'embeddings'] as OpenAIEndpointCapability[]
 }
@@ -2236,7 +2240,7 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
 
   if (applyOpenAIEndpointCapabilities) {
     credentials.openai_capabilities =
-      openAIEndpointCapabilities.value.length === 2 && !openAIEndpointCapabilities.value.includes('seedance')
+      openAIEndpointCapabilities.value.length === 2 && openAIEndpointCapabilities.value.includes('chat_completions') && openAIEndpointCapabilities.value.includes('embeddings')
         ? null
         : [...openAIEndpointCapabilities.value]
     credentialsChanged = true

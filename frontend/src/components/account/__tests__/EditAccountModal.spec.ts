@@ -2710,6 +2710,20 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.openai_capabilities).toEqual(['chat_completions', 'seedance'])
   })
 
+  it.each(['seedance', 'embeddings'])('preserves OpenAI Videos with %s enabled', async (otherCapability) => {
+    const account = buildAccount()
+    account.credentials.openai_capabilities = [otherCapability, 'videos']
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    expect(wrapper.get<HTMLInputElement>('[data-testid="openai-endpoint-capability-videos"]').element.checked).toBe(true)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.openai_capabilities).toEqual([otherCapability, 'videos'])
+  })
+
   it('keeps at least one OpenAI APIKey endpoint capability selected', async () => {
     const account = buildAccount()
     updateAccountMock.mockReset()

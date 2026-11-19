@@ -469,7 +469,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		if result.MiniMaxH3BaseCost != nil {
 			usageLog.VideoResolution = optionalTrimmedStringPtr(result.VideoResolution)
 		}
-		videoDurationSeconds := NormalizeVideoBillingDurationSecondsOrDefault(result.VideoDurationSeconds)
+		videoDurationSeconds := result.VideoBillingDuration()
 		usageLog.VideoDurationSeconds = &videoDurationSeconds
 	}
 	if cost != nil && result.HeaderTimeoutRetries > 0 {
@@ -901,7 +901,7 @@ func (s *OpenAIGatewayService) calculateOpenAIVideoCost(
 		videoCount = 1
 	}
 	resolution := NormalizeVideoBillingResolutionOrDefault(result.VideoResolution)
-	durationSeconds := NormalizeVideoBillingDurationSecondsOrDefault(result.VideoDurationSeconds)
+	durationSeconds := result.VideoBillingDuration()
 	resolved := s.resolveOpenAIChannelPricing(ctx, billingModel, apiKey)
 	if resolved != nil && resolved.Source == PricingSourceGroup && resolved.Mode == BillingModeVideo {
 		gid := apiKey.Group.ID
@@ -917,13 +917,13 @@ func (s *OpenAIGatewayService) calculateOpenAIVideoCost(
 	}
 	groupConfig := videoPriceConfigFromAPIKey(apiKey)
 	if apiKeyHasConfiguredVideoPrice(apiKey, billingModel, resolution) {
-		return s.billingService.CalculateVideoCost(billingModel, resolution, videoCount, durationSeconds, groupConfig, multiplier)
+		return s.billingService.calculateVideoCost(billingModel, resolution, videoCount, durationSeconds, groupConfig, multiplier)
 	}
 	if refreshed := s.apiKeyWithFreshGroupMediaPricing(ctx, apiKey); refreshed != apiKey {
 		apiKey = refreshed
 		groupConfig = videoPriceConfigFromAPIKey(apiKey)
 		if apiKeyHasConfiguredVideoPrice(apiKey, billingModel, resolution) {
-			return s.billingService.CalculateVideoCost(billingModel, resolution, videoCount, durationSeconds, groupConfig, multiplier)
+			return s.billingService.calculateVideoCost(billingModel, resolution, videoCount, durationSeconds, groupConfig, multiplier)
 		}
 	}
 	if resolved != nil && resolved.Source == PricingSourceChannel &&
@@ -954,7 +954,7 @@ func (s *OpenAIGatewayService) calculateOpenAIVideoCost(
 		logger.LegacyPrintf("service.openai_gateway", "Calculate video channel cost failed: %v", err)
 	}
 
-	return s.billingService.CalculateVideoCost(billingModel, resolution, videoCount, durationSeconds, groupConfig, multiplier)
+	return s.billingService.calculateVideoCost(billingModel, resolution, videoCount, durationSeconds, groupConfig, multiplier)
 }
 
 func (s *OpenAIGatewayService) apiKeyWithFreshGroupMediaPricing(ctx context.Context, apiKey *APIKey) *APIKey {

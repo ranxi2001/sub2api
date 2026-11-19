@@ -126,12 +126,13 @@ func grokMediaInflightEstimate(endpoint service.GrokMediaEndpoint, model string,
 		return service.InflightEstimateRequest{Model: model, BodyBytes: len(body), Kind: service.InflightEstimateImage, Units: info.N}
 	default:
 		return service.InflightEstimateRequest{
-			Model:                model,
-			BodyBytes:            len(body),
-			Kind:                 service.InflightEstimateVideo,
-			Units:                1,
-			VideoResolution:      info.Resolution,
-			VideoDurationSeconds: info.DurationSeconds,
+			Model:                     model,
+			BodyBytes:                 len(body),
+			Kind:                      service.InflightEstimateVideo,
+			Units:                     1,
+			VideoResolution:           info.Resolution,
+			VideoDurationSeconds:      info.DurationSeconds,
+			UseRequestedVideoDuration: endpoint == service.OpenAIVideoEndpointCreate,
 		}
 	}
 }

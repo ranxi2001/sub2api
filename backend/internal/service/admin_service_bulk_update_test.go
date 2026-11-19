@@ -385,6 +385,24 @@ func TestAdminServiceBulkUpdateAccounts_NormalizesOpenAISettings(t *testing.T) {
 	require.Nil(t, repo.lastBulkUpdate.Extra["openai_responses_mode"])
 }
 
+func TestAdminServiceBulkUpdateAccounts_PreservesVideoCapabilities(t *testing.T) {
+	repo := &accountRepoStubForBulkUpdate{getByIDsAccounts: []*Account{
+		{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey},
+	}}
+	svc := &adminServiceImpl{accountRepo: repo}
+
+	result, err := svc.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+		AccountIDs: []int64{1},
+		Credentials: map[string]any{
+			openAIEndpointCapabilitiesCredentialKey: []any{"videos", "seedance", "chat_completions", "embeddings"},
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Success)
+	require.Equal(t, []string{"chat_completions", "embeddings", "seedance", "videos"},
+		repo.lastBulkUpdate.Credentials[openAIEndpointCapabilitiesCredentialKey])
+}
+
 func TestAdminServiceBulkUpdateAccounts_AcceptsLongContextAccountTypes(t *testing.T) {
 	for _, accountType := range []string{AccountTypeOAuth, AccountTypeSetupToken, AccountTypeAPIKey} {
 		t.Run(accountType, func(t *testing.T) {
