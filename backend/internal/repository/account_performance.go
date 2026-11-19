@@ -23,7 +23,22 @@ type accountPerformanceRepository struct {
 func NewAccountPerformanceRepository(db *sql.DB, rdb *redis.Client, cfg *config.Config) service.AccountPerformanceRepository {
 	r := &accountPerformanceRepository{db: db}
 	r.display = newAccountPerformanceDisplayCache(rdb, cfg.Database.DBName, func(ctx context.Context, ids []int64, minutes int, now time.Time) (map[int64]service.AccountPerformance, error) {
-		return readAccountPerformanceWindow(ctx, db, ids, minutes, now)
+		tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = tx.Rollback() }()
+		if _, err = tx.ExecContext(ctx, `SET LOCAL statement_timeout='4500ms'; SET LOCAL lock_timeout='500ms'; SET LOCAL work_mem='8MB'; SET LOCAL max_parallel_workers_per_gather=0`); err != nil {
+			return nil, err
+		}
+		metrics, err := readAccountPerformanceWindow(ctx, tx, ids, minutes, now)
+		if err != nil {
+			return nil, err
+		}
+		if err = tx.Commit(); err != nil {
+			return nil, err
+		}
+		return metrics, nil
 	})
 	return r
 }
