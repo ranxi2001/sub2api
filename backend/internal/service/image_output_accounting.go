@@ -87,6 +87,20 @@ func (c *openAIImageOutputCounter) AddSSEData(data []byte) {
 	}
 }
 
+// IsCompletedOpenAIImageEvent shares the billing counter's supported image
+// shapes, while excluding partial/error events from settlement usage delivery.
+func IsCompletedOpenAIImageEvent(data []byte) bool {
+	switch strings.TrimSpace(gjson.GetBytes(data, "type").String()) {
+	case "", "message", "response.output_item.done", "response.completed", "response.done",
+		"image_generation.completed", "image_edit.completed":
+		counter := newOpenAIImageOutputCounter()
+		counter.AddSSEData(data)
+		return counter.Count() > 0
+	default:
+		return false
+	}
+}
+
 func (c *openAIImageOutputCounter) AddSSEBody(body string) {
 	if c == nil || strings.TrimSpace(body) == "" {
 		return

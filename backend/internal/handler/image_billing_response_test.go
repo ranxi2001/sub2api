@@ -5,6 +5,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -137,6 +138,10 @@ func (r imageSettlementUserRepo) GetByID(context.Context, int64) (*service.User,
 }
 
 func runImageSettlementHTTP(t *testing.T, contentType, body string) *httptest.ResponseRecorder {
+	return runImageSettlementHTTPWithCount(t, contentType, body, 1)
+}
+
+func runImageSettlementHTTPWithCount(t *testing.T, contentType, body string, count int) *httptest.ResponseRecorder {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	cfg := &config.Config{RunMode: config.RunModeStandard}
@@ -178,10 +183,96 @@ func runImageSettlementHTTP(t *testing.T, contentType, body string) *httptest.Re
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	require.Equal(t, 1, upstream.calls)
 	require.Equal(t, 1, billing.settlement)
-	require.Equal(t, .01, billing.event.Command.BalanceCost)
-	require.Equal(t, .01, billing.event.Command.APIKeyQuotaCost)
-	require.Equal(t, 1, billing.event.Usage.ImageCount)
+	require.Equal(t, .01*float64(count), billing.event.Command.BalanceCost)
+	require.Equal(t, .01*float64(count), billing.event.Command.APIKeyQuotaCost)
+	require.Equal(t, count, billing.event.Usage.ImageCount)
 	return rec
+}
+
+func imageBillingSSEPayloads(t *testing.T, body string) []gjson.Result {
+	t.Helper()
+	var payloads []gjson.Result
+	for _, block := range strings.Split(body, "\n\n") {
+		for _, line := range strings.Split(block, "\n") {
+			if data, ok := strings.CutPrefix(line, "data: "); ok {
+				require.True(t, gjson.Valid(data), data)
+				payloads = append(payloads, gjson.Parse(data))
+			}
+		}
+	}
+	return payloads
+}
+
+func TestImageBillingResponsesCompletedImageEvents(t *testing.T) {
+	const item = `{"type":"image_generation_call","id":"image-1","result":"ZmluYWw="}`
+	itemDone := `data: {"type":"response.output_item.done","item":` + item + `,"usage":{"output_tokens":100}}` + "\n\n"
+	for _, kind := range []string{"response.completed", "response.done", "response.output_item.done"} {
+		for _, itemFirst := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/item_first=%t", kind, itemFirst), func(t *testing.T) {
+				body := ""
+				if itemFirst {
+					body = itemDone
+				}
+				if kind == "response.output_item.done" {
+					body += itemDone
+				} else {
+					body += fmt.Sprintf("data: {\"type\":%q,\"response\":{\"output\":[%s]},\"usage\":{\"output_tokens\":100}}\n\n", kind, item)
+				}
+				completedIndex := 0
+				if itemFirst {
+					completedIndex = 1
+				}
+				// Neither an empty Responses terminal nor a partial with bytes
+				// may take the completed image's authoritative request usage.
+				body += "data: {\"type\":\"response.completed\",\"response\":{\"output\":[]}}\n\n"
+				body += "data: {\"type\":\"image_generation.partial_image\",\"b64_json\":\"unfinished\"}\n\n"
+				rec := runImageSettlementHTTP(t, "text/event-stream", body)
+				payloads := imageBillingSSEPayloads(t, rec.Body.String())
+				require.Len(t, payloads, completedIndex+3)
+				var usages int
+				for i, payload := range payloads {
+					if i == completedIndex {
+						require.Equal(t, kind, payload.Get("type").String())
+						imagePath := "response.output.0.result"
+						if kind == "response.output_item.done" {
+							imagePath = "item.result"
+						}
+						require.Equal(t, "ZmluYWw=", payload.Get(imagePath).String())
+						require.EqualValues(t, 1_000_000, payload.Get("usage.output_tokens").Int())
+						require.Equal(t, .01, payload.Get("billing.actual_cost").Float())
+						require.EqualValues(t, 100, payload.Get("upstream_usage.output_tokens").Int())
+					} else {
+						require.False(t, payload.Get("usage").Exists())
+						require.False(t, payload.Get("billing").Exists())
+					}
+					if payload.Get("usage").Exists() {
+						usages++
+					}
+				}
+				require.Equal(t, 1, usages)
+				require.Equal(t, "unfinished", payloads[len(payloads)-1].Get("b64_json").String())
+			})
+		}
+	}
+}
+
+func TestImageBillingResponsesWithoutCompletedImage(t *testing.T) {
+	for _, raw := range []string{
+		`{"type":"response.completed","response":{"output":[]}}`,
+		`{"type":"response.done","response":{"output":[{"type":"message","content":[]}]}}`,
+		`{"type":"response.completed","response":{"output":[{"type":"image_generation_call","partial_image_index":0,"result":"unfinished"}]}}`,
+		`{"type":"image_generation.partial_image","b64_json":"unfinished"}`,
+	} {
+		t.Run(gjson.Get(raw, "type").String()+"/"+raw, func(t *testing.T) {
+			rec := runImageSettlementHTTPWithCount(t, "text/event-stream", "data: "+raw+"\n\n", 0)
+			payloads := imageBillingSSEPayloads(t, rec.Body.String())
+			require.Len(t, payloads, 1)
+			require.Equal(t, "image_usage_unavailable", payloads[0].Get("error.code").String())
+			require.False(t, payloads[0].Get("usage").Exists())
+			require.False(t, payloads[0].Get("billing").Exists())
+			require.NotContains(t, rec.Body.String(), "unfinished")
+		})
+	}
 }
 
 func TestImageBillingStreamJSONFallback(t *testing.T) {

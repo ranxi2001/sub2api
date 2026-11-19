@@ -165,6 +165,7 @@ backend/internal/service/upstream_batch_whitelist_identity_policy_test.go
 backend/internal/handler/image_billing_response_test.go
 backend/internal/service/image_usage_billing_test.go
 backend/internal/repository/image_billing_recovery_integration_test.go
+backend/internal/repository/image_billing_recovery_export_test.go
 backend/internal/repository/usage_billing_delivery_unit_test.go
 backend/internal/repository/usage_billing_delivery_integration_test.go
 

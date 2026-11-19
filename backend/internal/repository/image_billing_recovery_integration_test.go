@@ -1,6 +1,6 @@
 //go:build integration
 
-package repository
+package repository_test
 
 import (
 	"context"
@@ -16,6 +16,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
+	"github.com/Wei-Shaw/sub2api/internal/repository"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -25,14 +26,14 @@ import (
 )
 
 type imageRecoveryBarrierRepo struct {
-	*usageBillingRepository
+	repository.ImageBillingRecoveryTestRepository
 	staged     chan service.UsageBillingEventKey
 	resume     chan struct{}
 	foreground *service.UsageBillingRecovery
 }
 
 func (r *imageRecoveryBarrierRepo) StageUsageBillingForReceipt(ctx context.Context, cmd *service.UsageBillingCommand, usage *service.UsageLog) (bool, error) {
-	created, err := r.usageBillingRepository.StageUsageBillingForReceipt(ctx, cmd, usage)
+	created, err := r.ImageBillingRecoveryTestRepository.StageUsageBillingForReceipt(ctx, cmd, usage)
 	if err != nil {
 		return false, err
 	}
@@ -50,7 +51,7 @@ func (r *imageRecoveryBarrierRepo) StageUsageBillingForReceipt(ctx context.Conte
 }
 
 func (r *imageRecoveryBarrierRepo) ApplyStagedUsageBilling(ctx context.Context, key service.UsageBillingEventKey) (*service.UsageBillingRecovery, error) {
-	recovered, err := r.usageBillingRepository.ApplyStagedUsageBilling(ctx, key)
+	recovered, err := r.ImageBillingRecoveryTestRepository.ApplyStagedUsageBilling(ctx, key)
 	r.foreground = recovered
 	return recovered, err
 }
@@ -97,26 +98,11 @@ func (u imageRecoveryTransport) Do(req *http.Request, _ string, _ int64, _ int) 
 func TestImageReceiptRecoveryWinsBeforeForegroundApply(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx := context.Background()
-	db, client := newBillingAuditDatabase(t)
-	user := mustCreateUser(t, client, &service.User{Email: uuid.NewString() + "@example.invalid", Balance: 100})
-	group := mustCreateGroup(t, client, &service.Group{Name: "image-recovery", Platform: service.PlatformOpenAI, RateMultiplier: 1})
-	group.AllowImageGeneration = true
-	price := .01
-	group.ModelPricing = []service.ChannelModelPricing{{
-		Models: []string{"gpt-image-2"}, BillingMode: service.BillingModeToken,
-		InputPrice: new(float64), OutputPrice: new(float64), ImageMinimumCharge: &price,
-	}}
-	key := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, GroupID: &group.ID, Quota: 100})
-	key.User, key.Group = user, group
-	account := mustCreateAccount(t, client, &service.Account{
-		Name: "image-recovery", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
-		Credentials: map[string]any{"api_key": "fixture", "base_url": "https://fixture.example/v1"},
-	})
-	account.Concurrency = 0
-	account.GroupIDs = []int64{group.ID}
+	fixture := repository.NewImageBillingRecoveryTestFixture(t)
+	db, user, key, account := fixture.DB, fixture.Key.User, fixture.Key, fixture.Account
 	accounts := imageRecoveryAccounts{account: account}
-	journal := &usageBillingRepository{db: db}
-	barrier := &imageRecoveryBarrierRepo{usageBillingRepository: journal, staged: make(chan service.UsageBillingEventKey, 1), resume: make(chan struct{})}
+	journal := fixture.NewJournal()
+	barrier := &imageRecoveryBarrierRepo{ImageBillingRecoveryTestRepository: journal, staged: make(chan service.UsageBillingEventKey, 1), resume: make(chan struct{})}
 	var resume sync.Once
 	unblock := func() { resume.Do(func() { close(barrier.resume) }) }
 	defer unblock()
@@ -132,7 +118,7 @@ func TestImageReceiptRecoveryWinsBeforeForegroundApply(t *testing.T) {
 	require.NoError(t, err)
 	cfg := &config.Config{RunMode: config.RunModeStandard}
 	cfg.Runtime.Role = config.RuntimeRoleGateway
-	users := NewUserRepository(client, db)
+	users := fixture.Users
 	cache := service.NewBillingCacheService(nil, users, nil, nil, nil, nil, cfg, nil)
 	defer cache.Stop()
 	pricing := service.NewBillingService(cfg, nil)
@@ -161,7 +147,7 @@ func TestImageReceiptRecoveryWinsBeforeForegroundApply(t *testing.T) {
 	}
 	// A separate repository instance wins while the foreground is held after
 	// its Stage commit, then completes the worker's cache acknowledgement.
-	worker := &usageBillingRepository{db: db}
+	worker := fixture.NewJournal()
 	recovered, err := worker.ApplyStagedUsageBilling(ctx, eventKey)
 	require.NoError(t, err)
 	require.True(t, recovered.Result.Applied)

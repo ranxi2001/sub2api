@@ -175,24 +175,11 @@ func imageEquivalentPayload(body []byte, receipt service.ImageBillingReceipt, in
 }
 
 func isCompletedImageEvent(kind string, event map[string]json.RawMessage) bool {
-	switch kind {
-	case "image_generation.completed", "image_edit.completed":
-		return true
-	case "", "message":
-		// Some compatible upstreams send an unnamed data-array event.
-		var images []struct {
-			Base64 string `json:"b64_json"`
-			URL    string `json:"url"`
-		}
-		if json.Unmarshal(event["data"], &images) == nil {
-			for _, image := range images {
-				if image.Base64 != "" || image.URL != "" {
-					return true
-				}
-			}
-		}
-	}
-	return false
+	// Include the SSE event name when the payload omits type. Selection uses
+	// the same completed image shapes as billing; the retained payload is unchanged.
+	event["type"], _ = json.Marshal(kind)
+	payload, err := json.Marshal(event)
+	return err == nil && service.IsCompletedOpenAIImageEvent(payload)
 }
 
 func (w *imageBillingResponse) settle(receipt service.ImageBillingReceipt) error {
