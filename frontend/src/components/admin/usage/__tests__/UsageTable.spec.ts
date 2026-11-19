@@ -1445,6 +1445,32 @@ it('shares the timing notice between the usage table and details and preserves t
 })
 
 describe('Free Fast customer cost snapshot', () => {
+  it.each(['priority', 'ultrafast'])('renders saved Standard costs with an image minimum for %s', async (serviceTier) => {
+    const row = {
+      ...baseImageRow, billing_mode: 'token', image_count: 1,
+      input_tokens: 71, output_tokens: 19, input_cost: .00142, output_cost: .0019,
+      total_cost: .00332, actual_cost: .01, rate_multiplier: .6, service_tier: serviceTier,
+      customer_cost_details: {
+        version: 3, free_fast: serviceTier === 'priority', free_ultrafast: serviceTier === 'ultrafast',
+        input_cost: .00071, output_cost: .00095, image_input_cost: 0, image_output_cost: 0,
+        cache_creation_cost: 0, cache_read_cost: 0, total_cost: .00166,
+        actual_cost: .01, multiplier: .6, image_minimum_charge: .01,
+        image_minimum_charge_adjustment: .009004,
+      },
+    }
+    const wrapper = mount(UsageTable, {
+      props: { data: [row], loading: false, columns: [], showAccountBilling: true },
+      global: { stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } },
+    })
+    try {
+      await wrapper.get('button[aria-label="Cost Breakdown"]').trigger('click')
+      await nextTick()
+      const text = wrapper.get('[role="tooltip"]').text()
+      for (const amount of ['$0.00071000', '$0.00095000', '$0.00166000', '$0.01000000']) expect(text).toContain(amount)
+      expect(row.total_cost).toBe(.00332)
+    } finally { wrapper.unmount() }
+  })
+
   it.each([true, false])('shows Standard unit prices and customer components, account column=%s', async (showAccountBilling) => {
     const row = {
       ...baseImageRow, request_id: 'synthetic-free-fast', billing_mode: 'token', image_count: 0,

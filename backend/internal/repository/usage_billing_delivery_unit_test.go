@@ -44,6 +44,7 @@ func TestUsageBillingDeliveryCommitUnknownChecksReceiptBeforeReplay(t *testing.T
 	recovered, err := (&usageBillingRepository{db: db}).ApplyStagedUsageBilling(context.Background(), service.UsageBillingEventKey{RequestID: "unknown", APIKeyID: 2})
 	require.NoError(t, err)
 	require.True(t, recovered.NeedsCache)
+	require.True(t, recovered.Settled)
 	require.NoError(t, mock.ExpectationsWereMet(), "only one money UPDATE is allowed")
 }
 
@@ -58,6 +59,8 @@ func TestUsageBillingStageCommitUnknownChecksStoredCommand(t *testing.T) {
 	mock.ExpectQuery("SELECT schema_version=1 AND request_fingerprint").WillReturnRows(sqlmock.NewRows([]string{"same"}).AddRow(true))
 	mock.ExpectCommit().WillReturnError(errors.New("stage commit response lost"))
 	mock.ExpectQuery("SELECT schema_version=1 AND request_fingerprint").WillReturnRows(sqlmock.NewRows([]string{"same"}).AddRow(true))
-	require.NoError(t, (&usageBillingRepository{db: db}).StageUsageBilling(context.Background(), &cmd, &usage))
+	created, err := (&usageBillingRepository{db: db}).StageUsageBillingForReceipt(context.Background(), &cmd, &usage)
+	require.NoError(t, err)
+	require.False(t, created, "an ambiguous Stage commit cannot prove fresh ownership")
 	require.NoError(t, mock.ExpectationsWereMet(), "stage must not execute money effects")
 }

@@ -229,39 +229,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	var cost *CostBreakdown
 	// Use the rewrite captured during forwarding, never current key settings:
 	// skipped endpoints and policy changes after admission retain their price.
-	requestedBillingModel := input.OriginalModel
-	if input.APIKeyMappedModel != "" {
-		requestedBillingModel = input.APIKeyMappedModel
-	}
-	channelBillingModel := input.ChannelMappedModel
-	if !input.ChannelMappingApplied && channelBillingModel == input.OriginalModel {
-		// An unchanged channel field is the audit alias, not an explicit price
-		// override. Do not resurrect its price when the key target is unpriced.
-		channelBillingModel = requestedBillingModel
-	}
-	resultBillingModel := result.Model
-	if !input.ChannelMappingApplied && result.Model == input.OriginalModel {
-		resultBillingModel = requestedBillingModel
-	}
-	billingModel := forwardResultBillingModel(resultBillingModel, result.UpstreamModel)
-	if result.BillingModel != "" {
-		billingModel = strings.TrimSpace(result.BillingModel)
-	}
-	if input.BillingModelSource == BillingModelSourceChannelMapped && input.ChannelMappedModel != "" &&
-		((input.APIKeyMappedModel != "" && input.ChannelMappingApplied) || input.ChannelMappedModel != input.OriginalModel) {
-		billingModel = input.ChannelMappedModel
-	}
-	if input.BillingModelSource == BillingModelSourceRequested && input.OriginalModel != "" {
-		billingModel = requestedBillingModel
-	}
-	billingModels := usageBillingModelCandidates(
-		billingModel,
-		result.BillingModel,
-		channelBillingModel,
-		requestedBillingModel,
-		result.UpstreamModel,
-		resultBillingModel,
-	)
+	requestedBillingModel, billingModel, billingModels := openAIUsageBillingModels(result, input.ChannelUsageFields)
 	billingModels = s.filterCNProviderBillingModelCandidates(ctx, account, apiKey, billingModels)
 	serviceTier := ""
 	if result.ServiceTier != nil {
@@ -484,7 +452,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 			customerCostDetails.ActualCost *= factor
 		}
 	}
-	if details := applyImageMinimumCharge(cost, result.ImageCount, result.HeaderTimeoutRetries, imageMinimumCharge(apiKey.Group, requestedBillingModel, billingModel)); details != nil {
+	if details := applyImageMinimumCharge(cost, result.ImageCount, result.HeaderTimeoutRetries, imageMinimumCharge(apiKey.Group, requestedBillingModel, billingModel), customerCostDetails); details != nil {
 		usageLog.CustomerCostDetails = details
 	}
 	if cost != nil {

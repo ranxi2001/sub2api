@@ -3,6 +3,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import PricingEntryCard from '../PricingEntryCard.vue'
 import type { PricingFormEntry } from '../types'
 import channelsAPI from '@/api/admin/channels'
+import { createPinia, setActivePinia } from 'pinia'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
+import { useNewFeatureNoticeStore } from '@/stores/newFeatureNotices'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
 
 vi.mock('@/api/admin/channels', () => ({
   default: { getModelDefaultPricing: vi.fn() },
@@ -105,5 +109,53 @@ describe('PricingEntryCard default price auto-fill', () => {
     for (const emitted of emittedEntries(wrapper)) {
       expect(emitted.input_price).toBe('1.5')
     }
+  })
+})
+
+describe('image usage billing notice in group pricing entries', () => {
+  beforeEach(() => localStorage.clear())
+
+  it.each(['create', 'edit'])('dismisses both entries from %s and persists A → B → C for the same administrator', async entryToDismiss => {
+    const admin = 41
+    const oldNotice = NEW_FEATURE_NOTICES.openaiCacheWriteTTL12h
+    const imageNotice = NEW_FEATURE_NOTICES.imageUsageBilling
+    const futureNotice = 'image-usage-future-feature-C'
+    let pinia = createPinia()
+    setActivePinia(pinia)
+    useNewFeatureNoticeStore().dismiss(admin, oldNotice)
+    const card = () => shallowMount(PricingEntryCard, {
+      props: { entry: createEntry(), platform: 'openai', hideTokenIntervals: true, noticeUserId: admin },
+      global: { plugins: [pinia], stubs: { NewFeatureBadge: false } },
+    })
+    const badge = (wrapper: ReturnType<typeof card>, id: string) =>
+      wrapper.findAllComponents(NewFeatureBadge).find(item => item.props('noticeId') === id)!
+    const create = card()
+    const edit = card()
+    for (const wrapper of [create, edit]) {
+      expect(badge(wrapper, oldNotice).find('button').exists()).toBe(false)
+      expect(badge(wrapper, imageNotice).find('button').exists()).toBe(true)
+    }
+    await badge(entryToDismiss === 'create' ? create : edit, imageNotice).get('button').trigger('click')
+    for (const wrapper of [create, edit]) {
+      expect(badge(wrapper, imageNotice).find('button').exists()).toBe(false)
+      wrapper.unmount()
+    }
+    // New Pinia simulates a refreshed session using this administrator's
+    // existing localStorage. No server or current pricing is involved.
+    pinia = createPinia()
+    setActivePinia(pinia)
+    const refreshed = card()
+    expect(badge(refreshed, oldNotice).find('button').exists()).toBe(false)
+    expect(badge(refreshed, imageNotice).find('button').exists()).toBe(false)
+    const future = shallowMount(NewFeatureBadge, {
+      props: { noticeId: futureNotice, userId: admin }, global: { plugins: [pinia] },
+    })
+    expect(future.find('button').exists()).toBe(true)
+    const ordinaryUpgrade = card()
+    expect(badge(ordinaryUpgrade, oldNotice).find('button').exists()).toBe(false)
+    expect(badge(ordinaryUpgrade, imageNotice).find('button').exists()).toBe(false)
+    refreshed.unmount()
+    ordinaryUpgrade.unmount()
+    future.unmount()
   })
 })

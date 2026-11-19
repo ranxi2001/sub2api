@@ -2047,6 +2047,8 @@ export interface CustomerCacheCostDetail {
 
 export interface CustomerCostDetails {
   cache_cost_details?: CustomerCacheCostDetail[]
+  image_minimum_charge?: number
+  image_minimum_charge_adjustment?: number
   version: number
   free_fast: boolean
   free_ultrafast?: boolean

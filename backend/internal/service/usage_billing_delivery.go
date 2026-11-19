@@ -29,6 +29,9 @@ type UsageBillingRecovery struct {
 	Event      UsageBillingEvent
 	Result     UsageBillingApplyResult
 	NeedsCache bool
+	// Settled proves that this journal event committed its own canonical usage
+	// and effects. Applied describes whether this call performed those effects.
+	Settled bool
 }
 
 // Stage is a separate durable boundary before monetary execution. A crash after
@@ -38,6 +41,11 @@ type DurableUsageBillingRepository interface {
 	ApplyStagedUsageBilling(context.Context, UsageBillingEventKey) (*UsageBillingRecovery, error)
 	PendingUsageBilling(context.Context, int) ([]UsageBillingEventKey, error)
 	AcknowledgeUsageBillingCache(context.Context, UsageBillingEventKey) error
+}
+
+type imageBillingStageRepository interface {
+	// True only if this call created the journal event and confirmed its commit.
+	StageUsageBillingForReceipt(context.Context, *UsageBillingCommand, *UsageLog) (bool, error)
 }
 
 func (s *GatewayService) DurableUsageBillingEnabled() bool {
@@ -92,8 +100,16 @@ func invalidateDurableUsageBilling(ctx context.Context, recovered *UsageBillingR
 }
 
 func applyDurableUsageBilling(ctx context.Context, repo DurableUsageBillingRepository, cmd *UsageBillingCommand, usage *UsageLog, p *postUsageBillingParams, deps *billingDeps) (bool, error) {
-	if err := repo.StageUsageBilling(ctx, cmd, usage); err != nil {
-		return false, err
+	receipt, _ := ctx.Value(imageBillingReceiptKey{}).(*ImageBillingReceipt)
+	var created bool
+	var stageErr error
+	if stager, ok := repo.(imageBillingStageRepository); receipt != nil && ok {
+		created, stageErr = stager.StageUsageBillingForReceipt(ctx, cmd, usage)
+	} else {
+		stageErr = repo.StageUsageBilling(ctx, cmd, usage)
+	}
+	if stageErr != nil {
+		return false, stageErr
 	}
 	key := UsageBillingEventKey{RequestID: cmd.RequestID, APIKeyID: cmd.APIKeyID}
 	recovered, err := repo.ApplyStagedUsageBilling(ctx, key)
@@ -119,8 +135,8 @@ func applyDurableUsageBilling(ctx context.Context, repo DurableUsageBillingRepos
 		go notifyBalanceLow(p, deps, &recovered.Result)
 		go notifyAccountQuota(p, deps, &recovered.Result)
 	}
-	if recovered != nil && recovered.Result.Applied && !p.SimpleModeKeyRateLimitOnly {
-		if receipt, _ := ctx.Value(imageBillingReceiptKey{}).(*ImageBillingReceipt); receipt != nil {
+	if recovered != nil && recovered.Settled && created && !p.SimpleModeKeyRateLimitOnly {
+		if receipt != nil {
 			canonical := recovered.Event.Usage
 			mode := ""
 			if canonical.BillingMode != nil {
