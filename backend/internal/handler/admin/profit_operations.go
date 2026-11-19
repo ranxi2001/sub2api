@@ -14,6 +14,7 @@ import (
 
 // UpstreamOperations is shared by two independent, read-only admin endpoints.
 func (h *ChannelHandler) ProfitOperations(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
 	account, e1 := operationsInt(c, "account_id", 0)
 	group, e2 := operationsInt(c, "group_id", 0)
 	channel, e7 := operationsInt(c, "channel_id", 0)

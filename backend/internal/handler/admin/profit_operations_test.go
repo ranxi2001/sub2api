@@ -40,7 +40,7 @@ func TestProfitOperationsHTTPIndependentScopesAndSafeFailure(t *testing.T) {
 	h := NewChannelHandler(service.NewChannelService(repo, nil, nil, nil, nil), nil, nil)
 	r := gin.New()
 	r.GET("/upstream", h.ProfitOperations)
-	path := "/upstream?from=2026-10-01T00:00:00Z&until=2026-10-02T00:00:00Z&account_id=42&dimension=model&model_scope=upstream&sort=estimated_profit&direction=asc"
+	path := "/upstream?refresh_report=1&from=2026-10-01T00:00:00Z&until=2026-10-02T00:00:00Z&account_id=42&dimension=model&model_scope=upstream&sort=estimated_profit&direction=asc"
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
 	require.Equal(t, 200, w.Code)
