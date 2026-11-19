@@ -62,7 +62,7 @@ apiClient.defaults.adapter=async config=>{
 };
 `
 const shell=`import {h} from 'vue';export default {setup(_,ctx){return()=>h('main',{class:'mx-auto max-w-7xl p-4'},ctx.slots.default?.())}}`
-const html=`<!doctype html><html lang="zh"><meta charset="utf-8"><div id="app"></div><script type="module">
+const html=`<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><div id="app"></div><script type="module">
 import 'virtual:entity-fixture';import {createApp} from 'vue';import {createPinia} from 'pinia';import {createRouter,createWebHistory,RouterView} from 'vue-router';import {createI18n} from 'vue-i18n';import {useAuthStore} from '/src/stores/auth.ts';
 import Config from '/src/views/admin/ChannelConfigView.vue';import Profit from '/src/views/admin/ProfitOperationsView.vue';import Channels from '/src/views/admin/UpstreamChannelsView.vue';const Accounts=()=>import('/src/views/admin/AccountsView.vue');import zh from '/src/i18n/locales/zh/index.ts';import '/src/style.css';
 const pinia=createPinia();const router=createRouter({history:createWebHistory(),routes:[{path:'/admin/channel-config',component:Config},{path:'/admin/profit-operations',component:Profit},{path:'/admin/upstream-channels',component:Channels},{path:'/admin/accounts',component:Accounts}]});

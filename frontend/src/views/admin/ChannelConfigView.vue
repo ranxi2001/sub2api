@@ -21,7 +21,7 @@
                 <summary class="cursor-pointer font-semibold">{{ t('channelConfig.connections') }}</summary>
                 <div v-if="walletOpen" class="mt-4 space-y-5"><MatureProvidersPanel passive @changed="changed" /><ProfitProviders @changed="changed" /></div>
               </details>
-              <details class="rounded-lg border p-4 dark:border-dark-700" @toggle="analyticsOpen = ($event.target as HTMLDetailsElement).open"><summary class="cursor-pointer font-semibold">{{ t('upstreamOps.title') }}</summary><UpstreamAnalytics v-if="analyticsOpen" embedded class="mt-4" /></details>
+              <details class="rounded-lg border p-4 dark:border-dark-700" @toggle="analyticsOpen = ($event.target as HTMLDetailsElement).open"><summary class="cursor-pointer font-semibold">{{ t('channelConfig.observations') }}</summary><UpstreamAnalytics v-if="analyticsOpen" embedded class="mt-4" /></details>
             </template>
             <ProfitAnalytics v-else-if="panel === 'profit'" embedded :active="opened.profit" :scope="scope" @scope="acceptScope" />
             <AccountOpsView v-else embedded :active="opened.accounts" :channel-id="scope.channel_id" :account-id="scope.account_id" />
@@ -52,7 +52,7 @@ const AccountOpsView=defineAsyncComponent(()=>import('./AccountOpsView.vue').the
 const { t }=useI18n(), route=useRoute(), router=useRouter(), auth=useAuthStore()
 const panels=['channels','profit','accounts'] as const
 type Panel=typeof panels[number]
-const labels={channels:'channelOps.title',profit:'profitOps.title',accounts:'accountOps.title'}
+const labels={channels:'channelConfig.channels',profit:'profitOps.title',accounts:'accountOps.title'}
 const initial=panels.includes(route.query.panel as Panel)?route.query.panel as Panel:'channels'
 const opened=reactive({channels:initial==='channels',profit:initial==='profit',accounts:initial==='accounts'})
 const visited=reactive({...opened}), walletOpen=ref(false), analyticsOpen=ref(false), stale=ref(false)
