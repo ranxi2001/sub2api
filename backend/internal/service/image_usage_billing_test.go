@@ -180,7 +180,7 @@ func (r *imageReceiptRepo) ApplyStagedUsageBilling(context.Context, UsageBilling
 func TestImageReceiptComesFromDurableEventNotCurrentQuote(t *testing.T) {
 	mode := "image"
 	repo := &imageReceiptRepo{created: true, recovery: &UsageBillingRecovery{
-		Event: UsageBillingEvent{Usage: UsageLog{ActualCost: .0201, BillingMode: &mode, ImageCount: 2}},
+		Event:  UsageBillingEvent{Usage: UsageLog{ActualCost: .0201, BillingMode: &mode, ImageCount: 2}},
 		Result: UsageBillingApplyResult{Applied: true}, Settled: true,
 	}}
 	receipt := &ImageBillingReceipt{}

@@ -30,7 +30,7 @@ func TestGrokAdaptiveCooldownRequiresMatchingHistory(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			history := map[string]any{"generation_us": strconv.FormatInt(generation.UnixMicro(), 10),
-				"reset_us": strconv.FormatInt(reset.UnixMicro(), 10), "cooldown_us": strconv.FormatInt((40*time.Minute).Microseconds(), 10)}
+				"reset_us": strconv.FormatInt(reset.UnixMicro(), 10), "cooldown_us": strconv.FormatInt((40 * time.Minute).Microseconds(), 10)}
 			if tc.edit != nil {
 				tc.edit(history)
 			}
