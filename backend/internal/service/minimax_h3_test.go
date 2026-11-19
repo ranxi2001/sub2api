@@ -104,9 +104,22 @@ func TestMiniMaxH3ValidationAndURLs(t *testing.T) {
 }
 
 func TestMiniMaxH3StatusStates(t *testing.T) {
-	for _, status := range []string{"queued", "in_progress", "unknown", "failed", "completed"} {
-		t.Run(status, func(t *testing.T) {
-			body := `{"id":"task-1","status":"` + status + `","metadata":{"url":"https://cdn.example/output.mp4"},"seconds":"15"}`
+	const outputURL = `"url":"https://cdn.example/output.mp4"`
+	const metadataURL = `"metadata":{` + outputURL + `}`
+	for _, tc := range []struct {
+		name, status, output string
+		videos               int
+	}{
+		{"queued", "queued", metadataURL, 0},
+		{"in progress", "in_progress", metadataURL, 0},
+		{"unknown", "unknown", metadataURL, 0},
+		{"failed", "failed", outputURL, 0},
+		{"completed metadata URL", "completed", metadataURL, 1},
+		{"completed top-level URL", "completed", outputURL, 1},
+		{"completed insecure URL", "completed", `"url":"http://cdn.example/output.mp4"`, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := `{"id":"task-1","status":"` + tc.status + `","seconds":"15",` + tc.output + `}`
 			upstream := &grokMediaContentUpstreamStub{response: grokMediaContentStatusResponse(body)}
 			svc := &OpenAIGatewayService{httpUpstream: upstream}
 			c, w := grokMediaContentTestContext(http.MethodGet, "/v1/videos/task-1", nil)
@@ -114,11 +127,7 @@ func TestMiniMaxH3StatusStates(t *testing.T) {
 			require.NoError(t, err)
 			require.JSONEq(t, body, w.Body.String())
 			require.Equal(t, "/v1/videos/task-1", upstream.request.URL.Path)
-			want := 0
-			if status == "completed" {
-				want = 1
-			}
-			require.Equal(t, want, result.VideoCount)
+			require.Equal(t, tc.videos, result.VideoCount)
 			require.Zero(t, result.VideoDurationSeconds, "status must not override requested seconds")
 		})
 	}

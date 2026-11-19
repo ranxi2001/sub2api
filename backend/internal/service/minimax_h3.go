@@ -224,7 +224,9 @@ func (s *OpenAIGatewayService) ForwardMiniMaxH3(ctx context.Context, c *gin.Cont
 		}
 		result.ResponseID = MiniMaxH3TaskKey(id)
 	case MiniMaxH3EndpointStatus:
-		if gjson.GetBytes(responseBody, "status").String() == "completed" && validMiniMaxH3OutputURL(gjson.GetBytes(responseBody, "metadata.url").String()) {
+		if gjson.GetBytes(responseBody, "status").String() == "completed" &&
+			(validMiniMaxH3OutputURL(gjson.GetBytes(responseBody, "metadata.url").String()) ||
+				validMiniMaxH3OutputURL(gjson.GetBytes(responseBody, "url").String())) {
 			result.VideoCount = 1
 		}
 	}
