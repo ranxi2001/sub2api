@@ -171,5 +171,5 @@ backend/internal/service/grok_rate_limit_history_test.go
 backend/internal/service/new_api_cost_test.go
 
 # Controls diagnostics require the newer recovery APIs, not historical RED sources.
-backend/internal/service/openai_409_omit_history_test.go
+backend/internal/service/openai_409_controls_diagnostics_test.go
 backend/internal/handler/openai_owner_conflict_diagnostics_test.go
