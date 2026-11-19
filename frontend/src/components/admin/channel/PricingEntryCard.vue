@@ -149,6 +149,16 @@
             </div>
           </div>
 
+          <div v-if="hideTokenIntervals && props.platform === 'openai'" class="mt-3 max-w-xl">
+            <label class="text-xs text-gray-500 dark:text-gray-400">
+              {{ t('imageUsage.minimumLabel') }}
+              <NewFeatureBadge v-if="noticeUserId != null" :notice-id="NEW_FEATURE_NOTICES.imageUsageBilling" :user-id="noticeUserId" />
+            </label>
+            <input :value="entry.image_minimum_charge" @input="emitField('image_minimum_charge', ($event.target as HTMLInputElement).value)"
+              type="number" min="0" max="1000" step="0.00000001" class="input mt-1 text-sm" />
+            <p class="mt-1 text-xs text-gray-500">{{ t('imageUsage.minimumHelp') }}</p>
+          </div>
+
           <div v-if="enableTierMultipliers" class="mt-3 grid max-w-3xl grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
             <div>
               <label class="text-xs text-gray-400">{{ t('admin.channels.form.fastMultiplier') }}</label>

@@ -21,6 +21,11 @@ import (
 // ChatCompletions handles OpenAI Chat Completions API requests.
 // POST /v1/chat/completions
 func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
+	if c.GetHeader("X-Image-Usage") != "" {
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "X-Image-Usage is supported only by /v1/images/generations and /v1/images/edits")
+		return
+	}
+
 	streamStarted := false
 	defer h.recoverResponsesPanic(c, &streamStarted)
 

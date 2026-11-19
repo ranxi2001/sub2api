@@ -1,0 +1,33 @@
+{
+  "source_parent": "da6723ccf5404b78487f57716710efe45596c9cd",
+  "before_commit": "feb761541918d25a73779c6ea42ee28f61b5591e",
+  "source_files_sha256": {
+    "frontend/src/components/admin/channel/PricingEntryCard.vue": "ff3ef506a1d279638ec2d2afc2aaec8d00907f86c47c6bbae725b7e000abf2cf",
+    "frontend/src/components/modelPlaza/PlazaModelPricingTable.vue": "254cc5c6d5e9d4e2a831bca82e1ab448ac2305f205461fe554868da3fd768e9d",
+    "frontend/src/i18n/locales/zh/imageUsage.ts": "a2e4b089a7ed1a156beb6c0909372a83e17e10eb4f6eb832d46763654ffc547c"
+  },
+  "mode": "actual Vue component rendering via local Vite, Windows Chrome CDP; mock data; not production or full group page",
+  "screenshots": [
+    "pricing-before.png",
+    "pricing-light.png",
+    "pricing-dark.png"
+  ],
+  "interactions": [
+    "expand pricing card",
+    "dismiss new minimum-charge badge",
+    "reload: minimum-charge badge stays dismissed and another notice remains visible"
+  ],
+  "fixtures": {
+    "group_rate": 1,
+    "personal_rate": 0.5,
+    "image_floor": 0.01,
+    "token_output_per_million": 10,
+    "image_rate": 0.15,
+    "image_prices": [
+      0.134,
+      0.201,
+      0.268
+    ]
+  },
+  "created_at": "2026-11-19T05:40:51.344834+00:00"
+}
