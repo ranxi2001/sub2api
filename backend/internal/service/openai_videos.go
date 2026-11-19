@@ -53,19 +53,57 @@ func (s *OpenAIGatewayService) HasOpenAIVideoAccount(ctx context.Context, groupI
 
 func ParseOpenAIVideoRequest(contentType string, body []byte) (GrokMediaRequestInfo, error) {
 	info := GrokMediaRequestInfo{N: 1}
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	isMultipart := err == nil && mediaType == "multipart/form-data"
 	fields := make(map[string]string)
-	capture := func(name, value string) error {
-		switch canonical := strings.ToLower(name); canonical {
-		case "model", "seconds", "duration", "n", "size", "resolution", "resolution_name":
-			if _, duplicate := fields[canonical]; duplicate || canonical != name {
-				return fmt.Errorf("invalid or repeated video field %q", canonical)
+	capture := func(name, value string, isFile bool) error {
+		canonical := openAIVideoFieldName(name, "model", "seconds", "duration", "n", "size", "resolution", "resolution_name",
+			"prompt", "image", "images", "reference_images", "image_url", "mask", "mask_image_url", "input_reference", "first_frame", "last_frame", "metadata")
+		if prefix, _, indexed := strings.Cut(name, "["); isMultipart && indexed && strings.EqualFold(prefix, "image") {
+			if prefix != "image" || !isFile {
+				return fmt.Errorf("invalid video image field name")
 			}
-			fields[name] = strings.TrimSpace(value)
+			return nil
+		}
+		if canonical == "" {
+			return nil
+		}
+		// Multipart image parts accumulate in the moderation input. JSON keys and
+		// scalar multipart fields must be unique: upstream decoders may pick a
+		// different occurrence than the moderation parser.
+		repeatable := isMultipart && (canonical == "image" || canonical == "image_url" ||
+			(isFile && (canonical == "images" || canonical == "input_reference" || canonical == "first_frame" || canonical == "last_frame")))
+		seenName := canonical
+		if canonical == "mask_image_url" {
+			seenName = "mask"
+		}
+		if _, duplicate := fields[seenName]; canonical != name || (duplicate && !repeatable) {
+			return fmt.Errorf("invalid or repeated video field %q", canonical)
+		}
+		fields[seenName] = strings.TrimSpace(value)
+		if isFile {
+			switch canonical {
+			case "image", "images", "mask", "input_reference", "first_frame", "last_frame":
+				return nil
+			default:
+				return fmt.Errorf("video field %q must be a text part", canonical)
+			}
+		}
+		if isMultipart {
+			switch canonical {
+			case "input_reference", "metadata":
+				nested := gjson.Parse(value)
+				if !gjson.Valid(value) || !nested.IsObject() {
+					return fmt.Errorf("video field %q must be a JSON object", canonical)
+				}
+				return parseOpenAIVideoNestedImages(canonical, nested, &info)
+			case "images", "reference_images", "first_frame", "last_frame":
+				return fmt.Errorf("video field %q requires an image upload", canonical)
+			}
 		}
 		return nil
 	}
 
-	mediaType, _, err := mime.ParseMediaType(contentType)
 	switch {
 	case contentType == "" || mediaType == "application/json":
 		request := gjson.ParseBytes(body)
@@ -73,19 +111,28 @@ func ParseOpenAIVideoRequest(contentType string, body []byte) (GrokMediaRequestI
 			return info, fmt.Errorf("video request must be a JSON object with a string model")
 		}
 		request.ForEach(func(key, value gjson.Result) bool {
-			err = capture(key.String(), value.String())
+			err = capture(key.String(), value.String(), false)
 			return err == nil
 		})
 		if err != nil {
 			return info, err
 		}
 		parseGrokMediaJSONRequest(body, &info)
-		if image := extractGrokMediaImageURL(request.Get("input_reference.image_url")); image != "" {
-			info.InputImageURLs = append(info.InputImageURLs, image)
+		for _, name := range []string{"image", "images", "reference_images", "mask"} {
+			value := request.Get(name)
+			images := []gjson.Result{value}
+			if name != "mask" && value.IsArray() {
+				images = value.Array()
+			}
+			for _, image := range images {
+				if err := validateOpenAIVideoImageJSON(image); err != nil {
+					return info, err
+				}
+			}
 		}
-		for _, item := range request.Get("metadata.content").Array() {
-			if image := extractGrokMediaImageURL(item.Get("image_url")); image != "" {
-				info.InputImageURLs = append(info.InputImageURLs, image)
+		for _, name := range []string{"input_reference", "metadata"} {
+			if err := parseOpenAIVideoNestedImages(name, request.Get(name), &info); err != nil {
+				return info, err
 			}
 		}
 	case err == nil && mediaType == "multipart/form-data":
@@ -117,6 +164,73 @@ func ParseOpenAIVideoRequest(contentType string, body []byte) (GrokMediaRequestI
 	info.DurationSeconds = int(seconds)
 	info.Resolution = openAIVideoResolution(fields["resolution"], fields["resolution_name"], info.Size)
 	return info, nil
+}
+
+func openAIVideoFieldName(name string, fields ...string) string {
+	for _, field := range fields {
+		if strings.EqualFold(name, field) {
+			return field
+		}
+	}
+	return ""
+}
+
+// Check only keys used by moderation, leaving unrelated relay metadata intact.
+func validateOpenAIVideoJSONFields(object gjson.Result, fields ...string) error {
+	if !object.IsObject() {
+		return nil
+	}
+	seen := make(map[string]bool)
+	var err error
+	object.ForEach(func(key, _ gjson.Result) bool {
+		name := key.String()
+		if canonical := openAIVideoFieldName(name, fields...); canonical != "" {
+			if canonical != name || seen[canonical] {
+				err = fmt.Errorf("invalid or repeated video field %q", canonical)
+				return false
+			}
+			seen[canonical] = true
+		}
+		return true
+	})
+	return err
+}
+
+func validateOpenAIVideoImageJSON(value gjson.Result) error {
+	if err := validateOpenAIVideoJSONFields(value, "url", "image_url"); err != nil {
+		return err
+	}
+	return validateOpenAIVideoJSONFields(value.Get("image_url"), "url")
+}
+
+func parseOpenAIVideoNestedImages(name string, value gjson.Result, info *GrokMediaRequestInfo) error {
+	images := []gjson.Result{}
+	switch name {
+	case "input_reference":
+		if err := validateOpenAIVideoJSONFields(value, "image_url"); err != nil {
+			return err
+		}
+		images = append(images, value.Get("image_url"))
+	case "metadata":
+		if err := validateOpenAIVideoJSONFields(value, "content"); err != nil {
+			return err
+		}
+		for _, item := range value.Get("content").Array() {
+			if err := validateOpenAIVideoJSONFields(item, "image_url"); err != nil {
+				return err
+			}
+			images = append(images, item.Get("image_url"))
+		}
+	}
+	for _, image := range images {
+		if err := validateOpenAIVideoImageJSON(image); err != nil {
+			return err
+		}
+		if imageURL := extractGrokMediaImageURL(image); imageURL != "" {
+			info.InputImageURLs = append(info.InputImageURLs, imageURL)
+		}
+	}
+	return nil
 }
 
 func openAIVideoResolution(values ...string) string {

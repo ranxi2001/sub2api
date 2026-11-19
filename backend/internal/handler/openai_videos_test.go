@@ -138,6 +138,28 @@ func TestOpenAIVideoLifecycle(t *testing.T) {
 		return w
 	}
 
+	for _, body := range []string{
+		`{"model":"video-a","seconds":5,"prompt":"waves","prompt":"other"}`,
+		`{"model":"video-a","seconds":5,"Prompt":"other"}`,
+		`{"model":"video-a","seconds":5,"input_reference":{"image_url":"a","image_url":"b"}}`,
+		`{"model":"video-a","seconds":5,"metadata":{"content":[],"content":[{"image_url":"b"}]}}`,
+	} {
+		rejected := request(http.MethodPost, "/v1/videos", "application/json", strings.NewReader(body), "20")
+		require.Equal(t, http.StatusBadRequest, rejected.Code, rejected.Body.String())
+		require.Equal(t, "invalid_request_error", gjson.GetBytes(rejected.Body.Bytes(), "error.type").String())
+		require.Zero(t, upstream.calls, "ambiguous moderation input must not reach the upstream")
+	}
+	var ambiguousForm bytes.Buffer
+	ambiguousMP := multipart.NewWriter(&ambiguousForm)
+	require.NoError(t, ambiguousMP.WriteField("model", "video-a"))
+	require.NoError(t, ambiguousMP.WriteField("seconds", "5"))
+	require.NoError(t, ambiguousMP.WriteField("prompt", "waves"))
+	require.NoError(t, ambiguousMP.WriteField("prompt", "other"))
+	require.NoError(t, ambiguousMP.Close())
+	rejected := request(http.MethodPost, "/v1/videos", ambiguousMP.FormDataContentType(), &ambiguousForm, "20")
+	require.Equal(t, http.StatusBadRequest, rejected.Code, rejected.Body.String())
+	require.Zero(t, upstream.calls, "ambiguous multipart input must not reach the upstream")
+
 	createdA := request(http.MethodPost, "/v1/videos", "application/json", strings.NewReader(`{"model":"video-a","prompt":"test","seconds":30,"size":"1280x720","metadata":{"passthrough":"keep"}}`), "20")
 	require.Equal(t, http.StatusAccepted, createdA.Code, createdA.Body.String())
 	idA := gjson.GetBytes(createdA.Body.Bytes(), "id").String()

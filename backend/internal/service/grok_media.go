@@ -205,7 +205,7 @@ func grokMediaImageObject(imageURL string) map[string]string {
 	return map[string]string{"url": imageURL, "type": "image_url"}
 }
 
-func parseGrokMediaMultipartRequest(contentType string, body []byte, info *GrokMediaRequestInfo, visitField func(string, string) error) error {
+func parseGrokMediaMultipartRequest(contentType string, body []byte, info *GrokMediaRequestInfo, visitField func(string, string, bool) error) error {
 	if info == nil {
 		return fmt.Errorf("missing media request info")
 	}
@@ -240,6 +240,15 @@ func parseGrokMediaMultipartRequest(contentType string, body []byte, info *GrokM
 		}
 		fileName := strings.TrimSpace(part.FileName())
 		partContentType := strings.TrimSpace(part.Header.Get("Content-Type"))
+		value := ""
+		if fileName == "" {
+			value = strings.TrimSpace(string(data))
+		}
+		if visitField != nil {
+			if err := visitField(name, value, fileName != ""); err != nil {
+				return err
+			}
+		}
 		if fileName != "" {
 			upload := OpenAIImagesUpload{
 				FieldName:   name,
@@ -258,12 +267,6 @@ func parseGrokMediaMultipartRequest(contentType string, body []byte, info *GrokM
 			continue
 		}
 
-		value := strings.TrimSpace(string(data))
-		if visitField != nil {
-			if err := visitField(name, value); err != nil {
-				return err
-			}
-		}
 		switch name {
 		case "model":
 			info.Model = value
