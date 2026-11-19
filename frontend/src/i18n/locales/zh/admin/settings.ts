@@ -23,7 +23,7 @@ export default {
           showAll: '全部显示',
           hideAll: '全部隐藏',
           count: '已选择 {visible} / {total} 个入口',
-          hint: '全部隐藏后，侧边栏将收起智能运维分组。请求采集等入口仍受原有功能启用条件控制。'
+          hint: '全部隐藏会隐藏上述入口。请求采集等入口仍受原有功能启用条件控制。'
         },
         excelBpsImages: {
           mode: '图片传输方式',

@@ -32,13 +32,16 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/pr-ui-browser" --no-save --ignore-scripts playwright@1.56.1
           "$RUNNER_TEMP/pr-ui-browser/node_modules/.bin/playwright" install --with-deps chromium
       - name: Fetch immutable before baseline
-        run: git fetch --no-tags --depth=1 origin c115bef917eae22fc2f5a4d0ba6ac6cbe600e8e4
+        env:
+          SOURCE_BASE: ${{ github.event.pull_request.base.sha }}
+        run: git fetch --no-tags --depth=1 origin "$SOURCE_BASE"
       - name: Capture actual Vue components with fictional local data
         env:
+          SOURCE_BASE: ${{ github.event.pull_request.base.sha }}
           NODE_OPTIONS: --max-old-space-size=1536
           PLAYWRIGHT_MODULE: ${{ runner.temp }}/pr-ui-browser/node_modules/playwright/index.mjs
         run: |
-          node .github/scripts/prmerge-ui-preview.mjs "$GITHUB_WORKSPACE" sidebar "$RUNNER_TEMP/smart-ops-sidebar-preview" c115bef917eae22fc2f5a4d0ba6ac6cbe600e8e4
+          node .github/scripts/prmerge-ui-preview.mjs "$GITHUB_WORKSPACE" sidebar "$RUNNER_TEMP/smart-ops-sidebar-preview" "$SOURCE_BASE"
           node .github/scripts/prmerge-ui-preview.mjs "$GITHUB_WORKSPACE" sidebar "$RUNNER_TEMP/smart-ops-sidebar-preview"
       - uses: actions/upload-artifact@v7
         if: always()

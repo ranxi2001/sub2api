@@ -10,9 +10,7 @@ func TestParseSmartOpsHiddenMenuItems(t *testing.T) {
 	defaults := []string{
 		"/admin/lottery",
 		"/admin/qqbot/overview",
-		"/admin/channel-operations",
 		"/admin/controlled-experiments",
-		"/admin/account-ops",
 		"/admin/group-cache-tests",
 		"/admin/request-captures",
 	}
@@ -26,6 +24,9 @@ func TestParseSmartOpsHiddenMenuItems(t *testing.T) {
 		{name: "invalid", raw: "invalid", want: defaults},
 		{name: "null", raw: "null", want: defaults},
 		{name: "explicit show all", raw: "[]", want: []string{}},
+		{name: "partially hidden legacy entries", raw: `["/admin/channel-operations","/admin/account-ops","/admin/future"]`, want: []string{"/admin/future"}},
+		{name: "all legacy entries hidden", raw: `["/admin/profit-operations","/admin/account-ops","/admin/channel-operations"]`, want: []string{}},
+		{name: "explicit merged selection", raw: `["/admin/channel-config","/admin/account-ops"]`, want: []string{"/admin/channel-config"}},
 		{name: "saved selection", raw: `["/admin/auto-config","/admin/future-entry","/admin/auto-config",""]`, want: []string{"/admin/auto-config", "/admin/future-entry"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

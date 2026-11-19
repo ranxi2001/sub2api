@@ -22,7 +22,7 @@ func TestSmartOpsSidebarSettingsRoundTripAndOmission(t *testing.T) {
 		return gjson.Get(rec.Body.String(), "data.smart_ops_hidden_menu_items").Raw
 	}
 	defaults := get()
-	require.JSONEq(t, `["/admin/lottery","/admin/qqbot/overview","/admin/channel-operations","/admin/controlled-experiments","/admin/account-ops","/admin/group-cache-tests","/admin/request-captures"]`, defaults, "unconfigured installations display only the six default entries")
+	require.JSONEq(t, `["/admin/lottery","/admin/qqbot/overview","/admin/controlled-experiments","/admin/group-cache-tests","/admin/request-captures"]`, defaults, "unconfigured installations display only the six default entries")
 	rec := doUpdateSettings(t, h, map[string]any{"site_name": "example"}, nil)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	require.NotContains(t, repo.values, service.SettingKeySmartOpsHiddenMenuItems, "omitted fields remain unconfigured")
