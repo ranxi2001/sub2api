@@ -78,7 +78,7 @@ import UpstreamChannelManager from './UpstreamChannelManager.vue'
 import ProfitProviders from './ProfitProviders.vue'
 import { readProfitOperations, type OperationsQuery, type OperationsSnapshot, type OperationsRow, type ProfitMetrics } from '@/api/admin/profitOperations'
 const props = withDefaults(defineProps<{ embedded?: boolean; active?: boolean; scope?: Partial<OperationsQuery> }>(), {active:true})
-const emit = defineEmits<{ scope: [value: OperationsQuery] }>()
+const emit = defineEmits<{ scope: [value: OperationsQuery]; refreshed: [] }>()
 const { t } = useI18n()
 const auth = useAuthStore()
 const amountKeys = ['requests','standard_charge','request_income','upstream_cost','gross_profit','gross_margin'] as const
@@ -135,7 +135,7 @@ async function load(forceWallet = false, forceReport = false) {
  if(props.active===false)return
  emit('scope', {...applied.value})
  const id=++request; controller?.abort(); controller=new AbortController(); loading.value=true; error.value=''; snapshot.value=null
- try { const next=(forceReport ? await readProfitOperations({...applied.value},controller.signal,forceWallet,true) : await readProfitOperations({...applied.value},controller.signal,forceWallet)); if(alive && request===id) snapshot.value=next }
+ try { const next=(forceReport ? await readProfitOperations({...applied.value},controller.signal,forceWallet,true) : await readProfitOperations({...applied.value},controller.signal,forceWallet)); if(alive && request===id) { snapshot.value=next; if(forceReport || forceWallet) emit('refreshed') } }
  catch (cause) {
   if(alive && request===id) {
    const failure=cause as { status?: number; reason?: string; code?: string } | null

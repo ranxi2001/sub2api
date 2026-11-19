@@ -23,7 +23,7 @@
               </details>
               <details class="rounded-lg border p-4 dark:border-dark-700" @toggle="analyticsOpen = ($event.target as HTMLDetailsElement).open"><summary class="cursor-pointer font-semibold">{{ t('channelConfig.observations') }}</summary><UpstreamAnalytics v-if="analyticsOpen" embedded class="mt-4" /></details>
             </template>
-            <ProfitAnalytics v-else-if="panel === 'profit'" embedded :active="opened.profit" :scope="scope" @scope="acceptScope" />
+            <ProfitAnalytics v-else-if="panel === 'profit'" embedded :active="opened.profit" :scope="scope" @scope="acceptScope" @refreshed="stale = false" />
             <AccountOpsView v-else embedded :active="opened.accounts" :channel-id="scope.channel_id" :account-id="scope.account_id" />
           </div>
         </details>
