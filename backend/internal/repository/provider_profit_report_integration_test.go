@@ -480,6 +480,9 @@ func TestProviderProfitNamingPreservesEstimateUntilWalletOptIn(t *testing.T) {
 	f.exec(`UPDATE mature_providers SET name='Renamed only' WHERE id=$1`, f.pid)
 	f.exec(`UPDATE upstream_channels SET name='Renamed classification' WHERE id=$1`, f.channel)
 	after := f.report(f.channel, w)
+	ids, err := f.r.ProfitChannelAccountIDs(context.Background(), f.channel)
+	require.NoError(t, err)
+	require.Contains(t, ids, f.account)
 	for _, key := range []string{"requests", "request_income", "upstream_cost", "gross_profit", "cost_source"} {
 		require.JSONEq(t, string(before[key]), string(after[key]))
 	}
@@ -487,7 +490,7 @@ func TestProviderProfitNamingPreservesEstimateUntilWalletOptIn(t *testing.T) {
 	var revision int64
 	require.NoError(t, f.db.QueryRow(`SELECT revision FROM provider_profit_links WHERE provider_id=$1`, f.pid).Scan(&revision))
 	wallet := "wallet"
-	_, err := f.r.SetProviderProfitLink(context.Background(), f.pid, service.ProviderProfitLinkMutation{ChannelID: f.channel, Revision: revision, Confirm: true, CostMode: &wallet})
+	_, err = f.r.SetProviderProfitLink(context.Background(), f.pid, service.ProviderProfitLinkMutation{ChannelID: f.channel, Revision: revision, Confirm: true, CostMode: &wallet})
 	require.NoError(t, err)
 	missing := f.report(f.channel, w)
 	require.JSONEq(t, `"wallet_unavailable"`, string(missing["cost_source"]))

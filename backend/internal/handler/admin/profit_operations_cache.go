@@ -18,6 +18,7 @@ import (
 type profitReportCache struct {
 	mu         sync.Mutex
 	generation uint64
+	slots      chan struct{}
 	entries    map[service.UpstreamOperationsFilter]profitReportEntry
 	flight     singleflight.Group
 }
@@ -41,6 +42,10 @@ func (c *profitReportCache) read(ctx context.Context, f service.UpstreamOperatio
 	key.From = key.From.UTC()
 	key.Until = key.Until.UTC()
 	c.mu.Lock()
+	if c.slots == nil {
+		c.slots = make(chan struct{}, 2)
+	}
+	slots := c.slots
 	generation := c.generation
 	entry, ok := c.entries[key]
 	c.mu.Unlock()
@@ -59,6 +64,12 @@ func (c *profitReportCache) read(ctx context.Context, f service.UpstreamOperatio
 		if ok && time.Now().Before(entry.expires) {
 			return entry.raw, nil
 		}
+		select {
+		case slots <- struct{}{}:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		defer func() { <-slots }()
 		report, err := load(ctx, true)
 		if err != nil {
 			return nil, err
@@ -100,6 +111,12 @@ func (c *profitReportCache) read(ctx context.Context, f service.UpstreamOperatio
 		}
 		raw := r.Val.([]byte)
 		if raw == nil {
+			select {
+			case slots <- struct{}{}:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+			defer func() { <-slots }()
 			return load(ctx, false)
 		}
 		return pageProfitReport(raw, f)
