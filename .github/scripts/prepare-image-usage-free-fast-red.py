@@ -12,7 +12,9 @@ phase, baseline = sys.argv[1:]
 if phase == 'usage':
     name = 'backend/internal/service/usage_log.go'
     marker = 'type UsageLog struct {'
-    addition = '\n\tCustomerCostDetails *CustomerCostDetails\n'
+    # Omit nil just as the pre-snapshot DTO did; persistence RED must reach
+    # its original missing-snapshot assertion, not a later JSON null mismatch.
+    addition = '\n\tCustomerCostDetails *CustomerCostDetails `json:"CustomerCostDetails,omitempty"`\n'
 elif phase == 'cache':
     name = 'backend/internal/service/customer_cost_details.go'
     marker = 'type CustomerCostDetails struct {'

@@ -164,3 +164,8 @@ backend/internal/service/upstream_batch_whitelist_identity_policy_test.go
 # Image usage settlement fixtures need the candidate billing implementation.
 backend/internal/handler/image_billing_response_test.go
 backend/internal/service/image_usage_billing_test.go
+
+# Account balance notifications require newer AccountOps APIs.
+backend/internal/service/account_ops_balance_notification_test.go
+backend/internal/service/grok_rate_limit_history_test.go
+backend/internal/service/new_api_cost_test.go
