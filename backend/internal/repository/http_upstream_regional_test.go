@@ -70,7 +70,7 @@ func TestRegionalHTTPCompressesConfiguredUpstream(t *testing.T) {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		defer decoder.Close()
+		defer func() { require.NoError(t, decoder.Close()) }()
 		got, err := io.ReadAll(decoder)
 		if err != nil || string(got) != payload {
 			t.Errorf("decoded regional request differs from the original: %v", err)

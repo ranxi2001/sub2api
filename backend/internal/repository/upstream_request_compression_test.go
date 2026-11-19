@@ -151,7 +151,7 @@ func TestUpstreamRequestCompressionCooldown(t *testing.T) {
 				require.NoError(t, err)
 				req.Header.Set("Content-Type", "application/json")
 				tr := s.wrapUpstreamRequestCompression(compressionTestTransport(func(r *http.Request) (*http.Response, error) {
-					defer r.Body.Close()
+					defer func() { require.NoError(t, r.Body.Close()) }()
 					sent = append(sent, r.Header.Get("Content-Encoding"))
 					response := &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}
 					if len(sent) == 1 {
@@ -240,7 +240,7 @@ func TestOpenAICodexUpstreamRequestCompressionPolicy(t *testing.T) {
 			transport := upstream.wrapUpstreamRequestCompression(compressionTestTransport(func(r *http.Request) (*http.Response, error) {
 				calls++
 				require.Equal(t, tc.want, r.Header.Get("Content-Encoding"))
-				defer r.Body.Close()
+				defer func() { require.NoError(t, r.Body.Close()) }()
 				if tc.want == "" {
 					got, err := io.ReadAll(r.Body)
 					require.NoError(t, err)
@@ -300,7 +300,7 @@ func TestUpstreamRequestCompressionSkipsIneligibleBodies(t *testing.T) {
 				rules: []config.UpstreamRequestCompressionRule{{Origin: origin, Encoding: "gzip"}},
 				base: compressionTestTransport(func(got *http.Request) (*http.Response, error) {
 					require.Same(t, req, got)
-					defer got.Body.Close()
+					defer func() { require.NoError(t, got.Body.Close()) }()
 					b, err := io.ReadAll(got.Body)
 					require.NoError(t, err)
 					require.Equal(t, body, b)

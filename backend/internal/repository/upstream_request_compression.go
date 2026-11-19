@@ -60,8 +60,8 @@ func (t *upstreamRequestCompressionTransport) RoundTrip(req *http.Request) (*htt
 	key := strings.ToLower(origin) + " " + coding
 	if t.cooldowns != nil {
 		if entry, ok := t.cooldowns.Load(key); ok {
-			rejection := entry.(compressionRejection)
-			if rejection.path == req.URL.EscapedPath() && time.Now().Before(rejection.until) {
+			rejection, ok := entry.(compressionRejection)
+			if ok && rejection.path == req.URL.EscapedPath() && time.Now().Before(rejection.until) {
 				return t.base.RoundTrip(req)
 			}
 		}
@@ -74,7 +74,7 @@ func (t *upstreamRequestCompressionTransport) RoundTrip(req *http.Request) (*htt
 
 	// Apply the encoding per physical send. Redirects and provider fallbacks
 	// continue to see the original body and re-evaluate the destination rule.
-	defer req.Body.Close()
+	defer func() { _ = req.Body.Close() }()
 	wire := req.Clone(req.Context())
 	encoded := compressed.Bytes()
 	wire.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(encoded)), nil }
@@ -102,7 +102,7 @@ func (t *upstreamRequestCompressionTransport) RoundTrip(req *http.Request) (*htt
 			if bodyErr == nil && body != nil {
 				plain.Body = body
 				if resp.Body != nil {
-					resp.Body.Close()
+					_ = resp.Body.Close()
 				}
 				return t.base.RoundTrip(plain)
 			}
@@ -215,7 +215,7 @@ func compressUpstreamRequestBody(req *http.Request, coding string, dst io.Writer
 	if err != nil || src == nil {
 		return false
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 	var encoder io.WriteCloser
 	switch coding {
 	case "gzip":
