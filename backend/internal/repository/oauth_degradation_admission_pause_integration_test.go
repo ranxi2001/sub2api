@@ -22,6 +22,7 @@ func TestOAuthDegradationNativePauseSurvivesAdmissionPass(t *testing.T) {
 			ctx := t.Context()
 			repo, _ := degradationPolicyFixture(t)
 			f := newAdmissionFixture(t)
+			recordDegradationHTTPPressure(f.account.ID)
 			t.Cleanup(func() {
 				_, _ = integrationDB.Exec(`DELETE FROM account_auto_config_events WHERE account_id=$1`, f.account.ID)
 			})

@@ -16,6 +16,8 @@ func TestOAuthDegradation429Conditions(t *testing.T) {
 	c := DefaultOAuthDegradationConfig()
 	c.Enabled = true
 	c.ThresholdPercent = degradation429Float(9)
+	off := false
+	c.ProbeEnabled = &off
 	for _, tc := range []struct {
 		name                     string
 		total, failures, limited int64
@@ -35,14 +37,20 @@ func TestOAuthDegradation429Conditions(t *testing.T) {
 		})
 	}
 	m := AccountPerformance{DegradationPercent: degradation429Float(100), QualitySamples: 1, UpstreamError: upstreamstats.Evidence{Source: "process_local_http_responses", Total: 25, Failures: 20, RateLimited: 16}}
-	off := false
+	c.ProbeEnabled = nil
+	require.Equal(t, OAuthDegradationProbeAnd429, c.TriggerReason(m))
+	require.False(t, c.NeedsCandyRetest(m))
+	c.ThresholdPercent, m.DegradationPercent = degradation429Float(0), degradation429Float(0)
+	require.Empty(t, c.TriggerReason(m), "a zero threshold still requires an actual wrong answer")
+	m.DegradationPercent = degradation429Float(100)
 	c.ProbeEnabled = &off
 	require.Equal(t, "upstream_429", c.TriggerReason(m))
 	c.Upstream429Enabled = &off
 	require.Error(t, c.Validate())
 	require.Empty(t, c.TriggerReason(m))
 	c.ProbeEnabled = nil
-	require.Equal(t, "probe_degradation", c.TriggerReason(m))
+	require.Empty(t, c.TriggerReason(m))
+	require.True(t, c.NeedsCandyRetest(m))
 	c.Enabled = false
 	require.Empty(t, c.TriggerReason(m))
 	c.Enabled = true
@@ -70,6 +78,8 @@ func TestOAuthDegradation429Conditions(t *testing.T) {
 
 func TestOAuthDegradation429NeverTreatsAuthenticationAsRateLimiting(t *testing.T) {
 	c := DefaultOAuthDegradationConfig()
+	off := false
+	c.ProbeEnabled = &off
 	c.Enabled = true
 	c.ThresholdPercent = degradation429Float(9)
 	for _, tc := range []struct {

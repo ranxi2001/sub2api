@@ -53,6 +53,17 @@ func (r *accountRepository) OAuthDegradationIDs(ctx context.Context, after int64
 }
 
 func (r *accountRepository) EvaluateOAuthDegradation(ctx context.Context, id int64, now time.Time) error {
+	return r.evaluateOAuthDegradation(ctx, id, now, nil)
+}
+
+// A review with no answers requests permission to probe. After two wrong
+// answers the runner submits the same lease and configuration revision.
+func (r *accountRepository) ReviewOAuthDegradationCandy(ctx context.Context, id int64, review service.OAuthDegradationCandyReview) (string, error) {
+	err := r.evaluateOAuthDegradation(ctx, id, time.Now().UTC(), &review)
+	return review.Revision, err
+}
+
+func (r *accountRepository) evaluateOAuthDegradation(ctx context.Context, id int64, now time.Time, review *service.OAuthDegradationCandyReview) error {
 	db, ok := r.sql.(*sql.DB)
 	if !ok {
 		return errors.New("OAuth degradation requires transactional database")
@@ -82,6 +93,22 @@ func (r *accountRepository) EvaluateOAuthDegradation(ctx context.Context, id int
 	if !c.DegradationAction.Enabled {
 		return nil
 	}
+	if review != nil {
+		// Quality actions lock their plan before locking the account.
+		var planID int64
+		err = tx.QueryRowContext(ctx, `SELECT id FROM scheduled_test_plans WHERE id=$1 AND account_id=$2
+ AND enabled AND updated_at=$3 AND running_until=$4 AND running_until>clock_timestamp()
+ AND EXISTS (SELECT 1 FROM scheduled_test_results WHERE plan_id=$1 AND quality_round_id=$5
+ AND pelican_config->>'model_id'=$6 AND status='failed' AND error_message='answer_mismatch'
+ AND quality_judgment->>'verdict'='incorrect')
+ FOR SHARE`, review.PlanID, id, review.PlanUpdatedAt, review.LeaseUntil, review.LeaseUntil.Format(time.RFC3339Nano), review.ModelID).Scan(&planID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+	}
 	a := service.Account{ID: id}
 	var credentials, extra []byte
 	err = tx.QueryRowContext(ctx, `SELECT name,platform,type,concurrency,schedulable,credentials,COALESCE(extra,'{}'::jsonb) FROM accounts WHERE id=$1 AND deleted_at IS NULL AND parent_account_id IS NULL AND type='oauth' FOR UPDATE`, id).Scan(&a.Name, &a.Platform, &a.Type, &a.Concurrency, &a.Schedulable, &credentials, &extra)
@@ -107,8 +134,21 @@ func (r *accountRepository) EvaluateOAuthDegradation(ctx context.Context, id int
 		return err
 	}
 	m, found := metrics[id]
+	if !found {
+		return nil
+	}
 	reason := c.DegradationAction.TriggerReason(m)
-	if !found || reason == "" {
+	if reason == "" && review != nil && c.DegradationAction.NeedsCandyRetest(m) &&
+		!review.StartedAt.Before(m.WindowStart) && now.Before(review.LeaseUntil) {
+		if review.Incorrect == 0 {
+			review.Revision = c.Revision
+			return nil
+		}
+		if review.Incorrect == 2 && review.Revision != "" && review.Revision == c.Revision {
+			reason = service.OAuthDegradationCandyRetested
+		}
+	}
+	if reason == "" {
 		return nil
 	}
 	models := make([]string, 0, len(c.DegradationAction.Models))
@@ -182,7 +222,10 @@ func (r *accountRepository) EvaluateOAuthDegradation(ctx context.Context, id int
 	if m.DegradationPercent != nil {
 		state.DegradationPercent = *m.DegradationPercent
 	}
-	if reason == "upstream_429" {
+	if reason == service.OAuthDegradationCandyRetested {
+		state.CandyReview = review
+	}
+	if reason == "upstream_429" || reason == service.OAuthDegradationProbeAnd429 {
 		state.UpstreamError = &m.UpstreamError
 		state.UpstreamErrorThresholdPercent = c.DegradationAction.HTTPErrorThreshold()
 		state.Upstream429ShareThresholdPercent = c.DegradationAction.HTTP429ShareThreshold()

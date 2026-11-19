@@ -56,7 +56,7 @@ func (s *ScheduledTestRunnerService) runPelicanAnswer(ctx context.Context, plan 
 		}
 		// Three attempts total, with 1s and 2s backoff inside the round's
 		// existing deadline. Exhaustion preserves the last failure as unknown.
-		if attempt == 2 || !retryableQualityAnswer(plan.PelicanConfig, result) {
+		if plan.degradationRetest || attempt == 2 || !retryableQualityAnswer(plan.PelicanConfig, result) {
 			return result, nil
 		}
 		timer := time.NewTimer(time.Duration(attempt+1) * time.Second)

@@ -7,10 +7,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/upstreamstats"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -42,6 +44,13 @@ func degradationPolicyFixture(t *testing.T) (*accountRepository, service.OAuthAu
 	require.NoError(t, err)
 	return newAccountRepositoryWithSQL(integrationEntClient, integrationDB, nil), c
 }
+func recordDegradationHTTPPressure(id int64) {
+	now := time.Now()
+	for range service.OAuthDegradationMinHTTPResponses {
+		upstreamstats.Default.Record(id, 429, now)
+	}
+}
+
 func degradationAccountFixture(t *testing.T, concurrency int, mapping map[string]any, rounds []string, age time.Duration) *service.Account {
 	t.Helper()
 	ctx := context.Background()
@@ -54,6 +63,9 @@ func degradationAccountFixture(t *testing.T, concurrency int, mapping map[string
 	})
 	if len(rounds) == 0 {
 		return a
+	}
+	if slices.Contains(rounds, "incorrect") {
+		recordDegradationHTTPPressure(a.ID)
 	}
 	var plan int64
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO scheduled_test_plans(account_id,model_id,cron_expression,enabled,pelican_config,updated_at) VALUES($1,'gpt-6-luna','*/30 * * * *',true,'{"quality":{}}',NOW()-INTERVAL '2 hours') RETURNING id`, a.ID).Scan(&plan))

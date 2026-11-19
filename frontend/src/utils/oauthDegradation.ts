@@ -1,5 +1,6 @@
 export interface OAuthDegradationConfig {
  probe_enabled?: boolean | null
+ candy_retest_enabled?: boolean | null
  upstream_429_enabled?: boolean | null
  upstream_error_threshold_percent?: number | null
  upstream_429_share_threshold_percent?: number | null
@@ -17,7 +18,7 @@ export function defaultOAuthDegradationConfig(): OAuthDegradationConfig {
 }
 export function oauthDegradationError(c: OAuthDegradationConfig): boolean {
  const limitConcurrency = c.limit_concurrency !== false, limitModels = c.limit_models !== false
- if (c.enabled && ((c.probe_enabled !== false && c.threshold_percent == null) || (c.probe_enabled === false && c.upstream_429_enabled === false) || !limitConcurrency && !limitModels && !c.limit_groups)) return true
+ if (c.enabled && ((c.probe_enabled !== false && c.threshold_percent == null) || missingDegradationConfirmation(c) || !limitConcurrency && !limitModels && !c.limit_groups)) return true
  if (c.threshold_percent != null && (!Number.isFinite(c.threshold_percent) || c.threshold_percent < 0 || c.threshold_percent > 100)) return true
  for (const value of [c.upstream_error_threshold_percent ?? 80, c.upstream_429_share_threshold_percent ?? 80]) {
   if (!Number.isFinite(value) || value <= 0 || value > 100) return true
@@ -31,4 +32,8 @@ export function oauthDegradationError(c: OAuthDegradationConfig): boolean {
 export function oauthDegradationPayload(c?: OAuthDegradationConfig | null): OAuthDegradationConfig {
  const cfg=c ?? defaultOAuthDegradationConfig()
  return { ...cfg, probe_enabled: cfg.probe_enabled ?? true, upstream_429_enabled: cfg.upstream_429_enabled ?? true, upstream_error_threshold_percent: cfg.upstream_error_threshold_percent ?? 80, upstream_429_share_threshold_percent: cfg.upstream_429_share_threshold_percent ?? 80, limit_concurrency: cfg.limit_concurrency ?? true, limit_models: cfg.limit_models ?? true, limit_groups: cfg.limit_groups ?? false, models: cfg.models ?? [], group_ids: cfg.group_ids ?? [] }
+}
+
+export function missingDegradationConfirmation(c: OAuthDegradationConfig): boolean {
+ return c.upstream_429_enabled === false && (c.probe_enabled === false || c.candy_retest_enabled === false)
 }

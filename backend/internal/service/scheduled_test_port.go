@@ -37,6 +37,7 @@ type PelicanTestConfig struct {
 
 // ScheduledTestPlan represents a scheduled test plan domain model.
 type ScheduledTestPlan struct {
+	degradationRetest bool
 	// Populated only from the repository's one-shot manual trigger marker.
 	ManualQualityRun      bool              `json:"-"`
 	ManualQualityRunID    string            `json:"-"`
