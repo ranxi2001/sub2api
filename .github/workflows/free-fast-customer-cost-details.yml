@@ -92,6 +92,9 @@ jobs:
             git show "$baseline:$file" > "$file"
             test "$(git hash-object "$file")" = "$(git rev-parse "$baseline:$file")"
           done
+          # The new image receipt reader needs the additive DTO field; retain
+          # the old Free Fast producer so the selected assertions still fail.
+          python3 .github/scripts/prepare-image-usage-free-fast-red.py usage "$baseline"
           # Tests stay byte-for-byte at candidate HEAD. Keep the new additive
           # DB column so a missing migration can never qualify as business RED.
           set +e
@@ -120,6 +123,7 @@ jobs:
           git fetch --no-tags --depth=1 origin "$baseline"
           git show "$baseline:backend/internal/service/customer_cost_details.go" > backend/internal/service/customer_cost_details.go
           test "$(git hash-object backend/internal/service/customer_cost_details.go)" = "$(git rev-parse "$baseline:backend/internal/service/customer_cost_details.go")"
+          python3 .github/scripts/prepare-image-usage-free-fast-red.py cache "$baseline"
           set +e
           (cd backend && go test -json -tags=unit ./internal/service -run '^TestFreeFastCustomerCostCachePrices$' -count=1 -timeout=15m) > "$RUNNER_TEMP/free-fast/red-cache.jsonl" 2>&1
           code=$?

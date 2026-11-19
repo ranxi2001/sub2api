@@ -689,6 +689,11 @@ func NewOpenAIGatewayHandler(
 // Responses handles OpenAI Responses API endpoint
 // POST /openai/v1/responses
 func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
+	if c.GetHeader("X-Image-Usage") != "" {
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "X-Image-Usage is supported only by /v1/images/generations and /v1/images/edits")
+		return
+	}
+
 	// 局部兜底：确保该 handler 内部任何 panic 都不会击穿到进程级。
 	streamStarted := false
 	defer h.recoverResponsesPanic(c, &streamStarted)
@@ -2996,6 +3001,11 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 // ResponsesWebSocket handles OpenAI Responses API WebSocket ingress endpoint
 // GET /openai/v1/responses (Upgrade: websocket)
 func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
+	if c.GetHeader("X-Image-Usage") != "" {
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "X-Image-Usage is supported only by /v1/images/generations and /v1/images/edits")
+		return
+	}
+
 	if !isOpenAIWSUpgradeRequest(c.Request) {
 		h.errorResponse(c, http.StatusUpgradeRequired, "invalid_request_error", "WebSocket upgrade required (Upgrade: websocket)")
 		return

@@ -58,6 +58,20 @@ function mountTable(
 }
 
 describe('PlazaModelPricingTable', () => {
+  it('does not multiply the final image floor by personal discounts', () => {
+    const m = tokenModel({ name: 'gpt-image-2', platform: 'openai' })
+    m.pricing!.image_minimum_charge = 0.01
+    const wrapper = mountTable([m], 0.2, 0.01)
+    expect(wrapper.find('[data-image-minimum-charge]').exists()).toBe(true)
+    expect(wrapper.find('[data-image-minimum-charge]').attributes('title')).toBe('imageUsage.minimumHelp')
+    wrapper.unmount()
+    m.pricing!.billing_mode = 'image'
+    const imageWrapper = mountTable([m], 0.2)
+    expect(imageWrapper.find('[data-image-minimum-charge]').exists()).toBe(false)
+    expect(imageWrapper.text()).not.toContain('modelPlaza.table.unitPerMillion')
+    imageWrapper.unmount()
+  })
+
   it.each([false, true])('shows independent 12h prices without a 1h label (intervals=%s)', (intervals) => {
     const model = tokenModel({ name: 'gpt-6-luna', platform: 'openai' })
     model.pricing!.cache_write_price = null

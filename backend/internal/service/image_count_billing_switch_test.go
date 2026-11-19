@@ -275,3 +275,18 @@ func TestImageCountBillingPreservesExplicitTokenCardsAcrossGateways(t *testing.T
 		}
 	}
 }
+
+func TestExplicitImageCardDoesNotChargeEmptyResponses(t *testing.T) {
+	groupID := int64(990)
+	model := "gpt-image-2"
+	resolver := newOpenAITokenImageChannelPricingResolverForTest(t, groupID, model)
+	group := &Group{ID: groupID, Platform: PlatformOpenAI, ModelPricing: []ChannelModelPricing{{Models: []string{model}, Platform: PlatformOpenAI, BillingMode: BillingModeImage, PerRequestPrice: f64p(.134)}}}
+	key := &APIKey{GroupID: &groupID, Group: group}
+	svc := &OpenAIGatewayService{billingService: resolver.billingService, resolver: resolver}
+	for _, count := range []int{0, 2} {
+		cost, err := svc.calculateOpenAIRecordUsageCost(context.Background(), &OpenAIForwardResult{Model: model, ImageCount: count, ImageSize: "1K"}, key, []string{model}, 1, 1, 1, 1, UsageTokens{InputTokens: 200, OutputTokens: 300}, "", nil, false, time.Time{})
+		require.NoError(t, err)
+		require.InDelta(t, float64(count)*.134, cost.ActualCost, 1e-12)
+		require.Equal(t, "image", cost.BillingMode, "observed token usage must not charge images again")
+	}
+}
