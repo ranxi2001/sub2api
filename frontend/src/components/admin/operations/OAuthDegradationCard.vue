@@ -10,13 +10,17 @@
    <label class="flex items-center gap-2 text-sm"><input :checked="config.probe_enabled !== false" data-testid="degradation-probe-enabled" type="checkbox" class="h-4 w-4 rounded text-primary-600" @change="config.probe_enabled = ($event.target as HTMLInputElement).checked" />{{ t('autoConfig.degradation.threshold') }}</label>
    <label v-if="config.probe_enabled !== false" class="block text-sm font-medium sm:max-w-xs"><span class="sr-only">{{ t('autoConfig.degradation.threshold') }}</span><input :value="config.threshold_percent ?? ''" data-testid="degradation-threshold" type="number" min="0" max="100" step="any" :required="config.enabled" class="input w-full" @input="setThreshold" /></label>
    <p v-if="config.probe_enabled !== false && config.threshold_percent == null" class="text-xs leading-5 text-gray-500 dark:text-gray-400">{{ t('autoConfig.degradation.thresholdRequired') }}</p>
+   <div v-if="config.probe_enabled !== false" class="flex flex-wrap items-center gap-2" data-testid="candy-retest-setting">
+    <label class="flex items-center gap-2 text-sm"><input :checked="config.candy_retest_enabled !== false" data-testid="degradation-candy-retest" type="checkbox" class="h-4 w-4 rounded text-primary-600" @change="config.candy_retest_enabled = ($event.target as HTMLInputElement).checked" />{{ t('autoConfig.degradation.candyRetest') }}</label>
+    <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.oauthDegradationCandyRetest" :user-id="userId" />
+   </div>
    <div class="flex flex-wrap items-center gap-2"><label class="flex items-center gap-2 text-sm"><input :checked="config.upstream_429_enabled !== false" data-testid="degradation-429-enabled" type="checkbox" class="h-4 w-4 rounded text-primary-600" @change="config.upstream_429_enabled = ($event.target as HTMLInputElement).checked" />{{ t('autoConfig.degradation.upstream429') }}</label><NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.oauthDegradation429" :user-id="userId" /></div>
    <div v-if="config.upstream_429_enabled !== false" class="grid gap-3 sm:grid-cols-2">
     <label class="block text-sm">{{ t('autoConfig.degradation.upstreamErrorThreshold') }}<input v-model.number="config.upstream_error_threshold_percent" data-testid="degradation-error-threshold" type="number" min="0.01" max="100" step="any" required class="input mt-2 w-full" /></label>
     <label class="block text-sm">{{ t('autoConfig.degradation.upstream429ShareThreshold') }}<input v-model.number="config.upstream_429_share_threshold_percent" data-testid="degradation-429-threshold" type="number" min="0.01" max="100" step="any" required class="input mt-2 w-full" /></label>
    </div>
    <p class="text-xs leading-5 text-gray-500 dark:text-gray-400">{{ t('autoConfig.degradation.upstream429Hint') }}</p>
-   <p v-if="config.probe_enabled === false && config.upstream_429_enabled === false" role="status" class="text-xs text-gray-500 dark:text-gray-400">{{ t('autoConfig.degradation.conditionsRequired') }}</p>
+   <p v-if="missingDegradationConfirmation(config)" role="status" class="text-xs text-gray-500 dark:text-gray-400">{{ t('autoConfig.degradation.conditionsRequired') }}</p>
   </fieldset>
   <fieldset class="space-y-2">
    <legend class="mb-2 text-sm font-medium">{{ t('autoConfig.degradation.actions') }}</legend>
@@ -52,6 +56,7 @@ import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import type { Group } from '@/types'
 import type { OAuthDegradationConfig } from '@/utils/oauthDegradation'
+import { missingDegradationConfirmation } from '@/utils/oauthDegradation'
 const props = withDefaults(defineProps<{ modelValue: OAuthDegradationConfig; groups?: Group[]; userId?: number }>(), { groups: () => [] })
 const { t } = useI18n()
 const config = computed(() => props.modelValue)

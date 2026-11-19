@@ -48,6 +48,7 @@ func TestOAuthDegradationStartupPostgres(t *testing.T) {
 	for _, kind := range []string{service.AccountTypeOAuth, service.AccountTypeAPIKey} {
 		a := mustCreateAccount(t, integrationEntClient, &service.Account{Name: "degradation-" + suffix + kind, Platform: service.PlatformOpenAI, Type: kind, Concurrency: 20, Schedulable: true, Credentials: map[string]any{"model_mapping": map[string]any{"gpt-6-luna": "gpt-6-luna"}, "keep": "credential"}, Extra: map[string]any{"keep": "extra"}})
 		ids = append(ids, a.ID)
+		recordDegradationHTTPPressure(a.ID)
 		t.Cleanup(func() {
 			_, cleanupErr := integrationDB.ExecContext(ctx, "DELETE FROM account_auto_config_events WHERE account_id=$1", a.ID)
 			require.NoError(t, cleanupErr)

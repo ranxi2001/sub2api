@@ -40,6 +40,7 @@ export const NEW_FEATURE_NOTICES = {
   qwenPlatform: 'qwen-platform-initial-announcement',
   qwenCache: 'qwen-cache-strict-session-initial-announcement',
   oauthDegradation429: 'oauth-degradation-429-conditions-initial-announcement',
+  oauthDegradationCandyRetest: 'oauth-degradation-candy-retest',
   priorityAccountPerformance: 'priority-account-performance-scoring-initial-announcement',
   oauthDegradationActions: 'oauth-degradation-actions-initial-announcement',
   openaiAPIKeyFallback: 'openai-apikey-fallback-initial-announcement',

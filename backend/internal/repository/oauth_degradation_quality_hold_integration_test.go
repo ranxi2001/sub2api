@@ -59,6 +59,7 @@ func TestOAuthDegradationHoldSurvivesQualityRecovery(t *testing.T) {
 				require.NoError(t, f.plans.FinishPelican(ctx, f.plan.ID, f.until, time.Now()))
 				f.claim()
 				degrade := func() {
+					recordDegradationHTTPPressure(f.account)
 					// Use the same persisted completed-round evidence as the actual
 					// degradation evaluator, rather than inserting the hold itself.
 					for i := range 6 {

@@ -25,7 +25,9 @@ func TestOAuthDegradationThresholdEvidence(t *testing.T) {
 		{"NaN", floatPtrDegradation(math.NaN()), 2, false}, {"infinite", floatPtrDegradation(math.Inf(1)), 2, false}, {"negative", floatPtrDegradation(-1), 2, false}, {"over 100", floatPtrDegradation(101), 2, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			require.Equal(t, test.want, c.Triggered(AccountPerformance{DegradationPercent: test.value, QualitySamples: test.samples}))
+			m := AccountPerformance{DegradationPercent: test.value, QualitySamples: test.samples}
+			require.Equal(t, test.want, c.NeedsCandyRetest(m))
+			require.False(t, c.Triggered(m), "a probe alone cannot cause an action")
 		})
 	}
 	c.Enabled = false

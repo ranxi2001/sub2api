@@ -372,6 +372,12 @@ func (s *ScheduledTestRunnerService) runPelicanPlan(ctx context.Context, plan *S
 	if succeeded && plan.AutoRecover && plan.PelicanConfig.Quality == nil && !isBuiltinCandyPlan(plan.PelicanConfig) && !isOpenAICodexStateProbePlan(plan.PelicanConfig) {
 		s.tryRecoverAccount(saveCtx, plan.AccountID, plan.ID)
 	}
+	if plan.PelicanConfig.Quality != nil && isBuiltinCandyPlan(plan.PelicanConfig) && applyTriggeredQuality &&
+		qualityAction != "stale_run" && qualityAction != "action_error" && qualityAction != "account_deleted" {
+		s.reviewDegradationCandyRound(runCtx, plan, until, results)
+	}
+	finishCtx, finishCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer finishCancel()
 	finished := time.Now()
 	if plan.TriggerSource == quality5xxSource {
 		// The stored rule was validated before claiming. The execution-only
@@ -380,9 +386,9 @@ func (s *ScheduledTestRunnerService) runPelicanPlan(ctx context.Context, plan *S
 		if nextErr != nil {
 			return false
 		}
-		err = s.planRepo.FinishTriggeredQuality(saveCtx, plan, until, finished, following)
+		err = s.planRepo.FinishTriggeredQuality(finishCtx, plan, until, finished, following)
 	} else {
-		err = s.planRepo.FinishPelican(saveCtx, plan.ID, until, finished)
+		err = s.planRepo.FinishPelican(finishCtx, plan.ID, until, finished)
 	}
 	if err != nil {
 		logger.LegacyPrintf("service.scheduled_test_runner", "pelican plan=%d finish failed: %v", plan.ID, err)

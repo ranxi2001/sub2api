@@ -12,6 +12,39 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestOAuthDegradationCandyReviewUsesCurrentRule(t *testing.T) {
+	repo, c := degradationPolicyFixture(t)
+	a := degradationAccountFixture(t, 20, nil, nil, time.Minute)
+	ctx := t.Context()
+	now := time.Now()
+	review := service.OAuthDegradationCandyReview{ModelID: "gpt-6-luna", LeaseUntil: now.Add(time.Minute).Truncate(time.Microsecond), StartedAt: now.Add(-time.Minute)}
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO scheduled_test_plans(account_id,model_id,cron_expression,enabled,pelican_config,updated_at,running_until)
+ VALUES($1,$2,'*/30 * * * *',true,'{"quality":{}}',NOW()-INTERVAL '1 hour',$3) RETURNING id,updated_at`, a.ID, review.ModelID, review.LeaseUntil).Scan(&review.PlanID, &review.PlanUpdatedAt))
+	_, err := integrationDB.ExecContext(ctx, `INSERT INTO scheduled_test_results(plan_id,status,started_at,finished_at,created_at,pelican_config,quality_round_id,quality_action,quality_judgment,error_message)
+ VALUES($1,'failed',$2,$3,$3,jsonb_build_object('model_id',$4::text),$5,'observed','{"verdict":"incorrect"}','answer_mismatch')`,
+		review.PlanID, review.StartedAt, now, review.ModelID, review.LeaseUntil.Format(time.RFC3339Nano))
+	require.NoError(t, err)
+	require.NoError(t, repo.EvaluateOAuthDegradation(ctx, a.ID, now))
+	revision, err := repo.ReviewOAuthDegradationCandy(ctx, a.ID, review)
+	require.NoError(t, err)
+	require.Equal(t, c.Revision, revision)
+	review.Incorrect, review.Revision = 2, "superseded-revision"
+	_, err = repo.ReviewOAuthDegradationCandy(ctx, a.ID, review)
+	require.NoError(t, err)
+	before, err := repo.GetByID(ctx, a.ID)
+	require.NoError(t, err)
+	require.False(t, before.HasOAuthDegradationAction())
+	review.Revision = revision
+	for range 2 {
+		_, err = repo.ReviewOAuthDegradationCandy(ctx, a.ID, review)
+		require.NoError(t, err)
+	}
+	var count int
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT count(*) FROM account_auto_config_events WHERE account_id=$1 AND kind='degradation_applied'
+ AND details->'degradation'->>'trigger_reason'=$2 AND details->'degradation'->'candy_review'->>'incorrect'='2'`, a.ID, service.OAuthDegradationCandyRetested).Scan(&count))
+	require.Equal(t, 1, count)
+}
+
 func TestOAuthDegradation429PostgresWithoutProbeVerdicts(t *testing.T) {
 	repo, c := degradationPolicyFixture(t)
 	ctx := t.Context()

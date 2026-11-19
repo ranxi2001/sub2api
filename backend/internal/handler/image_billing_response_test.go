@@ -116,7 +116,7 @@ func (r *imageSettlementHTTPRepo) ApplyStagedUsageBilling(context.Context, servi
 type imageSettlementUpstream struct {
 	service.HTTPUpstream
 	contentType, body string
-	calls            int
+	calls             int
 }
 
 func (u *imageSettlementUpstream) Do(_ *http.Request, _ string, _ int64, _ int) (*http.Response, error) {

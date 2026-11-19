@@ -76,6 +76,7 @@ func degradationChainFixture(t *testing.T, current int, empty bool) (*service.Ac
 		_, err = integrationDB.ExecContext(ctx, `INSERT INTO scheduled_test_results(plan_id,status,started_at,finished_at,created_at,pelican_config,quality_round_id,quality_action,quality_judgment,error_message) VALUES($1,$2,NOW()-INTERVAL '1 minute',NOW()-INTERVAL '50 seconds',NOW()-INTERVAL '50 seconds','{"parallel_count":1}',$3,'evaluated',jsonb_build_object('verdict',$4::text),$5)`, plan, status, fmt.Sprintf("chain-%d-%d", a.ID, i), verdict, message)
 		require.NoError(t, err)
 	}
+	recordDegradationHTTPPressure(a.ID)
 	return a, group
 }
 
