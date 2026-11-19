@@ -25,6 +25,8 @@ type imageBillingResponse struct {
 	header       http.Header
 	status, size int
 	stream       bool
+	bodyStarted  bool
+	sse          bool
 	flushed      bool
 	failure      error
 }
@@ -55,7 +57,20 @@ func (w *imageBillingResponse) WriteHeaderNow() {
 }
 func (w *imageBillingResponse) WriteString(s string) (int, error) { return w.Write([]byte(s)) }
 func (w *imageBillingResponse) Write(b []byte) (int, error) {
+	if w.stream && !w.sse && imageBillingComment(b) {
+		// Queue/upstream keepalives can arrive before the actual protocol is
+		// known, or between lines of a JSON fallback. They are not image data.
+		return len(b), nil
+	}
 	w.WriteHeaderNow()
+	if w.stream && !w.bodyStarted {
+		if first := bytes.TrimSpace(b); len(first) > 0 {
+			w.bodyStarted = true
+			// An upstream can send a JSON object with an SSE Content-Type.
+			// Do not commit SSE headers or comments before seeing the body.
+			w.sse = first[0] != '{' && strings.HasPrefix(w.header.Get("Content-Type"), "text/event-stream")
+		}
+	}
 	if int64(w.size)+int64(len(b)) > imageBillingResponseLimit {
 		w.failure = errors.New("image billing response exceeds 64 MiB")
 		return 0, w.failure
@@ -67,9 +82,25 @@ func (w *imageBillingResponse) Write(b []byte) (int, error) {
 	}
 	return n, err
 }
+
+func imageBillingComment(body []byte) bool {
+	comment := false
+	for _, line := range bytes.Split(body, []byte("\n")) {
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		if line[0] != ':' {
+			return false
+		}
+		comment = true
+	}
+	return comment
+}
+
 func (w *imageBillingResponse) Flush() {
 	// Never expose a provisional amount or image as a successful completion.
-	if !w.stream {
+	if !w.sse {
 		return
 	}
 	w.ResponseWriter.Header().Set("Content-Type", "text/event-stream")
@@ -108,7 +139,7 @@ func (w *imageBillingResponse) passthrough() {
 func (w *imageBillingResponse) errorResponse(code, message string) {
 	w.flushed = true
 	payload, _ := json.Marshal(gin.H{"error": gin.H{"type": "api_error", "code": code, "message": message}})
-	if w.stream {
+	if w.sse || (w.stream && !w.bodyStarted) {
 		w.ResponseWriter.Header().Set("Content-Type", "text/event-stream")
 		_, _ = fmt.Fprintf(w.ResponseWriter, "event: error\ndata: %s\n\n", payload)
 	} else {
@@ -142,6 +173,15 @@ func imageEquivalentPayload(body []byte, receipt service.ImageBillingReceipt, in
 	}
 	return json.Marshal(out)
 }
+
+func isCompletedImageEvent(kind string, event map[string]json.RawMessage) bool {
+	// Include the SSE event name when the payload omits type. Selection uses
+	// the same completed image shapes as billing; the retained payload is unchanged.
+	event["type"], _ = json.Marshal(kind)
+	payload, err := json.Marshal(event)
+	return err == nil && service.IsCompletedOpenAIImageEvent(payload)
+}
+
 func (w *imageBillingResponse) settle(receipt service.ImageBillingReceipt) error {
 	if w.failure != nil {
 		return w.failure
@@ -155,8 +195,9 @@ func (w *imageBillingResponse) settle(receipt service.ImageBillingReceipt) error
 		return err
 	}
 	var out []byte
-	if !w.stream {
+	if !w.stream || bytes.HasPrefix(bytes.TrimSpace(body), []byte("{")) {
 		out, err = imageEquivalentPayload(body, receipt, true)
+		w.header.Set("Content-Type", "application/json")
 	} else {
 		// Rewrite only JSON data events. Put the request total on the final image
 		// event exactly once, including multi-image and partial-success responses.
@@ -165,9 +206,13 @@ func (w *imageBillingResponse) settle(receipt service.ImageBillingReceipt) error
 		last := -1
 		for i, block := range blocks {
 			var data [][]byte
+			var eventName string
 			for _, line := range bytes.Split(block, []byte("\n")) {
 				if bytes.HasPrefix(line, []byte("data:")) {
 					data = append(data, bytes.TrimPrefix(bytes.TrimPrefix(line, []byte("data:")), []byte(" ")))
+				}
+				if name, ok := bytes.CutPrefix(line, []byte("event:")); ok {
+					eventName = string(bytes.TrimSpace(name))
 				}
 			}
 			payload := bytes.Join(data, []byte("\n"))
@@ -178,7 +223,10 @@ func (w *imageBillingResponse) settle(receipt service.ImageBillingReceipt) error
 			payloads[i] = payload
 			var kind string
 			_ = json.Unmarshal(event["type"], &kind)
-			if strings.HasSuffix(kind, ".completed") || event["b64_json"] != nil || event["url"] != nil || event["data"] != nil {
+			if kind == "" {
+				kind = eventName
+			}
+			if isCompletedImageEvent(kind, event) {
 				last = i
 			}
 		}
@@ -203,6 +251,7 @@ func (w *imageBillingResponse) settle(receipt service.ImageBillingReceipt) error
 			blocks[i] = bytes.Join(lines, []byte("\n"))
 		}
 		out = bytes.Join(blocks, []byte("\n\n"))
+		w.header.Set("Content-Type", "text/event-stream")
 	}
 	if err != nil {
 		return err

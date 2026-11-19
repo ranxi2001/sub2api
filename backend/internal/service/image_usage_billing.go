@@ -3,9 +3,46 @@ package service
 import (
 	"context"
 	"fmt"
-	"github.com/gin-gonic/gin"
 	"math"
+	"strings"
+
+	"github.com/gin-gonic/gin"
 )
+
+func openAIUsageBillingModels(result *OpenAIForwardResult, fields ChannelUsageFields) (requested, primary string, candidates []string) {
+	requested = fields.OriginalModel
+	if fields.APIKeyMappedModel != "" {
+		requested = fields.APIKeyMappedModel
+	}
+	channelModel := fields.ChannelMappedModel
+	if !fields.ChannelMappingApplied && channelModel == fields.OriginalModel {
+		// An unchanged channel field is an audit alias, not a price override.
+		channelModel = requested
+	}
+	resultModel := result.Model
+	if !fields.ChannelMappingApplied && result.Model == fields.OriginalModel {
+		resultModel = requested
+	}
+	primary = forwardResultBillingModel(resultModel, result.UpstreamModel)
+	if result.BillingModel != "" {
+		primary = strings.TrimSpace(result.BillingModel)
+	}
+	if fields.BillingModelSource == BillingModelSourceChannelMapped && fields.ChannelMappedModel != "" &&
+		((fields.APIKeyMappedModel != "" && fields.ChannelMappingApplied) || fields.ChannelMappedModel != fields.OriginalModel) {
+		primary = fields.ChannelMappedModel
+	}
+	if fields.BillingModelSource == BillingModelSourceRequested && fields.OriginalModel != "" {
+		primary = requested
+	}
+	return requested, primary, usageBillingModelCandidates(primary, result.BillingModel, channelModel, requested, result.UpstreamModel, resultModel)
+}
+
+type imageBillingModelKey struct{}
+
+// WithImageBillingModel captures the pricing model selection before forwarding.
+func WithImageBillingModel(ctx context.Context, fields ChannelUsageFields) context.Context {
+	return context.WithValue(ctx, imageBillingModelKey{}, fields)
+}
 
 // ImageMinimumCharge is a final customer charge per completed image. It is
 // deliberately not a token price or a multiplier and survives personal discounts.
@@ -34,20 +71,27 @@ func validateImageMinimumCharge(platform string, p ChannelModelPricing) error {
 
 // applyImageMinimumCharge preserves every observed token and its base cost.
 // The adjustment is customer-only; account cost statistics must not inherit it.
-func applyImageMinimumCharge(cost *CostBreakdown, count, retries int, perImage float64) *CustomerCostDetails {
+func applyImageMinimumCharge(cost *CostBreakdown, count, retries int, perImage float64, standard *CustomerCostDetails) *CustomerCostDetails {
 	if cost == nil || cost.BillingMode != string(BillingModeToken) || count <= 0 || perImage <= 0 {
 		return nil
 	}
 	minimum := QuantizeUsageBillingAmount(perImage * float64(count) * float64(1+max(retries, 0)))
 	before := QuantizeUsageBillingAmount(cost.ActualCost)
 	cost.ActualCost = math.Max(before, minimum)
-	return &CustomerCostDetails{
+	details := CustomerCostDetails{
 		Version: 3, InputCost: cost.InputCost, OutputCost: cost.OutputCost,
 		ImageInputCost: cost.ImageInputCost, ImageOutputCost: cost.ImageOutputCost,
 		CacheCreationCost: cost.CacheCreationCost, CacheReadCost: cost.CacheReadCost,
 		TotalCost: cost.TotalCost, ActualCost: cost.ActualCost,
-		ImageMinimumCharge: minimum, ImageMinimumChargeAdjustment: cost.ActualCost - before,
 	}
+	if standard != nil {
+		details = *standard
+	}
+	details.Version = 3
+	details.ActualCost = cost.ActualCost
+	details.ImageMinimumCharge = minimum
+	details.ImageMinimumChargeAdjustment = QuantizeUsageBillingAmount(cost.ActualCost - before)
+	return &details
 }
 
 // ImageBillingReceipt is filled only after the durable billing transaction
@@ -78,14 +122,20 @@ func (r ImageBillingReceipt) EquivalentTokens() (int64, error) {
 
 // Explicit image cards and settlement receipts require observed completion;
 // an empty upstream data array cannot silently become the requested n images.
-func resolveImageCountForBillingMode(c *gin.Context, model string, reported, requested int) int {
+func resolveImageCountForBillingMode(c *gin.Context, fields ChannelUsageFields, model, upstreamModel string, reported, requested int) int {
 	key := getAPIKeyFromContext(c)
-	if c.GetHeader("X-Image-Usage") == "billing" {
+	if c != nil && c.GetHeader("X-Image-Usage") == "billing" {
 		return max(reported, 0)
 	}
 	if key != nil {
-		if p := matchGroupModelPricing(key.Group, model); p != nil && (p.BillingMode == BillingModeImage || p.ImageMinimumCharge != nil) {
+		requestedModel, billingModel, _ := openAIUsageBillingModels(&OpenAIForwardResult{Model: model, UpstreamModel: upstreamModel}, fields)
+		if p := matchGroupModelPricing(key.Group, billingModel); p != nil && p.BillingMode == BillingModeImage {
 			return max(reported, 0)
+		}
+		for _, model := range []string{requestedModel, billingModel} {
+			if p := matchGroupModelPricing(key.Group, model); p != nil && p.BillingMode == BillingModeToken && p.ImageMinimumCharge != nil {
+				return max(reported, 0)
+			}
 		}
 	}
 	return resolveBillableImageCount(reported, requested, imageCountBillingEnabled(key))

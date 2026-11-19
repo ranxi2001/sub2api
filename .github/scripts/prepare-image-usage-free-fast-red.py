@@ -18,7 +18,13 @@ if phase == 'usage':
 elif phase == 'cache':
     name = 'backend/internal/service/customer_cost_details.go'
     marker = 'type CustomerCostDetails struct {'
-    addition = '\n\tImageMinimumCharge float64 `json:"image_minimum_charge,omitempty"`\n\tImageMinimumChargeAdjustment float64 `json:"image_minimum_charge_adjustment,omitempty"`\n'
+    # New image snapshot fixtures compile in the same package even when only
+    # the historical cache-price oracle runs. Add their DTO fields without
+    # backporting either the cache-price producer or UltraFast behavior.
+    addition = ('\n\tImageMinimumCharge float64 `json:"image_minimum_charge,omitempty"`\n'
+                '\tImageMinimumChargeAdjustment float64 `json:"image_minimum_charge_adjustment,omitempty"`\n'
+                '\tFreeUltrafast bool `json:"free_ultrafast,omitempty"`\n'
+                '\tCacheCostDetails []CustomerCacheCostDetail `json:"cache_cost_details,omitempty"`\n')
 else:
     raise SystemExit('unsupported overlay')
 path = pathlib.Path(name)

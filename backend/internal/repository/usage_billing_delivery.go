@@ -12,9 +12,14 @@ import (
 var _ service.DurableUsageBillingRepository = (*usageBillingRepository)(nil)
 
 func (r *usageBillingRepository) StageUsageBilling(ctx context.Context, cmd *service.UsageBillingCommand, usage *service.UsageLog) error {
+	_, err := r.StageUsageBillingForReceipt(ctx, cmd, usage)
+	return err
+}
+
+func (r *usageBillingRepository) StageUsageBillingForReceipt(ctx context.Context, cmd *service.UsageBillingCommand, usage *service.UsageLog) (bool, error) {
 	if cmd == nil || usage == nil || cmd.RequestID == "" || cmd.APIKeyID <= 0 || cmd.UserID <= 0 ||
 		usage.RequestID != cmd.RequestID || usage.APIKeyID != cmd.APIKeyID || usage.UserID != cmd.UserID || usage.AccountID != cmd.AccountID {
-		return service.ErrUsageBillingRequestConflict
+		return false, service.ErrUsageBillingRequestConflict
 	}
 	cmd.Normalize()
 	e := service.UsageBillingEvent{Version: 1, Command: *cmd, Usage: *usage}
@@ -24,23 +29,27 @@ func (r *usageBillingRepository) StageUsageBilling(ctx context.Context, cmd *ser
 	}
 	raw, err := json.Marshal(e)
 	if err != nil {
-		return err
+		return false, err
 	}
 	command, err := json.Marshal(e.Command)
 	if err != nil {
-		return err
+		return false, err
 	}
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	_, err = tx.ExecContext(ctx, `INSERT INTO usage_billing_events
+	inserted, err := tx.ExecContext(ctx, `INSERT INTO usage_billing_events
 		(request_id,api_key_id,request_fingerprint,schema_version,payload,observed_at)
 		VALUES($1,$2,$3,1,$4::jsonb,$5) ON CONFLICT(request_id,api_key_id) DO NOTHING`,
 		cmd.RequestID, cmd.APIKeyID, cmd.RequestFingerprint, string(raw), e.Usage.CreatedAt)
 	if err != nil {
-		return err
+		return false, err
+	}
+	n, err := inserted.RowsAffected()
+	if err != nil {
+		return false, err
 	}
 	// Keep the first immutable usage snapshot. Repeated delivery may observe a
 	// later wall clock, but must never change the command, owner or monetary basis.
@@ -48,13 +57,13 @@ func (r *usageBillingRepository) StageUsageBilling(ctx context.Context, cmd *ser
 	err = tx.QueryRowContext(ctx, `SELECT schema_version=1 AND request_fingerprint=$3 AND ((payload->'command')-'PlatformUsageAt')=($4::jsonb-'PlatformUsageAt')
 		FROM usage_billing_events WHERE request_id=$1 AND api_key_id=$2`, cmd.RequestID, cmd.APIKeyID, cmd.RequestFingerprint, string(command)).Scan(&same)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !same {
-		return service.ErrUsageBillingRequestConflict
+		return false, service.ErrUsageBillingRequestConflict
 	}
 	if err = tx.Commit(); err == nil {
-		return nil
+		return n == 1, nil
 	}
 	// A lost COMMIT response is not proof of rollback. Check a fresh connection
 	// before returning; do not re-run either the model or a monetary operation.
@@ -64,9 +73,11 @@ func (r *usageBillingRepository) StageUsageBilling(ctx context.Context, cmd *ser
 	checkErr := r.db.QueryRowContext(check, `SELECT schema_version=1 AND request_fingerprint=$3 AND ((payload->'command')-'PlatformUsageAt')=($4::jsonb-'PlatformUsageAt')
 		FROM usage_billing_events WHERE request_id=$1 AND api_key_id=$2`, cmd.RequestID, cmd.APIKeyID, cmd.RequestFingerprint, string(command)).Scan(&stored)
 	if checkErr == nil && stored {
-		return nil
+		// Another transaction could have inserted the same command after a
+		// rollback. The read proves the command exists, not who created it.
+		return false, nil
 	}
-	return errors.Join(service.ErrUsageBillingOutcomeUnknown, err, checkErr)
+	return false, errors.Join(service.ErrUsageBillingOutcomeUnknown, err, checkErr)
 }
 
 func validateUsageBillingEvent(e *service.UsageBillingEvent, key service.UsageBillingEventKey, fingerprint string) error {
@@ -128,6 +139,7 @@ func (r *usageBillingRepository) ApplyStagedUsageBilling(ctx context.Context, ke
 				return nil, err
 			}
 		}
+		recovered.Settled = state != "legacy" && recovered.Result.Applied
 		recovered.Result.Applied = false
 		recovered.NeedsCache = state == "applied"
 		return recovered, nil
@@ -180,6 +192,7 @@ func (r *usageBillingRepository) ApplyStagedUsageBilling(ctx context.Context, ke
 		return nil, err
 	}
 	if err = tx.Commit(); err == nil {
+		recovered.Settled = true
 		recovered.NeedsCache = true
 		return recovered, nil
 	}
@@ -193,6 +206,7 @@ func (r *usageBillingRepository) ApplyStagedUsageBilling(ctx context.Context, ke
 		WHERE request_id=$1 AND api_key_id=$2`, key.RequestID, key.APIKeyID).Scan(&committedState, &committedResult)
 	if checkErr == nil && (committedState == "applied" || committedState == "complete") {
 		if checkErr = json.Unmarshal(committedResult, &recovered.Result); checkErr == nil {
+			recovered.Settled = recovered.Result.Applied
 			recovered.NeedsCache = committedState == "applied"
 			return recovered, nil
 		}

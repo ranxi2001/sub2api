@@ -9,11 +9,19 @@ const close = (a: number, b: number) => Math.abs(a - b) <= 1e-10 + Math.abs(b) *
 
 export function customerCostSnapshot(row: UsageLog | null): CustomerCostDetails | null {
   const detail = row?.customer_cost_details
-  if (!row || !['priority', 'fast', 'ultrafast'].includes(row.service_tier ?? '') || !detail || ![1, 2].includes(detail.version) || (row.service_tier === 'ultrafast' ? detail.free_ultrafast !== true : detail.free_fast !== true)) return null
+  if (!row || !['priority', 'fast', 'ultrafast'].includes(row.service_tier ?? '') || !detail || ![1, 2, 3].includes(detail.version) || (row.service_tier === 'ultrafast' ? detail.free_ultrafast !== true : detail.free_fast !== true)) return null
   if (![...components.map(key => detail[key]), detail.total_cost, detail.actual_cost, detail.multiplier].every(value => Number.isFinite(value) && value >= 0)) return null
   const sum = components.reduce((total, key) => total + detail[key], 0)
-  if (!close(sum, detail.total_cost) || !close(sum * detail.multiplier, detail.actual_cost) || !closeMoney(detail.actual_cost, row.actual_cost)) return null
-  if (detail.version === 2 && !validCachePrices(row, detail)) return null
+  if (!close(sum, detail.total_cost) || !closeMoney(detail.actual_cost, row.actual_cost)) return null
+  const base = sum * detail.multiplier
+  if (detail.version === 3) {
+    const minimum = detail.image_minimum_charge ?? 0
+    const adjustment = detail.image_minimum_charge_adjustment ?? 0
+    if (!Number.isFinite(minimum) || minimum <= 0 || !Number.isFinite(adjustment) || adjustment < 0 ||
+        !closeMoney(Math.max(base, minimum), detail.actual_cost) ||
+        !closeMoney(Math.max(minimum - base, 0), adjustment)) return null
+  } else if (!close(base, detail.actual_cost)) return null
+  if ((detail.version === 2 || (detail.version === 3 && detail.cache_cost_details !== undefined)) && !validCachePrices(row, detail)) return null
   return detail
 }
 
@@ -51,7 +59,7 @@ function validCachePrices(row: UsageLog, detail: CustomerCostDetails): boolean {
 export function customerCachePrices(row: UsageLog | null): Array<Omit<CustomerCacheCostDetail, 'unit_price'> & { unit_price: number | null }> {
   const detail = customerCostSnapshot(row)
   if (!row || (!detail && !customerCostsUnknown(row))) return []
-  if (detail?.version === 2) return detail.cache_cost_details ?? []
+  if (detail?.version === 2 || (detail?.version === 3 && detail.cache_cost_details !== undefined)) return detail.cache_cost_details ?? []
   // Version 1 saved aggregates only. TTL counts can label unknown prices, but
   // cannot reconstruct a price. Do not consult today's catalogue or group.
   const lines: Array<Omit<CustomerCacheCostDetail, 'unit_price'> & { unit_price: number | null }> = []

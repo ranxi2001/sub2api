@@ -106,6 +106,7 @@ func TestUsageBillingDeliveryLogFailureRollsBackMoneyAndRecovers(t *testing.T) {
 	result, err = repo.ApplyStagedUsageBilling(ctx, key)
 	require.NoError(t, err)
 	require.False(t, result.Result.Applied)
+	require.True(t, result.Settled)
 	require.False(t, result.NeedsCache)
 }
 
@@ -121,6 +122,7 @@ func TestUsageBillingDeliveryArchiveClaimNeverBackChargesHistory(t *testing.T) {
 	r, err := repo.ApplyStagedUsageBilling(ctx, service.UsageBillingEventKey{RequestID: cmd.RequestID, APIKeyID: cmd.APIKeyID})
 	require.NoError(t, err)
 	require.False(t, r.Result.Applied)
+	require.False(t, r.Settled, "legacy dedup is not proof that this staged usage settled")
 	var balance string
 	var logs int
 	require.NoError(t, db.QueryRowContext(ctx, "SELECT balance::text FROM users WHERE id=$1", cmd.UserID).Scan(&balance))
