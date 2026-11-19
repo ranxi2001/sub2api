@@ -442,6 +442,27 @@ func TestProviderProfitUniqueSiteClaimsAfterUnlinkAndOAuthUsesBinding(t *testing
 	require.Contains(t, rows, site+"/v1", "two providers sharing a site key must not auto-merge the unlinked URL")
 }
 
+func TestProviderProfitReportHistoricalOwnerAtManualBoundaries(t *testing.T) {
+	f := newProfitChargeFixture(t)
+	override := f.id(`INSERT INTO upstream_channels(name,code) VALUES('Manual override','manual-boundary') RETURNING id`)
+	start := f.now()
+	end := start.Add(time.Second)
+	f.exec(`INSERT INTO provider_profit_manual_history(account_id,channel_id,revision,effective_from,effective_until)
+		VALUES($1,$2,1,$3,$4)`, f.account, override, start, end)
+	before := start.Add(-time.Microsecond)
+	f.usageWithIncome(f.account, nil, before, 1)
+	f.usageWithIncome(f.account, nil, start, 2)
+	f.usageWithIncome(f.account, nil, end, 4)
+
+	w := service.ProviderProfitWindow{From: before, Until: end.Add(time.Microsecond)}
+	imported := f.report(f.channel, w)
+	require.Equal(t, "2", string(imported["requests"]))
+	require.JSONEq(t, "5", string(imported["request_income"]))
+	manual := f.report(override, w)
+	require.Equal(t, "1", string(manual["requests"]))
+	require.JSONEq(t, "2", string(manual["request_income"]))
+}
+
 func TestProviderProfitLegacyIncomeUnchangedByFirstLink(t *testing.T) {
 	f := newProfitChargeFixture(t)
 	channel := f.id(`INSERT INTO upstream_channels(name,code) VALUES('Legacy channel','legacy-fixture') RETURNING id`)
