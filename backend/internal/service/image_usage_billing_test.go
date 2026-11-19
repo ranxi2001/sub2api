@@ -54,7 +54,7 @@ func TestImageMinimumPreservesStandardTierSnapshot(t *testing.T) {
 			details := applyImageMinimumCharge(cost, 1, 0, floor, standard)
 			want := *standard
 			want.Version = 3
-			want.ActualCost = max(.002, floor)
+			want.ActualCost = math.Max(.002, floor)
 			want.ImageMinimumCharge = floor
 			want.ImageMinimumChargeAdjustment = QuantizeUsageBillingAmount(want.ActualCost - .002)
 			require.Equal(t, &want, details)
