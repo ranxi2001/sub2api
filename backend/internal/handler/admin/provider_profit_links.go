@@ -68,5 +68,6 @@ func (h *ChannelHandler) SetProviderProfitLink(c *gin.Context) {
 		providerProfitLinkError(c, err)
 		return
 	}
+	h.profitReports.clear()
 	response.Success(c, out)
 }

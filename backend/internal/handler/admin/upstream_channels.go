@@ -92,10 +92,12 @@ func (h *ChannelHandler) MutateUpstreamChannel(c *gin.Context) {
 		return
 	}
 	if out == nil {
+		h.profitReports.clear()
 		response.Success(c, gin.H{"deleted": id})
 		return
 	}
 	middleware.SetAuditExtra(c, map[string]any{"target_channel_id": out.ID, "config_version": out.Revision})
+	h.profitReports.clear()
 	response.Success(c, out)
 }
 func (h *ChannelHandler) ReadUpstreamChannelBindings(c *gin.Context) {
@@ -141,6 +143,7 @@ func (h *ChannelHandler) BindUpstreamChannelAccounts(c *gin.Context) {
 		upstreamChannelError(c, e)
 		return
 	}
+	h.profitReports.clear()
 	response.Success(c, gin.H{"items": out})
 }
 func (h *ChannelHandler) UpstreamChannelMembers(c *gin.Context) {

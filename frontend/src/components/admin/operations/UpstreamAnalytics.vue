@@ -1,8 +1,8 @@
 <template>
-  <AppLayout>
+  <component :is="embedded ? 'div' : AppLayout">
     <div class="min-w-0 space-y-5">
       <header class="flex flex-wrap items-start justify-between gap-3"><div><h1 class="text-2xl font-semibold">{{ t('upstreamOps.title') }}</h1><p class="mt-2 text-sm text-gray-500">{{ t('upstreamOps.description') }}</p></div><button class="btn btn-secondary" data-testid="refresh-operations" :disabled="loading" @click="load">{{ t('upstreamOps.refresh') }}</button></header>
-      <SmartOpsNav />
+      <SmartOpsNav v-if="!embedded" />
       <slot />
       <p class="rounded-xl bg-primary-50 p-4 text-sm leading-6 dark:bg-dark-800">{{ t('upstreamOps.attribution') }}</p>
       <form data-testid="upstream-filters" class="card grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4" @submit.prevent="apply">
@@ -36,7 +36,7 @@
         <section class="card space-y-3 p-4"><h2 class="font-semibold">{{ t('upstreamOps.errors') }}</h2><p class="text-sm text-gray-500">{{ t('upstreamOps.errorNote') }}</p><p v-if="snapshot.errors.status !== 'ready'" role="alert">{{ snapshot.errors.error }}</p><template v-else-if="snapshot.errors.data"><p>{{ t('upstreamOps.errorRecords') }} {{ snapshot.errors.data.records }} · 5xx {{ snapshot.errors.data.upstream_5xx }}</p><p v-for="(row, i) in snapshot.errors.data.rows" :key="i" class="text-sm">{{ row.error_type }} / {{ row.error_phase }} / {{ row.status_code }}: {{ row.records }}</p></template><a class="text-primary-600 underline" href="/admin/ops">{{ t('upstreamOps.errors') }}</a></section>
       </template>
     </div>
-  </AppLayout>
+  </component>
 </template>
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
@@ -44,6 +44,7 @@ import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import SmartOpsNav from './SmartOpsNav.vue'
 import { readOperations, type OperationsQuery, type OperationsSnapshot, type OperationsRow, type UpstreamMetrics } from '@/api/admin/upstreamOperations'
+defineProps<{ embedded?: boolean }>()
 const { t } = useI18n()
 const amountKeys = ['requests'] as const
 const sortKeys = [...amountKeys, 'name']

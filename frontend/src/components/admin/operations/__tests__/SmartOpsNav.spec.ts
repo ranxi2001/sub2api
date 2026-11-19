@@ -12,7 +12,7 @@ import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import type { User } from '@/types'
 
 const smartOpsPaths = ['/admin/lottery', '/admin/auto-config', '/admin/priority-scheduling',
-  '/admin/qqbot/overview', '/admin/channel-operations', '/admin/profit-operations', '/admin/account-quality', '/admin/controlled-experiments', '/admin/account-ops', '/admin/token-guard-v2', '/admin/pelican-tests', '/admin/group-cache-tests']
+  '/admin/qqbot/overview', '/admin/channel-config', '/admin/account-quality', '/admin/controlled-experiments', '/admin/token-guard-v2', '/admin/pelican-tests', '/admin/group-cache-tests']
 
 async function mountAt(path: string) {
   const router = createRouter({
@@ -99,9 +99,9 @@ describe('SmartOpsNav', () => {
   })
 
   it('uses the provider reconciliation notice on the existing profit entry', async () => {
-    const wrapper = await mountAt('/admin/profit-operations')
-    await wrapper.get('a[href="/admin/profit-operations"] + [data-testid="new-feature-badge"]').trigger('click')
-    expect(useNewFeatureNoticeStore().isDismissed(41, NEW_FEATURE_NOTICES.providerProfit)).toBe(true)
+    const wrapper = await mountAt('/admin/channel-config')
+    await wrapper.get('a[href="/admin/channel-config"] + [data-testid="new-feature-badge"]').trigger('click')
+    expect(useNewFeatureNoticeStore().isDismissed(41, NEW_FEATURE_NOTICES.channelConfig)).toBe(true)
     wrapper.unmount()
   })
 

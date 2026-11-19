@@ -32,7 +32,7 @@ func (s *providerProfitLinkStub) SetProviderProfitLink(_ context.Context, id int
 	return &s.item, nil
 }
 func TestProviderProfitLinkHandlerContract(t *testing.T) {
-	s := &providerProfitLinkStub{item: service.ProviderProfitLink{ProviderID: 7, ProviderName: "Fixture", SiteType: "newapi", ChannelID: 19, ChannelName: "Fixture channel", Revision: 3, Status: "disconnected"}}
+	s := &providerProfitLinkStub{item: service.ProviderProfitLink{CostMode: "estimate", ProviderID: 7, ProviderName: "Fixture", SiteType: "newapi", ChannelID: 19, ChannelName: "Fixture channel", Revision: 3, Status: "disconnected"}}
 	h := NewChannelHandler(service.NewChannelService(s, nil, nil, nil, nil), nil, nil)
 	r := gin.New()
 	r.GET("/providers", h.ListProviderProfitLinks)
@@ -48,11 +48,11 @@ func TestProviderProfitLinkHandlerContract(t *testing.T) {
 	w := call("GET", "/providers?page=1&page_size=10", "")
 	require.Equal(t, 200, w.Code)
 	require.Equal(t, "no-store", w.Header().Get("Cache-Control"))
-	require.JSONEq(t, `{"code":0,"message":"success","data":{"items":[{"provider_id":7,"provider_name":"Fixture","site_type":"newapi","channel_id":19,"channel_name":"Fixture channel","revision":3,"observed_at":null,"status":"disconnected","metrics":{"today_spend":null,"total_spend":null,"currency":""}}],"total":1,"page":1,"page_size":10}}`, w.Body.String())
+	require.JSONEq(t, `{"code":0,"message":"success","data":{"items":[{"cost_mode":"estimate","provider_id":7,"provider_name":"Fixture","site_type":"newapi","channel_id":19,"channel_name":"Fixture channel","revision":3,"observed_at":null,"status":"disconnected","metrics":{"today_spend":null,"total_spend":null,"currency":""}}],"total":1,"page":1,"page_size":10}}`, w.Body.String())
 	for _, path := range []string{"/providers?page=0", "/providers?page_size=101", "/providers?page=1.5"} {
 		require.Equal(t, 400, call("GET", path, "").Code)
 	}
-	for _, body := range []string{`{}`, `{"channel_id":5,"revision":3}`, `{"channel_id":0,"revision":3,"confirm":true}`, `{"channel_id":5,"revision":0,"confirm":true}`, `{"channel_id":5,"revision":3,"confirm":true,"unexpected":42}`, `{"channel_id":5,"revision":3,"confirm":true}{}`} {
+	for _, body := range []string{`{"channel_id":5,"revision":3,"confirm":true,"cost_mode":"invalid"}`, `{}`, `{"channel_id":5,"revision":3}`, `{"channel_id":0,"revision":3,"confirm":true}`, `{"channel_id":5,"revision":0,"confirm":true}`, `{"channel_id":5,"revision":3,"confirm":true,"unexpected":42}`, `{"channel_id":5,"revision":3,"confirm":true}{}`} {
 		require.Equal(t, 400, call("PUT", "/providers/7", body).Code)
 	}
 	require.Zero(t, s.writes)

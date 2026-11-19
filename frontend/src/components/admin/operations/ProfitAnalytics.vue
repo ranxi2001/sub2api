@@ -1,9 +1,9 @@
 <template>
-  <AppLayout>
+  <component :is="embedded ? 'div' : AppLayout">
     <div class="min-w-0 space-y-5">
-      <header class="flex flex-wrap items-start justify-between gap-3"><div><h1 class="text-2xl font-semibold">{{ t('profitOps.title') }}</h1><p class="mt-2 text-sm text-gray-500">{{ t('profitOps.description') }}</p></div><div class="flex flex-wrap gap-2"><button class="btn btn-secondary" data-testid="refresh-wallet" :disabled="loading" @click="load(true)">{{ t('profitOps.refreshWallet') }}</button><button class="btn btn-secondary" data-testid="refresh-operations" :disabled="loading" @click="load()">{{ t('profitOps.refresh') }}</button></div></header>
-      <SmartOpsNav />
-      <UpstreamChannelManager @changed="load"><ProfitProviders v-if="auth.isAdmin" @changed="load" /></UpstreamChannelManager>
+      <header class="flex flex-wrap items-start justify-between gap-3"><div><h1 class="text-2xl font-semibold">{{ t('profitOps.title') }}</h1><p class="mt-2 text-sm text-gray-500">{{ t('profitOps.description') }}</p></div><div class="flex flex-wrap gap-2"><button class="btn btn-secondary" data-testid="refresh-wallet" :disabled="loading" @click="load(true)">{{ t('profitOps.refreshWallet') }}</button><button class="btn btn-secondary" data-testid="refresh-operations" :disabled="loading" @click="load(false, true)">{{ t('profitOps.refresh') }}</button></div></header>
+      <SmartOpsNav v-if="!embedded" />
+      <UpstreamChannelManager v-if="!embedded" @changed="load"><ProfitProviders v-if="auth.isAdmin" @changed="load" /></UpstreamChannelManager>
       <p class="rounded-xl bg-primary-50 p-4 text-sm leading-6 dark:bg-dark-800">{{ t('profitOps.attribution') }}</p>
       <details class="card p-4" open><summary class="font-semibold">{{ t('profitOps.method') }}</summary><p class="mt-3 text-sm leading-6">{{ t('profitOps.formula') }}</p><p class="mt-2 text-sm leading-6">{{ t('profitOps.incomeNote') }}</p><p class="mt-2 text-sm leading-6">{{ t('profitOps.unknownNote') }}</p></details>
       <form data-testid="profit-filters" class="card grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4" @submit.prevent="apply">
@@ -50,7 +50,7 @@
                   <span v-if="applied.dimension === 'upstream'" class="block text-xs text-gray-500">{{ t(`upstreamEntities.${row.assignment || (row.key.startsWith('unknown:') ? 'unbound_unknown' : 'unbound_url')}`) }}<span v-if="row.channel_id"> #{{ row.channel_id }} · {{ row.channel_code }} · {{ row.channel_remark }}</span></span>
                 </th>
                 <td v-for="key in amountKeys" :key="key" class="whitespace-nowrap p-2 tabular-nums"><span v-if="metricLabel(key, row) !== metricLabel(key, snapshot.usage.summary)" class="block text-xs text-gray-500">{{ metricLabel(key, row) }}</span><span :data-field="key">{{ formatMetric(row, key) }}</span></td>
-                <td class="p-2"><span data-testid="cost-source">{{ sourceLabel(row) }}</span></td>
+                <td class="p-2"><span data-testid="cost-source">{{ sourceLabel(row) }}</span><span v-if="row.wallet_observed_at || row.wallet_error_at" class="block text-xs text-gray-500">{{ synced(row.wallet_observed_at || row.wallet_error_at || '') }}</span></td>
                 <td>{{ number(row.p50_ms, 0) }} / {{ number(row.p90_ms, 0) }} / {{ number(row.p95_ms, 0) }}<span class="block text-xs">{{ t('profitOps.samples') }} {{ row.samples }} / {{ t('profitOps.unknown') }} {{ row.unknown_samples }}</span></td><td>{{ number(row.duration_p90_ms,0) }}</td>
               </tr></tbody>
             </table>
@@ -64,10 +64,10 @@
         <section class="card space-y-3 p-4"><h2 class="font-semibold">{{ t('profitOps.errors') }}</h2><p class="text-sm text-gray-500">{{ t('profitOps.errorNote') }}</p><p v-if="snapshot.errors.status !== 'ready'" role="alert">{{ snapshot.errors.error }}</p><template v-else-if="snapshot.errors.data"><p>{{ t('profitOps.errorRecords') }} {{ snapshot.errors.data.records }} · 5xx {{ snapshot.errors.data.upstream_5xx }}</p><p v-for="(row, i) in snapshot.errors.data.rows" :key="i" class="text-sm">{{ row.error_type }} / {{ row.error_phase }} / {{ row.status_code }}: {{ row.records }}</p></template><a class="text-primary-600 underline" href="/admin/ops">{{ t('profitOps.errors') }}</a></section>
       </template>
     </div>
-  </AppLayout>
+  </component>
 </template>
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { watch, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
@@ -77,6 +77,8 @@ import SmartOpsNav from './SmartOpsNav.vue'
 import UpstreamChannelManager from './UpstreamChannelManager.vue'
 import ProfitProviders from './ProfitProviders.vue'
 import { readProfitOperations, type OperationsQuery, type OperationsSnapshot, type OperationsRow, type ProfitMetrics } from '@/api/admin/profitOperations'
+const props = withDefaults(defineProps<{ embedded?: boolean; active?: boolean; scope?: Partial<OperationsQuery> }>(), {active:true})
+const emit = defineEmits<{ scope: [value: OperationsQuery]; refreshed: [] }>()
 const { t } = useI18n()
 const auth = useAuthStore()
 const amountKeys = ['requests','standard_charge','request_income','upstream_cost','gross_profit','gross_margin'] as const
@@ -90,6 +92,8 @@ start.setHours(0,0,0,0)
 const local = (d: Date) => new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,16)
 const from=ref(local(start)), until=ref(local(at))
 const initial: OperationsQuery = { from:start.toISOString(),until:at.toISOString(),upstream:'',channel_id:0,account_id:0,group_id:0,model:'',model_scope:'public',dimension:'upstream',sort:'requests',direction:'desc',page:1,page_size:20 }
+Object.assign(initial, props.scope)
+from.value=local(new Date(initial.from)); until.value=local(new Date(initial.until))
 const draft=ref<OperationsQuery>({...initial}), applied=ref<OperationsQuery>({...initial})
 const snapshot=ref<OperationsSnapshot|null>(null), loading=ref(false), error=ref('')
 let request=0, alive=true, controller: AbortController|undefined
@@ -127,9 +131,11 @@ function formatMetric(m: ProfitMetrics, key: Metric) {
  if (key === 'gross_margin') return m.gross_margin == null || !Number.isFinite(m.gross_margin) ? t('profitOps.unknown') : `${(m.gross_margin * 100).toFixed(2)}%`
  return number(m[key], key === 'requests' ? 0 : 6)
 }
-async function load(forceWallet = false) {
+async function load(forceWallet = false, forceReport = false) {
+ if(props.active===false)return
+ emit('scope', {...applied.value})
  const id=++request; controller?.abort(); controller=new AbortController(); loading.value=true; error.value=''; snapshot.value=null
- try { const next=await readProfitOperations({...applied.value},controller.signal,forceWallet); if(alive && request===id) snapshot.value=next }
+ try { const next=(forceReport ? await readProfitOperations({...applied.value},controller.signal,forceWallet,true) : await readProfitOperations({...applied.value},controller.signal,forceWallet)); if(alive && request===id) { snapshot.value=next; if(forceReport || forceWallet) emit('refreshed') } }
  catch (cause) {
   if(alive && request===id) {
    const failure=cause as { status?: number; reason?: string; code?: string } | null
@@ -180,6 +186,13 @@ function drill(row:OperationsRow){if(applied.value.dimension==='upstream'){const
 function selectUpstream(key:string,channelID=0){applied.value={...applied.value,upstream:channelID?'':key,channel_id:channelID,account_id:0,dimension:'account',page:1};draft.value={...applied.value};void load()}
 function selectAccount(id:number){applied.value={...applied.value,account_id:id,dimension:'model',page:1};draft.value={...applied.value};void load()}
 function overview(){applied.value={...applied.value,upstream:'',channel_id:0,account_id:0,dimension:'upstream',page:1};draft.value={...applied.value};void load()}
+watch(() => props.scope, scope => {
+ if (!scope) return
+ const next={...applied.value,...scope}
+ if(JSON.stringify(next)===JSON.stringify(applied.value)) return
+ applied.value=next; draft.value={...next}; from.value=local(new Date(next.from));until.value=local(new Date(next.until));void load()
+}, {deep:true})
+watch(() => props.active, (active,previous) => { if(active && previous===false && (!snapshot.value || JSON.stringify(snapshot.value.scope)!==JSON.stringify(applied.value))) void load() })
 onMounted(() => { void load() })
 onBeforeUnmount(()=>{alive=false;request++;controller?.abort()})
 </script>

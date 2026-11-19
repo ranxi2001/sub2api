@@ -81,6 +81,8 @@ import { useAuthStore } from '@/stores/auth'
 import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
 import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import { listProviders, saveProvider, refreshProvider, deleteProvider, type MatureProvider, type ProviderInput } from '@/api/admin/matureProviders'
+const props = defineProps<{ passive?: boolean }>()
+const emit = defineEmits<{ changed: [] }>()
 const { t } = useI18n(), auth = useAuthStore()
 const providers = ref<MatureProvider[]>([]), total = ref(0), page = ref(1), pageSize = 20
 const query = ref(''), status = ref(''), loading = ref(false), error = ref(''), busy = ref<number | null>(null)
@@ -98,7 +100,7 @@ function amount(p: MatureProvider, field: typeof metrics[number]) {
 function lowBalance(p: MatureProvider) { return p.status === 'connected' && !p.suppress_low_balance_alert && p.low_balance_threshold != null && p.metrics.balance != null && p.metrics.balance < p.low_balance_threshold }
 function message(e: unknown) { return t((e as { status?: number })?.status === 409 ? 'matureProviders.conflict' : 'matureProviders.failed') }
 async function refreshVisible(items: MatureProvider[], current: number) {
-  if (formOpen.value || current !== generation) return
+  if (props.passive || formOpen.value || current !== generation) return
   const pending = items.filter(p => p.has_credential && !refreshed.has(p.id))
   if (!pending.length) return
   for (const provider of pending) {
@@ -131,7 +133,7 @@ async function save() {
   const input = { ...draft.value, cost_multiplier: cost.value === '' ? null : Number(cost.value), low_balance_threshold: threshold.value === '' ? null : Number(threshold.value) }
   if (credential.value) { if (input.auth_mode === 'password') input.password = credential.value; else input.access_token = credential.value }
   if (refreshToken.value && input.auth_mode === 'token' && input.site_type === 'sub2api') input.refresh_token = refreshToken.value
-  try { await saveProvider(editID.value, input); formOpen.value = false; credential.value = ''; refreshToken.value = ''; await load() }
+  try { await saveProvider(editID.value, input); formOpen.value = false; credential.value = ''; refreshToken.value = ''; await load(); emit('changed') }
   catch (e) { error.value = message(e) }
   finally { saving.value = false }
 }
@@ -143,7 +145,7 @@ async function refresh(p: MatureProvider) {
 async function remove() {
   if (!deleting.value || busy.value !== null) return
   busy.value = deleting.value.id; error.value = ''
-  try { await deleteProvider(deleting.value); deleting.value = null; await load() } catch (e) { error.value = message(e); deleting.value = null } finally { busy.value = null }
+  try { await deleteProvider(deleting.value); deleting.value = null; await load(); emit('changed') } catch (e) { error.value = message(e); deleting.value = null } finally { busy.value = null }
 }
 onMounted(load)
 onBeforeUnmount(() => { alive = false; generation++; controller?.abort(); credential.value = ''; refreshToken.value = '' })

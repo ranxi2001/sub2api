@@ -10,7 +10,7 @@ import (
 func (r *channelRepository) ListProviderSpendTargets(ctx context.Context) ([]service.ProviderSpendTarget, error) {
 	rows, err := r.db.QueryContext(ctx, `SELECT p.id, p.revision FROM mature_providers p
 		JOIN provider_profit_links l ON l.provider_id=p.id
-		WHERE p.credential_cipher<>''
+		WHERE p.credential_cipher<>'' AND l.cost_mode='wallet'
 		ORDER BY p.id`)
 	if err != nil {
 		return nil, err

@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
@@ -41,4 +43,38 @@ func profitURLDirectory(ctx context.Context, tx *sql.Tx) (map[string]profitURLPr
 		directory[key] = p
 	}
 	return directory, rows.Err()
+}
+
+// ProfitChannelAccountIDs uses the same current ownership projection as the
+// report, without aggregating usage or requesting a provider wallet.
+func (r *channelRepository) ProfitChannelAccountIDs(ctx context.Context, channel int64) ([]int64, error) {
+	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	raw, err := profitOperationsAccounts(ctx, tx, service.UpstreamOperationsFilter{})
+	if err != nil {
+		return nil, err
+	}
+	var accounts []struct {
+		ID        int64 `json:"id"`
+		ChannelID int64 `json:"channel_id"`
+		Deleted   bool  `json:"deleted"`
+	}
+	if err = json.Unmarshal(raw, &accounts); err != nil {
+		return nil, err
+	}
+	ids := make([]int64, 0)
+	for _, account := range accounts {
+		if !account.Deleted && account.ChannelID == channel {
+			ids = append(ids, account.ID)
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+	return ids, nil
 }

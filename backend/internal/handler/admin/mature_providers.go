@@ -119,9 +119,11 @@ func (h *ChannelHandler) MutateMatureProvider(c *gin.Context) {
 		return
 	}
 	if out == nil {
+		h.profitReports.clear()
 		response.Success(c, gin.H{"deleted": id})
 		return
 	}
 	middleware.SetAuditExtra(c, map[string]any{"provider_id": out.ID, "revision": out.Revision})
+	h.profitReports.clear()
 	response.Success(c, out)
 }

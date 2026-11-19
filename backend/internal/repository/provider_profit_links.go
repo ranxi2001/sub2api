@@ -13,7 +13,7 @@ import (
 
 // Select individual public fields; never select raw metrics, dashboard account,
 // observations' errors, URL, key provenance, or encrypted credentials.
-const providerProfitLinkSelect = `SELECT p.id,p.name,p.site_type,c.id,c.name,l.revision,p.observed_at,p.status,
+const providerProfitLinkSelect = `SELECT l.cost_mode,p.id,p.name,p.site_type,c.id,c.name,l.revision,p.observed_at,p.status,
  CASE WHEN jsonb_typeof(p.metrics->'today_spend')='number' THEN p.metrics->>'today_spend' END,
  CASE WHEN jsonb_typeof(p.metrics->'total_spend')='number' THEN p.metrics->>'total_spend' END,
  CASE WHEN p.metrics->>'currency' IN ('USD','CNY','quota_units') THEN p.metrics->>'currency' ELSE '' END
@@ -21,7 +21,7 @@ const providerProfitLinkSelect = `SELECT p.id,p.name,p.site_type,c.id,c.name,l.r
 
 func scanProviderProfitLink(row interface{ Scan(...any) error }) (*service.ProviderProfitLink, error) {
 	var v service.ProviderProfitLink
-	err := row.Scan(&v.ProviderID, &v.ProviderName, &v.SiteType, &v.ChannelID, &v.ChannelName, &v.Revision, &v.ObservedAt, &v.Status, &v.Metrics.TodaySpend, &v.Metrics.TotalSpend, &v.Metrics.Currency)
+	err := row.Scan(&v.CostMode, &v.ProviderID, &v.ProviderName, &v.SiteType, &v.ChannelID, &v.ChannelName, &v.Revision, &v.ObservedAt, &v.Status, &v.Metrics.TodaySpend, &v.Metrics.TotalSpend, &v.Metrics.Currency)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, service.ErrProviderProfitLinkNotFound
 	}
@@ -89,7 +89,8 @@ func (r *channelRepository) SetProviderProfitLink(ctx context.Context, id int64,
 	var out *service.ProviderProfitLink
 	err := r.runInTx(ctx, func(tx *sql.Tx) error {
 		var channel, revision int64
-		err := tx.QueryRowContext(ctx, `SELECT channel_id,revision FROM provider_profit_links WHERE provider_id=$1 FOR UPDATE`, id).Scan(&channel, &revision)
+		var costMode string
+		err := tx.QueryRowContext(ctx, `SELECT channel_id,revision,cost_mode FROM provider_profit_links WHERE provider_id=$1 FOR UPDATE`, id).Scan(&channel, &revision, &costMode)
 		if errors.Is(err, sql.ErrNoRows) {
 			return service.ErrProviderProfitLinkNotFound
 		}
@@ -99,8 +100,11 @@ func (r *channelRepository) SetProviderProfitLink(ctx context.Context, id int64,
 		if m.Revision != revision {
 			return service.ErrProviderProfitLinkConflict
 		}
-		if m.ChannelID != channel {
-			_, err = tx.ExecContext(ctx, `UPDATE provider_profit_links SET channel_id=$2,revision=revision+1 WHERE provider_id=$1`, id, m.ChannelID)
+		if m.CostMode != nil {
+			costMode = *m.CostMode
+		}
+		if m.ChannelID != channel || m.CostMode != nil {
+			_, err = tx.ExecContext(ctx, `UPDATE provider_profit_links SET channel_id=$2,cost_mode=$3,revision=revision+1 WHERE provider_id=$1`, id, m.ChannelID, costMode)
 			if isUniqueViolation(err) {
 				return service.ErrProviderProfitLinkConflict
 			}

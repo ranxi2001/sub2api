@@ -190,7 +190,7 @@ const profitOperationsBase = `WITH ` + profitOperationsCohort + `, event_rows AS
  u.account_stats_cost,u.input_tokens,u.output_tokens,u.cache_read_tokens,u.cache_creation_tokens,u.duration_ms,u.billing_type,u.created_at,u.queue_timing,u.queue_wait_ms,
  COALESCE('channel:'||owner.channel_id::text,c.url_key,'unknown:account_missing') AS upstream_key,
  CASE WHEN e.channel_id IS NOT NULL OR h.channel_id IS NOT NULL THEN 'historical_channel' WHEN legacy.channel_id IS NOT NULL THEN 'legacy_channel_estimate' WHEN owner.channel_id IS NOT NULL THEN 'provider_url' ELSE COALESCE(c.url_attribution,'account_missing') END AS attribution,
- c.name AS account_name,c.updated_at AS config_updated_at,c.deleted,c.multiplier,owner.channel_id AS explicit_channel_id,ch.name AS channel_name,ch.code AS channel_code,ch.remark AS channel_remark,ch.revision AS channel_revision,pl.provider_id,p.site_type AS provider_site_type,
+ c.name AS account_name,c.updated_at AS config_updated_at,c.deleted,c.multiplier,owner.channel_id AS explicit_channel_id,ch.name AS channel_name,ch.code AS channel_code,ch.remark AS channel_remark,ch.revision AS channel_revision,p.id AS provider_id,p.site_type AS provider_site_type,
  CASE WHEN snap.amount IS NOT NULL THEN snap.amount
       WHEN $18::bool AND jsonb_typeof(p.metrics->'today_spend')='number' AND p.observed_at>=$12::timestamptz AND p.observed_at<$13::timestamptz THEN (p.metrics->>'today_spend')::numeric END AS wallet_spend,
  CASE WHEN snap.amount IS NOT NULL AND snap.currency IN ('USD','CNY','quota_units') THEN snap.currency
@@ -219,7 +219,7 @@ const profitOperationsBase = `WITH ` + profitOperationsCohort + `, event_rows AS
    END) AS channel_id) owner
  LEFT JOIN upstream_channels ch ON ch.id=owner.channel_id
  LEFT JOIN provider_profit_links pl ON pl.channel_id=owner.channel_id
- LEFT JOIN mature_providers p ON p.id=pl.provider_id
+ LEFT JOIN mature_providers p ON p.id=pl.provider_id AND pl.cost_mode='wallet'
  LEFT JOIN provider_spend_snapshots snap ON snap.provider_id=p.id AND snap.window_from=$1 AND snap.window_until=$2
  WHERE u.created_at >= $1 AND u.created_at < $2 AND ($5::bigint=0 OR u.account_id=$5) AND ($6::bigint=0 OR u.group_id=$6)
  AND ($7='' OR CASE $8 WHEN 'public' THEN COALESCE(NULLIF(u.requested_model,''),u.model) WHEN 'recorded' THEN u.model WHEN 'upstream' THEN u.upstream_model END=$7)
@@ -302,7 +302,11 @@ func (r *channelRepository) ReadProfitOperations(ctx context.Context, f service.
 	if err != nil {
 		return nil, err
 	}
-	args := []any{f.From, f.Until, string(raw), f.Upstream, f.AccountID, f.GroupID, f.Model, f.ModelScope, f.PageSize, (f.Page - 1) * f.PageSize, f.ChannelID}
+	size, offset := f.PageSize, (f.Page-1)*f.PageSize
+	if service.CollectProfitRows(ctx) {
+		size, offset = 10001, 0
+	}
+	args := []any{f.From, f.Until, string(raw), f.Upstream, f.AccountID, f.GroupID, f.Model, f.ModelScope, size, offset, f.ChannelID}
 	dimension, name := `upstream_key`, `COALESCE(NULLIF(max(channel_name),''),upstream_key)`
 	channelFields := `,COALESCE(max(explicit_channel_id),0) AS channel_id,max(provider_id) AS provider_id,max(provider_site_type) AS provider_site_type,max(channel_code) AS channel_code,max(channel_remark) AS channel_remark,max(channel_revision) AS channel_revision,COALESCE(max(assignment),'unbound_unknown') AS assignment`
 	switch f.Dimension {

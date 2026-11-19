@@ -1,0 +1,14 @@
+{
+  "date": "2026-11-19",
+  "browser": "Chrome/157.0.8103.79",
+  "baseline": "5a51997112d0f93c8ec06747748680a9d7e8e4a7",
+  "rendering": "actual Vue components; synthetic Axios adapter; simplified AppLayout",
+  "production_requests": 0,
+  "paid_requests": 0,
+  "profit_api_calls": {"initial_configuration": 0, "profit_expanded": 1, "accounts_expanded": 1},
+  "profit_summary_present": true,
+  "profit_table_rows": 1,
+  "account_rules_present": true,
+  "visible_alerts": [],
+  "responsive_dark": {"viewport_width": 390, "document_scroll_width": 390}
+}

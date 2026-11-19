@@ -9,6 +9,7 @@ import lottery from './lottery'
 import accountTestTiming from './accountTestTiming'
 import openaiAuth from './openaiAuth'
 import upstreamEntities from './upstreamEntities'
+import channelConfig from './channelConfig'
 import profitOps from './profitOps'
 import upstreamOps from './upstreamOps'
 import channelOps from './channelOps'
@@ -65,6 +66,7 @@ export default {
   qualityOps,
   channelOps,
   upstreamOps,
+  channelConfig,
   profitOps,
   controlledExperiments,
   accountOps,

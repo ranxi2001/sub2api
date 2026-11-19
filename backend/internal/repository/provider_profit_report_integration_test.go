@@ -85,7 +85,7 @@ func TestProviderProfitReportPartialThenSettledWithSharedWallet(t *testing.T) {
 	check("40", "40", "60", 2)
 	mainMetrics("2", "45", "null", "null", "null")
 	newChannel := f.id(`INSERT INTO upstream_channels(name,code) VALUES('New location','new-location') RETURNING id`)
-	_, err := f.r.SetProviderProfitLink(context.Background(), f.pid, service.ProviderProfitLinkMutation{Revision: 1, ChannelID: newChannel, Confirm: true})
+	_, err := f.r.SetProviderProfitLink(context.Background(), f.pid, service.ProviderProfitLinkMutation{Revision: f.id(`SELECT revision FROM provider_profit_links WHERE provider_id=$1`, f.pid), ChannelID: newChannel, Confirm: true})
 	require.NoError(t, err)
 	f.counts(w, 2, 0, a, b, external)
 	check("40", "40", "60", 2)
@@ -153,6 +153,7 @@ func TestProviderProfitReportRegisterSiteAfterUsage(t *testing.T) {
 	check(rows[api], map[string]string{"requests": "1", "upstream_cost": "6", "supplier_requests": "0"})
 	check(s, map[string]string{"requests": "2", "request_income": "100", "upstream_cost": "12"})
 	pid := f.id(`INSERT INTO mature_providers(name,site_type,base_url) VALUES('Later supplier','sub2api',$1) RETURNING id`, site)
+	f.exec(`UPDATE provider_profit_links SET cost_mode='wallet',revision=revision+1 WHERE provider_id=$1`, pid)
 	channel := f.id(`SELECT channel_id FROM provider_profit_links WHERE provider_id=$1`, pid)
 	key := fmt.Sprintf("channel:%d", channel)
 	s, rows = read()
@@ -457,9 +458,43 @@ func TestProviderProfitLegacyIncomeUnchangedByFirstLink(t *testing.T) {
 		require.JSONEq(t, "null", string(s["reconciled_cost"]))
 	}
 	check()
-	for rev, dest := range []int64{channel, f.channel} {
-		_, err := f.r.SetProviderProfitLink(context.Background(), f.pid, service.ProviderProfitLinkMutation{Revision: int64(rev + 1), ChannelID: dest, Confirm: true})
+	for _, dest := range []int64{channel, f.channel} {
+		_, err := f.r.SetProviderProfitLink(context.Background(), f.pid, service.ProviderProfitLinkMutation{Revision: f.id(`SELECT revision FROM provider_profit_links WHERE provider_id=$1`, f.pid), ChannelID: dest, Confirm: true})
 		require.NoError(t, err)
 		check()
 	}
+}
+
+func TestProviderProfitNamingPreservesEstimateUntilWalletOptIn(t *testing.T) {
+	f := newProfitChargeFixture(t)
+	// A new URL/name record defaults to estimates, even without credentials.
+	pid := f.id(`INSERT INTO mature_providers(name,site_type,base_url) VALUES('new estimate','sub2api','https://estimate.invalid') RETURNING id`)
+	var mode string
+	require.NoError(t, f.db.QueryRow(`SELECT cost_mode FROM provider_profit_links WHERE provider_id=$1`, pid).Scan(&mode))
+	require.Equal(t, "estimate", mode)
+	f.exec(`UPDATE provider_profit_links SET cost_mode='estimate',revision=revision+1 WHERE provider_id=$1`, f.pid)
+	at := f.now()
+	w := service.ProviderProfitWindow{From: at, Until: at.Add(time.Microsecond)}
+	f.usageWithIncome(f.account, "estimate-mode", at, 25)
+	before := f.report(f.channel, w)
+	f.exec(`UPDATE mature_providers SET name='Renamed only' WHERE id=$1`, f.pid)
+	f.exec(`UPDATE upstream_channels SET name='Renamed classification' WHERE id=$1`, f.channel)
+	after := f.report(f.channel, w)
+	ids, err := f.r.ProfitChannelAccountIDs(context.Background(), f.channel)
+	require.NoError(t, err)
+	require.Contains(t, ids, f.account)
+	for _, key := range []string{"requests", "request_income", "upstream_cost", "gross_profit", "cost_source"} {
+		require.JSONEq(t, string(before[key]), string(after[key]))
+	}
+	require.JSONEq(t, `"estimate"`, string(after["cost_source"]))
+	var revision int64
+	require.NoError(t, f.db.QueryRow(`SELECT revision FROM provider_profit_links WHERE provider_id=$1`, f.pid).Scan(&revision))
+	wallet := "wallet"
+	_, err = f.r.SetProviderProfitLink(context.Background(), f.pid, service.ProviderProfitLinkMutation{ChannelID: f.channel, Revision: revision, Confirm: true, CostMode: &wallet})
+	require.NoError(t, err)
+	missing := f.report(f.channel, w)
+	require.JSONEq(t, `"wallet_unavailable"`, string(missing["cost_source"]))
+	require.JSONEq(t, `null`, string(missing["upstream_cost"]))
+	require.JSONEq(t, string(before["requests"]), string(missing["requests"]))
+	require.JSONEq(t, string(before["request_income"]), string(missing["request_income"]))
 }

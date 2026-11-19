@@ -29,7 +29,7 @@ import { useI18n } from 'vue-i18n'
 import { listUpstreamChannels, getUpstreamChannel, saveUpstreamChannel, deleteUpstreamChannel, getChannelMembers, type UpstreamChannel, type ChannelBinding } from '@/api/admin/upstreamChannels'
 import AccountUpstreamChannelBinding from '@/components/account/AccountUpstreamChannelBinding.vue'
 const props = defineProps<{ expanded?: boolean }>()
-const emit = defineEmits<{ changed: [] }>()
+const emit = defineEmits<{ changed: []; selected: [channel: UpstreamChannel] }>()
 const { t } = useI18n()
 const items = ref<UpstreamChannel[]>([]), total = ref(0), page = ref(1), search = ref(''), opened = ref(false), busy = ref(false), error = ref(''), saved = ref(false), confirmed = ref(false), needsRead = ref(false)
 const latestSaved = ref('')
@@ -52,7 +52,7 @@ async function save() {
  finally { busy.value = false }
 }
 async function remove() { if (!draft.value?.id || draft.value.members || !confirmed.value || needsRead.value) return; busy.value = true; error.value = ''; try { await deleteUpstreamChannel(draft.value.id, draft.value.revision); draft.value = null; await load(); emit('changed') } catch { needsRead.value = true; error.value = t('upstreamEntities.deleteBlocked') } finally { busy.value = false } }
-async function showMembers(channel: UpstreamChannel, next = 1) { busy.value = true; error.value = ''; try { const result = await getChannelMembers(channel.id, next); memberChannel.value = channel; members.value = result.items; membersTotal.value = result.total; memberPage.value = next; selectedIds.value = [] } catch { error.value = t('upstreamEntities.failed') } finally { busy.value = false } }
+async function showMembers(channel: UpstreamChannel, next = 1) { emit('selected', channel); busy.value = true; error.value = ''; try { const result = await getChannelMembers(channel.id, next); memberChannel.value = channel; members.value = result.items; membersTotal.value = result.total; memberPage.value = next; selectedIds.value = [] } catch { error.value = t('upstreamEntities.failed') } finally { busy.value = false } }
 function reloadMembers() { if (memberChannel.value) void showMembers(memberChannel.value, memberPage.value); void load(); emit('changed') }
 onMounted(() => { if (props.expanded) open() })
 </script>

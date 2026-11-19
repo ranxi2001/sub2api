@@ -33,12 +33,13 @@ export interface OperationsSnapshot {
  usage: { summary: ProfitMetrics; rows: OperationsRow[]; total: number; wallet_synced_at?: string | null; accounts: AccountBasis[]; members: AccountBasis[]; member_total: number; capacity: { accounts: number; schedulable: number; configured_concurrency: number }; account_details_limit: number; catalog: Array<{key: string; name: string; accounts: number; channel_id?: number; channel_code?: string; channel_remark?: string; assignment?: string}>; catalog_total: number; historical_upstream_snapshot_requests: number; historical_cost_multiplier_snapshot_requests: number; cost_formula: string; income_source: string; standard_source: string }
  quality: Section<Quality & { total: number }>; errors: Section<ErrorLogs>
 }
-export async function readProfitOperations( params: OperationsQuery, signal?: AbortSignal, refreshSpend = false): Promise<OperationsSnapshot> {
+export async function readProfitOperations( params: OperationsQuery, signal?: AbortSignal, refreshSpend = false, refreshReport = false): Promise<OperationsSnapshot> {
  // Full-range accounting may take minutes; leave time for the server's five-minute budget and response.
  // refresh_spend bypasses the short same-window cache. It does not sync per-request bills.
- return (await apiClient.get<OperationsSnapshot>('/admin/profit-operations/snapshot', { params: { ...params, ...(refreshSpend ? { refresh_spend: 1 } : {}) }, signal, timeout: 330_000 })).data
+ return (await apiClient.get<OperationsSnapshot>('/admin/profit-operations/snapshot', { params: { ...params, ...(refreshReport ? { refresh_report: 1 } : {}), ...(refreshSpend ? { refresh_spend: 1 } : {}) }, signal, timeout: 330_000 })).data
 }
 export interface ProfitProvider extends Pick<MatureProvider, 'site_type' | 'status' | 'observed_at' | 'revision'> {
+  cost_mode?: 'estimate' | 'wallet'
   provider_id: number
   provider_name: string
   channel_id: number | null
@@ -49,8 +50,8 @@ export interface ProfitProviderPage { items: ProfitProvider[]; total: number; pa
 export async function listProfitProviders(page: number, signal?: AbortSignal) {
   return (await apiClient.get<ProfitProviderPage>('/admin/profit-operations/providers', { params: { page, page_size: 20 }, signal })).data
 }
-export async function linkProfitChannel(providerId: number, channelId: number, revision: number) {
-  await apiClient.put(`/admin/providers/${providerId}/profit-channel`, { channel_id: channelId, revision, confirm: true })
+export async function linkProfitChannel(providerId: number, channelId: number, revision: number, costMode?: 'estimate' | 'wallet') {
+  await apiClient.put(`/admin/providers/${providerId}/profit-channel`, { channel_id: channelId, revision, confirm: true, ...(costMode ? { cost_mode: costMode } : {}) })
 }
 export type ProfitDates = Pick<OperationsQuery, 'from' | 'until'>
 export interface ProfitSyncStatus { status: 'running' | 'succeeded' | 'failed'; matched?: number; unmatched?: number; reason?: string }
@@ -62,4 +63,8 @@ export async function readProfitSync(providerId: number, jobId: string, signal: 
 }
 export async function readExplicitChannelProfitOperations(query: OperationsQuery, channelId: number, signal?: AbortSignal): Promise<OperationsSnapshot> {
  return readProfitOperations({ ...query, upstream: '', channel_id: channelId }, signal)
+}
+
+export async function readProfitChannelAccountIDs(channelId: number) {
+ return (await apiClient.get<{account_ids:number[]}>('/admin/profit-operations/channel-accounts', {params:{channel_id:channelId}})).data.account_ids
 }

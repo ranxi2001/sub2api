@@ -7,6 +7,10 @@
       <p v-if="!result.items.length">{{ t('profitOps.providersEmpty') }}</p>
       <div v-for="p in result.items" :key="p.provider_id" class="space-y-2" :data-testid="`provider-link-${p.provider_id}`">
         <div class="flex flex-wrap items-center gap-2"><span>{{ p.provider_name }} #{{ p.provider_id }} → {{ channelName(p) }}</span><button type="button" class="btn btn-secondary btn-sm" :aria-expanded="editing === p.provider_id" :disabled="busy" @click="begin(p)">{{ t('profitOps.linkChannel') }}</button></div>
+        <label class="flex flex-wrap items-center gap-2 text-sm">{{ t('channelConfig.costMode') }}
+          <select :value="p.cost_mode || 'wallet'" :disabled="busy" class="input" @change="setCostMode(p, $event)"><option value="estimate">{{ t('channelConfig.estimate') }}</option><option value="wallet">{{ t('channelConfig.wallet') }}</option></select>
+        </label>
+        <p class="text-xs text-gray-500">{{ t('channelConfig.costHelp') }}</p>
         <ProfitChannelLink v-if="editing === p.provider_id" :provider="p" :current-channel="channelName(p)" @cancel="editing = null" @busy="writing = $event" @reread="linkResult" />
       </div>
       <div v-if="result.total > result.page_size || page > 1" class="flex flex-wrap items-center gap-3 text-sm">
@@ -23,7 +27,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { listProfitProviders, type ProfitProvider, type ProfitProviderPage } from '@/api/admin/profitOperations'
+import { linkProfitChannel, listProfitProviders, type ProfitProvider, type ProfitProviderPage } from '@/api/admin/profitOperations'
 import ProfitChannelLink from './ProfitChannelLink.vue'
 
 const emit = defineEmits<{ changed: [] }>()
@@ -46,12 +50,23 @@ async function load(next: number) {
 function begin(p: ProfitProvider) {
   message.value = ''; actionError.value = ''; editing.value = editing.value === p.provider_id ? null : p.provider_id
 }
-async function linkResult(providerId: number, channelId: number, state: 'written' | 'conflict' | 'failed') {
+async function linkResult(providerId: number, channelId: number, state: 'written' | 'conflict' | 'failed', mode?: 'estimate'|'wallet') {
   await load(page.value)
   if (lifetime.signal.aborted) return
-  if (state === 'written' && result.value?.items.some(p => p.provider_id === providerId && p.channel_id === channelId)) message.value = t('upstreamEntities.saved')
+  if (state === 'written' && result.value?.items.some(p => p.provider_id === providerId && p.channel_id === channelId && (!mode || p.cost_mode===mode))) message.value = t('upstreamEntities.saved')
   else actionError.value = t(state === 'conflict' ? 'profitOps.linkConflict' : 'profitOps.linkUnconfirmed')
   emit('changed')
+}
+async function setCostMode(p: ProfitProvider, event: Event) {
+ const select=event.target as HTMLSelectElement, mode=select.value as 'estimate'|'wallet'
+ select.value=p.cost_mode || 'wallet'
+ if(!p.channel_id || busy.value) return
+ writing.value=true
+ let state: 'written'|'conflict'|'failed'='written'
+ try { await linkProfitChannel(p.provider_id,p.channel_id,p.revision,mode) }
+ catch(cause){state=(cause as {status?:number})?.status===409?'conflict':'failed'}
+ finally{writing.value=false}
+ await linkResult(p.provider_id,p.channel_id,state,mode)
 }
 onMounted(() => load(1))
 onBeforeUnmount(() => lifetime.abort())

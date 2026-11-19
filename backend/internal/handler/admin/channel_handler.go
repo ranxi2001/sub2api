@@ -20,6 +20,7 @@ import (
 // ChannelHandler handles admin channel management
 type ChannelHandler struct {
 	profitJobs        providerProfitJobs
+	profitReports     profitReportCache
 	providerCancel    context.CancelFunc
 	providerWG        sync.WaitGroup
 	providerEncryptor service.SecretEncryptor
