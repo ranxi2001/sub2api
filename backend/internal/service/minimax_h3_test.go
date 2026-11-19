@@ -44,6 +44,42 @@ func TestMiniMaxH3ForwardPreservesProtocol(t *testing.T) {
 	require.JSONEq(t, `{"id":"task-1","status":"queued"}`, w.Body.String())
 }
 
+func TestMiniMaxH3ExplicitVideoModelMapping(t *testing.T) {
+	for _, tc := range []struct {
+		name, model, source, target, want string
+	}{
+		{"standard model", "MiniMax-H3", "", "", "MiniMax-H3"},
+		{"custom alias", "h3-video", "h3-video", "relay-video-v2", "relay-video-v2"},
+		{"identity mapping", "relay-video-v2", "relay-video-v2", "relay-video-v2", "relay-video-v2"},
+		{"unmapped model", "relay-video-v2", "", "", ""},
+		{"wildcard only", "h3-video", "h3-*", "relay-video-v2", ""},
+		{"blank target", "h3-video", "h3-video", " ", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			account := miniMaxH3TestAccount()
+			delete(account.Credentials, "model_mapping")
+			if tc.source != "" {
+				account.Credentials["model_mapping"] = map[string]any{tc.source: tc.target}
+			}
+			upstream := &grokMediaContentUpstreamStub{response: grokMediaContentStatusResponse(`{"id":"task-1","status":"queued"}`)}
+			svc := &OpenAIGatewayService{httpUpstream: upstream}
+			c, _ := grokMediaContentTestContext(http.MethodPost, "/v1/videos", nil)
+			body := []byte(`{"model":"` + tc.model + `","prompt":"waves","seconds":"1"}`)
+			result, err := svc.ForwardMiniMaxH3(context.Background(), c, account, MiniMaxH3EndpointCreate, "", body)
+			if tc.want == "" {
+				require.Error(t, err)
+				require.Empty(t, upstream.requests)
+				return
+			}
+			require.NoError(t, err)
+			forwarded, err := io.ReadAll(upstream.request.Body)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, gjson.GetBytes(forwarded, "model").String())
+			require.Equal(t, tc.model, result.BillingModel)
+		})
+	}
+}
+
 func TestMiniMaxH3ValidationAndURLs(t *testing.T) {
 	for _, body := range []string{`{`, `[]`, `{}`, `{"model":"MiniMax-H3","prompt":"x","seconds":1}`, `{"model":"MiniMax-H3","prompt":"x","seconds":"0"}`, `{"model":"MiniMax-H3","prompt":"x","seconds":"16"}`, `{"model":"MiniMax-H3","prompt":"x","seconds":"01"}`, `{"model":"MiniMax-H3","prompt":" ","seconds":"1"}`, `{"model":"MiniMax-H3","prompt":"x","seconds":"1","n":2}`} {
 		_, err := ParseMiniMaxH3Request([]byte(body))
