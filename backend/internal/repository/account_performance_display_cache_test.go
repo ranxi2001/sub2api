@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
@@ -39,7 +40,7 @@ func TestAccountPerformanceDisplayColdReadNeverWaitsForHistory(t *testing.T) {
 	_, client := displayRedis(t)
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { require.NoError(t, db.Close()) }()
 	started := make(chan struct{})
 	release := make(chan struct{})
 	var calls atomic.Int32
@@ -199,4 +200,20 @@ func TestAccountPerformanceDisplayBoundedQueueDeduplicatesAndStops(t *testing.T)
 	c.stop()
 	c.enqueue(performanceDisplayJob{2048, 60})
 	require.Equal(t, int32(1), calls.Load())
+}
+
+func TestAccountPerformanceDisplayRefreshUsesReadOnlyDatabaseBudget(t *testing.T) {
+	_, client := displayRedis(t)
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { require.NoError(t, db.Close()) }()
+	repo := NewAccountPerformanceRepository(db, client, &config.Config{Database: config.DatabaseConfig{DBName: "fixture"}}).(*accountPerformanceRepository)
+	defer repo.Stop()
+	mock.ExpectBegin()
+	mock.ExpectExec("SET LOCAL statement_timeout='4500ms'; SET LOCAL lock_timeout='500ms'; SET LOCAL work_mem='8MB'; SET LOCAL max_parallel_workers_per_gather=0").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery("WITH source").WithArgs("{7}", sqlmock.AnyArg(), sqlmock.AnyArg()).WillReturnRows(performanceRow(service.PerformanceConfig{}))
+	mock.ExpectCommit()
+	repo.display.refresh([]performanceDisplayJob{{7, 60}})
+	require.Equal(t, int64(1), client.Exists(context.Background(), repo.display.key(performanceDisplayJob{7, 60})).Val())
+	require.NoError(t, mock.ExpectationsWereMet())
 }
