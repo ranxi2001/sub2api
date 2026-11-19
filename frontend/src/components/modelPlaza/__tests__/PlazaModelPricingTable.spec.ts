@@ -68,6 +68,7 @@ describe('PlazaModelPricingTable', () => {
     m.pricing!.billing_mode = 'image'
     const imageWrapper = mountTable([m], 0.2)
     expect(imageWrapper.find('[data-image-minimum-charge]').exists()).toBe(false)
+    expect(imageWrapper.text()).not.toContain('modelPlaza.table.unitPerMillion')
     imageWrapper.unmount()
   })
 

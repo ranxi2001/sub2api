@@ -89,6 +89,10 @@ func (w *imageBillingResponse) passthrough() {
 		return
 	}
 	w.flushed = true
+	if w.status < http.StatusBadRequest {
+		w.errorResponse("image_billing_unavailable", "Image settlement was not confirmed; do not automatically retry")
+		return
+	}
 	if w.failure != nil {
 		w.errorResponse("image_response_unavailable", "Image response could not be retained")
 		return
@@ -119,6 +123,8 @@ func imageEquivalentPayload(body []byte, receipt service.ImageBillingReceipt, in
 	if out == nil {
 		return nil, errors.New("invalid image response")
 	}
+	delete(out, "billing")
+	delete(out, "upstream_usage")
 	if raw, ok := out["usage"]; ok {
 		out["upstream_usage"] = raw
 		delete(out, "usage")
@@ -151,17 +157,22 @@ func (w *imageBillingResponse) settle(receipt service.ImageBillingReceipt) error
 	} else {
 		// Rewrite only JSON data events. Put the request total on the final image
 		// event exactly once, including multi-image and partial-success responses.
-		lines := bytes.Split(bytes.ReplaceAll(body, []byte("\r\n"), []byte("\n")), []byte("\n"))
+		blocks := bytes.Split(bytes.ReplaceAll(body, []byte("\r\n"), []byte("\n")), []byte("\n\n"))
+		payloads := make([][]byte, len(blocks))
 		last := -1
-		for i, line := range lines {
-			if !bytes.HasPrefix(line, []byte("data:")) {
-				continue
+		for i, block := range blocks {
+			var data [][]byte
+			for _, line := range bytes.Split(block, []byte("\n")) {
+				if bytes.HasPrefix(line, []byte("data:")) {
+					data = append(data, bytes.TrimPrefix(bytes.TrimPrefix(line, []byte("data:")), []byte(" ")))
+				}
 			}
-			payload := bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:")))
+			payload := bytes.Join(data, []byte("\n"))
 			var event map[string]json.RawMessage
 			if json.Unmarshal(payload, &event) != nil || event == nil {
 				continue
 			}
+			payloads[i] = payload
 			var kind string
 			_ = json.Unmarshal(event["type"], &kind)
 			if strings.HasSuffix(kind, ".completed") || event["b64_json"] != nil || event["url"] != nil || event["data"] != nil {
@@ -171,21 +182,24 @@ func (w *imageBillingResponse) settle(receipt service.ImageBillingReceipt) error
 		if last < 0 {
 			return errors.New("image stream has no completed image event")
 		}
-		for i, line := range lines {
-			if !bytes.HasPrefix(line, []byte("data:")) {
-				continue
-			}
-			payload := bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:")))
-			if !json.Valid(payload) {
+		for i, payload := range payloads {
+			if payload == nil {
 				continue
 			}
 			rewritten, e := imageEquivalentPayload(payload, receipt, i == last)
 			if e != nil {
 				return e
 			}
-			lines[i] = append([]byte("data: "), rewritten...)
+			var lines [][]byte
+			for _, line := range bytes.Split(blocks[i], []byte("\n")) {
+				if !bytes.HasPrefix(line, []byte("data:")) {
+					lines = append(lines, line)
+				}
+			}
+			lines = append(lines, append([]byte("data: "), rewritten...))
+			blocks[i] = bytes.Join(lines, []byte("\n"))
 		}
-		out = bytes.Join(lines, []byte("\n"))
+		out = bytes.Join(blocks, []byte("\n\n"))
 	}
 	if err != nil {
 		return err

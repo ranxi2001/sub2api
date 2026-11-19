@@ -160,3 +160,7 @@ backend/internal/service/openai_relogin_settings_test.go
 backend/internal/service/openai_subscription_long_context_test.go
 backend/internal/service/openai_two_fa_login_test.go
 backend/internal/service/upstream_batch_whitelist_identity_policy_test.go
+
+# Image usage settlement fixtures need the candidate billing implementation.
+backend/internal/handler/image_billing_response_test.go
+backend/internal/service/image_usage_billing_test.go

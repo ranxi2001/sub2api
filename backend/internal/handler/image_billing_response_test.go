@@ -60,3 +60,16 @@ func TestImageBillingUnsettledResponseNeverExposesImage(t *testing.T) {
 	require.NotContains(t, rec.Body.String(), "secret-result")
 	require.Equal(t, 503, rec.Code)
 }
+
+func TestImageBillingEarlyReturnCannotLeakUnsettledSuccess(t *testing.T) {
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	w, err := newImageBillingResponse(c.Writer, false)
+	require.NoError(t, err)
+	defer w.close()
+	_, err = w.WriteString(`{"data":[{"b64_json":"unsettled-image"}]}`)
+	require.NoError(t, err)
+	w.passthrough()
+	require.Equal(t, 503, rec.Code)
+	require.NotContains(t, rec.Body.String(), "unsettled-image")
+}
