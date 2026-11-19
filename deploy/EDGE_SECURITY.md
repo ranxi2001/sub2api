@@ -212,12 +212,14 @@ integrity-protected bodies, multipart uploads and active request captures are
 left unchanged. A local encoding failure sends the original body. Single-submission
 requests, including regionally metered requests and controlled experiments, use
 the original body from the start. A bare HTTP 415 or an explicit rejection
-that permits identity starts a ten-minute plain-body cooldown for that endpoint
-and coding on the current gateway instance.
-For the current request, the gateway retries once with the original body on the
-same upstream transport only when the 415 response's `Accept-Encoding` excludes
-the sent coding and permits identity (RFC 9110 section 12.5.3). A bare 415
-follows normal error handling. The gateway logs `upstream.request_compression_rejected`.
+that permits identity starts a ten-minute plain-body cooldown for the most
+recently rejected endpoint per origin and coding on the current gateway instance.
+The upstream transport returns the original 415 response, including its headers
+and body, to normal service error handling without a resend. The cooldown applies
+only to later independent requests, which still pass normal admission, RPM,
+authorization and upload-phase checks. Each rejected send remains visible in
+per-account HTTP response statistics.
+The gateway logs `upstream.request_compression_rejected`.
 
 ## CDN Proxy Setup
 

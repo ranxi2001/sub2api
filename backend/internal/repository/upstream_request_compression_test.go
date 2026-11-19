@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/upstreamstats"
 	"github.com/Wei-Shaw/sub2api/internal/requestcapture"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/klauspost/compress/zstd"
@@ -81,37 +82,78 @@ func assertWireRequest(t *testing.T, r *http.Request, body []byte, err error, co
 	return true
 }
 
-func TestHTTPUpstreamRequestCompressionTransparentFallback(t *testing.T) {
+func TestHTTPUpstreamRequestCompressionRejectionPreservesResponseAndAccounting(t *testing.T) {
 	payload := `{"input":"` + strings.Repeat("repeat ", 1024) + `"}`
-	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if calls.Add(1) == 1 {
-			require.Equal(t, "zstd", req.Header.Get("Content-Encoding"))
-			w.Header().Set("Accept-Encoding", "identity")
-			w.WriteHeader(http.StatusUnsupportedMediaType)
-			return
+	const rejectionBody = `{"error":"unsupported request encoding"}`
+	for _, regional := range []bool{false, true} {
+		name := "ordinary"
+		if regional {
+			name = "regional"
 		}
-		raw, err := io.ReadAll(req.Body)
-		require.NoError(t, err)
-		require.Equal(t, payload, string(raw))
-		require.EqualValues(t, len(payload), req.ContentLength)
-		require.Empty(t, req.Header.Get("Content-Encoding"))
-		w.WriteHeader(http.StatusCreated)
-	}))
-	t.Cleanup(server.Close)
-	upstream := NewHTTPUpstream(&config.Config{Gateway: config.GatewayConfig{
-		UpstreamRequestCompression: []config.UpstreamRequestCompressionRule{{Origin: server.URL, Encoding: "zstd"}},
-	}})
-	for range 2 {
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/v1/responses", strings.NewReader(payload))
-		require.NoError(t, err)
-		req.Header.Set("Content-Type", "application/json")
-		resp, err := upstream.Do(req, "", 1, 1)
-		require.NoError(t, err)
-		require.NoError(t, resp.Body.Close())
-		require.Equal(t, http.StatusCreated, resp.StatusCode)
+		t.Run(name, func(t *testing.T) {
+			original := upstreamstats.Default
+			upstreamstats.Default = upstreamstats.NewStore(100, time.Now())
+			defer func() { upstreamstats.Default = original }()
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				raw, err := io.ReadAll(req.Body)
+				if err != nil {
+					t.Error(err)
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				if calls.Add(1) == 1 {
+					if req.Header.Get("Content-Encoding") != "zstd" {
+						t.Error("first independent request must be compressed")
+					}
+					w.Header().Set("Accept-Encoding", "identity")
+					w.Header().Set("X-Request-Id", "compression-rejection-fixture")
+					w.WriteHeader(http.StatusUnsupportedMediaType)
+					_, _ = io.WriteString(w, rejectionBody)
+					return
+				}
+				if string(raw) != payload || req.ContentLength != int64(len(payload)) || req.Header.Get("Content-Encoding") != "" {
+					t.Error("next independent request must carry the intact plain body")
+				}
+				w.WriteHeader(http.StatusCreated)
+			}))
+			t.Cleanup(server.Close)
+			origin := server.URL
+			cfg := &config.Config{}
+			if regional {
+				origin = "http://api.vendor.test"
+				cfg = regionalHTTPConfig(t, server.URL, "api.vendor.test")
+			}
+			cfg.Gateway.UpstreamRequestCompression = []config.UpstreamRequestCompressionRule{{Origin: origin, Encoding: "zstd"}}
+			upstream := NewHTTPUpstream(cfg)
+			since := time.Now()
+			for attempt, status := range []int{http.StatusUnsupportedMediaType, http.StatusCreated} {
+				// A fresh caller request enters the normal upstream path each time.
+				req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, origin+"/v1/responses", strings.NewReader(payload))
+				require.NoError(t, err)
+				req.Header.Set("Content-Type", "application/json")
+				resp, err := upstream.Do(req, "", 90005, 1)
+				require.NoError(t, err)
+				body, err := io.ReadAll(resp.Body)
+				require.NoError(t, err)
+				require.NoError(t, resp.Body.Close())
+				require.Equal(t, status, resp.StatusCode)
+				require.EqualValues(t, attempt+1, calls.Load(), "one physical send per independent request")
+				if attempt == 0 {
+					require.Equal(t, rejectionBody, string(body))
+					require.Equal(t, "identity", resp.Header.Get("Accept-Encoding"))
+					require.Equal(t, "compression-rejection-fixture", resp.Header.Get("X-Request-Id"))
+				}
+				snapshot := upstreamstats.Default.Snapshot([]int64{90005, 90006}, since, time.Now())
+				require.EqualValues(t, attempt+1, snapshot[90005].Total)
+				require.EqualValues(t, 1, snapshot[90005].Failures, "the original 415 must remain visible")
+				require.NotNil(t, snapshot[90005].Percent)
+				require.Equal(t, 100/float64(attempt+1), *snapshot[90005].Percent)
+				require.Zero(t, snapshot[90006].Total)
+				require.Nil(t, snapshot[90006].Percent)
+			}
+		})
 	}
-	require.EqualValues(t, 3, calls.Load())
 }
 
 func TestUpstreamRequestCompressionNegotiation(t *testing.T) {
@@ -139,6 +181,7 @@ func TestUpstreamRequestCompressionCooldown(t *testing.T) {
 		secondEncoding string
 	}{
 		{"bare 415", nil, ""},
+		{"explicit identity", []string{"identity"}, ""},
 		{"identity forbidden", []string{"identity;q=0"}, "gzip"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

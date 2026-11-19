@@ -96,17 +96,9 @@ func (t *upstreamRequestCompressionTransport) RoundTrip(req *http.Request) (*htt
 		}
 		slog.WarnContext(req.Context(), "upstream.request_compression_rejected", "origin", origin,
 			"encoding", coding, "status", resp.StatusCode)
-		if req.Context().Err() == nil && explicitRejection {
-			plain := req.Clone(req.Context())
-			body, bodyErr := req.GetBody()
-			if bodyErr == nil && body != nil {
-				plain.Body = body
-				if resp.Body != nil {
-					_ = resp.Body.Close()
-				}
-				return t.base.RoundTrip(plain)
-			}
-		}
+		// Return this rejection intact. Only a later, independently admitted
+		// request may use the cooldown; a transport resend would bypass RPM,
+		// authorization and upload-phase checks and hide this HTTP response.
 	}
 	return resp, err
 }
