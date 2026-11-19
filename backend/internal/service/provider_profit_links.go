@@ -18,6 +18,7 @@ var (
 // This projection deliberately excludes connection details, credentials and raw
 // observations. Null spend is unknown; it is not a zero or verified event cost.
 type ProviderProfitLink struct {
+	CostMode     string                `json:"cost_mode"`
 	ProviderID   int64                 `json:"provider_id"`
 	ProviderName string                `json:"provider_name"`
 	SiteType     string                `json:"site_type"`
@@ -43,12 +44,16 @@ type ProviderProfitLinkPage struct {
 }
 
 type ProviderProfitLinkMutation struct {
-	ChannelID int64 `json:"channel_id"`
-	Revision  int64 `json:"revision"`
-	Confirm   bool  `json:"confirm"`
+	CostMode  *string `json:"cost_mode,omitempty"`
+	ChannelID int64   `json:"channel_id"`
+	Revision  int64   `json:"revision"`
+	Confirm   bool    `json:"confirm"`
 }
 
 func (m ProviderProfitLinkMutation) Validate(providerID int64) error {
+	if m.CostMode != nil && *m.CostMode != "estimate" && *m.CostMode != "wallet" {
+		return ErrProviderProfitLinkValidation
+	}
 	if providerID <= 0 || m.ChannelID <= 0 || m.Revision <= 0 || m.Revision == math.MaxInt64 || !m.Confirm {
 		return ErrProviderProfitLinkValidation
 	}

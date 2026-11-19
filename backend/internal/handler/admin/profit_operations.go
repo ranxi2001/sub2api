@@ -33,9 +33,16 @@ func (h *ChannelHandler) ProfitOperations(c *gin.Context) {
 	// Refresh (or reuse) each linked provider's wallet for this window before
 	// the report subtracts it. A probe failure does not hide unbound estimates.
 	force := c.Query("refresh_spend") == "1" || c.Query("refresh_spend") == "true"
-	h.refreshBoundProviderSpend(c.Request.Context(), f.From, f.Until, force)
+	if force || c.Query("refresh_report") == "1" {
+		h.profitReports.clear()
+	}
 	started := time.Now()
-	out, err := h.channelService.ProfitOperations(c.Request.Context(), f)
+	out, err := h.profitReports.read(c.Request.Context(), f, func(ctx context.Context, collect bool) (*service.ProfitOperationsSnapshot, error) {
+		h.refreshBoundProviderSpend(ctx, f.From, f.Until, force)
+		query := f
+		query.CollectProfitRows = collect
+		return h.channelService.ProfitOperations(ctx, query)
+	})
 	if err != nil {
 		status, reason, message := http.StatusInternalServerError, "PROFIT_OPERATIONS_QUERY_FAILED", "Upstream operations query failed; retry"
 		if errors.Is(err, context.DeadlineExceeded) {

@@ -463,3 +463,34 @@ func TestProviderProfitLegacyIncomeUnchangedByFirstLink(t *testing.T) {
 		check()
 	}
 }
+
+func TestProviderProfitNamingPreservesEstimateUntilWalletOptIn(t *testing.T) {
+	f := newProfitChargeFixture(t)
+	// A new URL/name record defaults to estimates, even without credentials.
+	pid := f.provider()
+	var mode string
+	require.NoError(t, f.db.QueryRow(`SELECT cost_mode FROM provider_profit_links WHERE provider_id=$1`, pid).Scan(&mode))
+	require.Equal(t, "estimate", mode)
+	f.exec(`UPDATE provider_profit_links SET cost_mode='estimate',revision=revision+1 WHERE provider_id=$1`, f.pid)
+	at := f.now()
+	w := service.ProviderProfitWindow{From: at, Until: at.Add(time.Microsecond)}
+	f.usageWithIncome(f.account, "estimate-mode", at, 25)
+	before := f.report(f.channel, w)
+	f.exec(`UPDATE mature_providers SET name='Renamed only' WHERE id=$1`, f.pid)
+	f.exec(`UPDATE upstream_channels SET name='Renamed classification' WHERE id=$1`, f.channel)
+	after := f.report(f.channel, w)
+	for _, key := range []string{"requests", "request_income", "upstream_cost", "gross_profit", "cost_source"} {
+		require.JSONEq(t, string(before[key]), string(after[key]))
+	}
+	require.JSONEq(t, `"estimate"`, string(after["cost_source"]))
+	var revision int64
+	require.NoError(t, f.db.QueryRow(`SELECT revision FROM provider_profit_links WHERE provider_id=$1`, f.pid).Scan(&revision))
+	wallet := "wallet"
+	_, err := f.r.SetProviderProfitLink(context.Background(), f.pid, service.ProviderProfitLinkMutation{ChannelID: f.channel, Revision: revision, Confirm: true, CostMode: &wallet})
+	require.NoError(t, err)
+	missing := f.report(f.channel, w)
+	require.JSONEq(t, `"wallet_unavailable"`, string(missing["cost_source"]))
+	require.JSONEq(t, `null`, string(missing["upstream_cost"]))
+	require.JSONEq(t, string(before["requests"]), string(missing["requests"]))
+	require.JSONEq(t, string(before["request_income"]), string(missing["request_income"]))
+}

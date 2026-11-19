@@ -4,6 +4,7 @@
  * browser; use a new ID to announce the feature again in a later release.
  */
 export const NEW_FEATURE_NOTICES = {
+  channelConfig: 'channel-configuration-20261119',
   imageUsageBilling: 'image-usage-minimum-charge-20261119',
   newAPICostConversion: 'new-api-cost-conversion-20261119',
   accountOpsBalanceNotification: 'account-ops-per-account-balance-notification-20261119',

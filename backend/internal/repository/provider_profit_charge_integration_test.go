@@ -29,6 +29,7 @@ func newProfitChargeFixture(t *testing.T) *profitChargeFixture {
 	db, _ := UpstreamChannelsTestDatabase(t)
 	f := &profitChargeFixture{t: t, db: db, r: &channelRepository{db: db}}
 	f.pid = f.provider()
+	f.exec(`UPDATE provider_profit_links SET cost_mode='wallet',revision=revision+1 WHERE provider_id=$1`, f.pid)
 	f.channel = f.id(`SELECT channel_id FROM provider_profit_links WHERE provider_id=$1`, f.pid)
 	var err error
 	f.epoch, err = f.r.ProviderProfitIdentityFrom(context.Background(), f.pid)
