@@ -20,6 +20,8 @@ on:
       - 'backend/internal/repository/oauth429_weekly_only*'
       - '.github/workflows/oauth429-weekly-only.yml'
       - '.github/scripts/oauth429-weekly-only-*'
+      - '.github/scripts/prepare-openai-usage-red-compat.py'
+      - '.github/scripts/test_openai_usage_red_compat.py'
 
 permissions:
   contents: read
@@ -84,6 +86,7 @@ jobs:
           # The retained helper references the new storage field. Add only that
           # zero-value field after proving every original production blob above.
           bash .github/scripts/oauth429-weekly-only-bridge-compat.sh "$RUNNER_TEMP/oauth429-red" "$BASELINE" | tee evidence/bridge-compat.txt
+          python3 .github/scripts/prepare-openai-usage-red-compat.py "$RUNNER_TEMP/oauth429-red" "$BASELINE" | tee evidence/usage-compat.json
           # This later, unrelated regression requires the candidate-only WS
           # stream-phase helper. Exclude it only from this disposable old-source
           # checkout; GREEN explicitly runs all six tests with candidate sources.

@@ -3,6 +3,14 @@ on:
   pull_request:
     paths:
       - '**/profit_operations*'
+      - '**/provider_profit*'
+      - '**/*_provider_profit*'
+      - '**/*usage_wallet_debit*'
+      - '**/usage_settled_debits*'
+      - '**/ProfitProviders*'
+      - '**/ProfitChannelLink*'
+      - '**/ProfitEvidence*'
+      - '**/ProviderProfit*'
       - '**/ProfitOperations*'
       - '**/UpstreamChannelOperations*'
       - '**/ProfitAnalytics*'
@@ -26,7 +34,7 @@ jobs:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
       - run: git rev-parse HEAD
-      - run: go test -tags=unit ./internal/service ./internal/handler/admin ./internal/server/routes -run '^TestProfitOperations' -count=1 -v
+      - run: go test -tags=unit ./internal/service ./internal/handler/admin ./internal/server/routes ./internal/server/middleware -run '^Test(ProfitOperations|ProviderProfit|ClientRequestID|ImportedSub2API|UsageUpstreamRequestID)' -count=1 -v
         working-directory: backend
       - name: Standard charge cost formula RED against account-statistics substitution
         working-directory: backend
@@ -51,7 +59,7 @@ jobs:
           test "$result" -ne 0
           grep -q 'FAIL: TestProfitOperationsHTTPPostgresWithoutModelChannelBinding' "$RUNNER_TEMP/profit-cost-red.log"
           grep -q 'standard model charge base, not account statistics override' "$RUNNER_TEMP/profit-cost-red.log"
-      - run: go test -tags=integration ./internal/repository -run '^TestProfitOperations' -count=1 -v
+      - run: go test -tags=integration ./internal/repository -run '^Test(ProfitOperations|ProviderProfit|MatureProviderImportPreservesCanonicalData|UpstreamChannelEntityHTTPAccountProfitPersistence|UsageBillingQuoteKeeps|UsageBillingRawQuoteBoundary)' -count=1 -v
         working-directory: backend
   frontend:
     runs-on: ubuntu-24.04
@@ -69,7 +77,7 @@ jobs:
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
       - run: pnpm --dir frontend install --frozen-lockfile
-      - run: pnpm exec vitest run src/views/admin/__tests__/ProfitOperationsView.spec.ts src/components/admin/operations/__tests__/SmartOpsNav.spec.ts src/components/layout/__tests__/AppSidebar.spec.ts --maxWorkers=1 --minWorkers=1 --no-file-parallelism
+      - run: pnpm exec vitest run src/views/admin/__tests__/ProfitOperationsView.spec.ts src/views/admin/__tests__/ProviderProfit.spec.ts src/components/admin/operations/__tests__/SmartOpsNav.spec.ts src/components/layout/__tests__/AppSidebar.spec.ts --maxWorkers=1 --minWorkers=1 --no-file-parallelism
         working-directory: frontend
       - name: Calendar presets in local timezones
         working-directory: frontend

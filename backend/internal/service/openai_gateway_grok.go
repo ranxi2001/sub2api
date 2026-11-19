@@ -1808,7 +1808,7 @@ func grokRateLimitResetAtForAccount(account *Account, snapshot *xai.QuotaSnapsho
 	if previousResetAt.After(now) || now.Sub(previousResetAt) > grokRateLimitBackoffQuietPeriod {
 		return resetAt, true
 	}
-	previousCooldown := previousResetAt.Sub(*account.RateLimitedAt)
+	previousCooldown := grokHistoricalCooldown(account)
 	if previousCooldown <= 0 {
 		return resetAt, true
 	}

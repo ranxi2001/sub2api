@@ -13,7 +13,7 @@ const { createServer } = await import(pathToFileURL(join(dirname(req.resolve('vi
 const vue = (await import(pathToFileURL(req.resolve('@vitejs/plugin-vue')).href)).default
 const { chromium } = await import(pathToFileURL(process.env.SUB2API_PLAYWRIGHT_MODULE).href)
 const git = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trimEnd()
-const baseline = '6fa7fb86eae7c732794450646dc13831dce87ff1', head = git('rev-parse', 'HEAD')
+const baseline = '1dcd7628743701918f331b26c85aaceb16201b10', head = git('rev-parse', 'HEAD')
 const cacheDir = mkdtempSync(join(tmpdir(), 'vip-credit-preview-'))
 const entryName = `.vip-credit-preview-${process.pid}.js`, entry = join(root, entryName)
 const origin = 'http://127.0.0.1:4298', captures = [], errors = [], browserWarnings = [], geometry = [], interactions = []
@@ -76,7 +76,9 @@ await import('/src/__fixtures__/vip-auto-credit.ts');
     before = true; server.moduleGraph.invalidateAll()
     await page.goto(origin + '/?lang=' + lang, { waitUntil: 'networkidle' })
     await page.locator('[name="threshold"]').waitFor()
-    if (await page.locator('[name="notify_email"]').count()) throw Error('Baseline unexpectedly contains notification checkbox')
+    for (const [field, value] of Object.entries({ threshold: '50.00000000', amount: '300.00000000', cap: '500.00000000' })) {
+      if (await page.locator(`[name="${field}"]`).inputValue() !== value) throw Error('Baseline money display changed: ' + field)
+    }
     await screenshot('before')
     if (device === 'mobile') await screenshot('before-settings', 'settings')
     before = false; server.moduleGraph.invalidateAll()
@@ -85,8 +87,12 @@ await import('/src/__fixtures__/vip-auto-credit.ts');
     await checkbox.waitFor()
     if (await checkbox.isChecked()) throw Error('Legacy/new opt-in must default OFF')
     const inspect = async () => {
-      for (const [field, value] of Object.entries({ threshold: '50.00000000', amount: '300.00000000', cap: '500.00000000' })) {
+      for (const [field, value] of Object.entries({ threshold: '50.00', amount: '300.00', cap: '500.00' })) {
         if (await page.locator(`[name="${field}"]`).inputValue() !== value) throw Error('Fixture money changed: ' + field)
+      }
+      const saved = await page.evaluate(() => window.saved)
+      if (saved) for (const [field, value] of Object.entries({ threshold: '50.00000000', amount: '300.00000000', cap: '500.00000000' })) {
+        if (saved[field] !== value) throw Error('Untouched saved money changed: ' + field)
       }
       const layout = await page.locator('form').evaluate(form => {
         const grid = form.querySelector('.grid'), box = form.getBoundingClientRect()

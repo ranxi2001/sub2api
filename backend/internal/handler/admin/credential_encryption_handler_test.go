@@ -32,7 +32,7 @@ func (e *credentialHandlerEncryptor) InitializeEncryption() (service.CredentialE
 func TestCredentialEncryptionHandlerStatusAndInitialization(t *testing.T) {
 	encryptor := &credentialHandlerEncryptor{}
 	reauth := service.NewOpenAIOAuthReauthService(nil, nil, nil, nil, encryptor, false, nil, nil)
-	h := NewAccountTokenGuardHandler(nil, reauth)
+	h := NewOpenAIReloginHandler(nil, reauth)
 	r := gin.New()
 	r.GET("/encryption", h.CredentialEncryption)
 	r.POST("/encryption/initialize", h.InitializeCredentialEncryption)
@@ -53,7 +53,7 @@ func TestCredentialEncryptionHandlerBlocksLoginBeforeCreatingJob(t *testing.T) {
 	encryptor := &credentialHandlerEncryptor{}
 	reauth := service.NewOpenAIOAuthReauthService(nil, nil, nil, nil, encryptor, false, nil, nil)
 	// A nil login service would panic if the handler began a login job.
-	h := NewAccountTokenGuardHandler(nil, reauth)
+	h := NewOpenAIReloginHandler(nil, reauth)
 	r := gin.New()
 	r.POST("/login", h.StartTwoFALogin)
 	for _, storageErr := range []error{nil, errors.New("private-storage-detail")} {

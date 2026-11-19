@@ -1,10 +1,13 @@
 {
   "gpt-6.2-astra": {
-    "input_cost_per_token": 1e-05,
-    "output_cost_per_token": 5e-05,
-    "cache_creation_input_token_cost": 1.25e-05,
-    "cache_creation_input_token_cost_12h": 1.25e-05,
-    "cache_read_input_token_cost": 1e-06,
+    "input_cost_per_token": 8e-06,
+    "output_cost_per_token": 4e-05,
+    "cache_creation_input_token_cost": 1e-05,
+    "cache_creation_input_token_cost_12h": 2e-05,
+    "cache_read_input_token_cost": 4e-07,
+    "long_context_input_token_threshold": 272000,
+    "long_context_input_cost_multiplier": 2,
+    "long_context_output_cost_multiplier": 1.5,
     "litellm_provider": "openai",
     "mode": "responses",
     "supports_prompt_caching": true,
@@ -12,11 +15,11 @@
     "supports_xhigh_reasoning_effort": true
   },
   "gpt-6.2-astra-pro": {
-    "input_cost_per_token": 1e-05,
-    "output_cost_per_token": 5e-05,
-    "cache_creation_input_token_cost": 1.25e-05,
-    "cache_creation_input_token_cost_12h": 1.25e-05,
-    "cache_read_input_token_cost": 1e-06,
+    "input_cost_per_token": 8e-06,
+    "output_cost_per_token": 4e-05,
+    "cache_creation_input_token_cost": 1e-05,
+    "cache_creation_input_token_cost_12h": 2e-05,
+    "cache_read_input_token_cost": 4e-07,
     "litellm_provider": "openai",
     "mode": "responses",
     "supports_prompt_caching": true,
@@ -27,8 +30,11 @@
     "input_cost_per_token": 2e-06,
     "output_cost_per_token": 1e-05,
     "cache_creation_input_token_cost": 2.5e-06,
-    "cache_creation_input_token_cost_12h": 2.5e-06,
+    "cache_creation_input_token_cost_12h": 5e-06,
     "cache_read_input_token_cost": 1e-07,
+    "long_context_input_token_threshold": 272000,
+    "long_context_input_cost_multiplier": 2,
+    "long_context_output_cost_multiplier": 1.5,
     "litellm_provider": "openai",
     "mode": "responses",
     "supports_prompt_caching": true,
@@ -78,7 +84,8 @@
     "supports_xhigh_reasoning_effort": true,
     "supports_reasoning": true,
     "supports_prompt_caching": true,
-    "supports_service_tier": true
+    "supports_service_tier": true,
+    "cache_creation_input_token_cost_12h": 2.5e-06
   },
   "gpt-6.1-sol": {
     "cache_creation_input_token_cost": 2.5e-06,
@@ -132,7 +139,8 @@
     "supports_web_search": true,
     "supports_xhigh_reasoning_effort": true,
     "cache_read_input_token_cost_batches": 5e-08,
-    "context_window": 1050000
+    "context_window": 1050000,
+    "cache_creation_input_token_cost_12h": 5e-06
   },
   "grok-4.7": {
     "cache_read_input_token_cost": 5e-07,
@@ -209,7 +217,8 @@
     "supports_web_search": true,
     "supports_xhigh_reasoning_effort": true,
     "cache_read_input_token_cost_batches": 1e-07,
-    "context_window": 1050000
+    "context_window": 1050000,
+    "cache_creation_input_token_cost_12h": 5e-06
   },
   "gpt-6-luna": {
     "cache_creation_input_token_cost": 1.25e-07,
@@ -263,7 +272,8 @@
     "supports_web_search": true,
     "supports_xhigh_reasoning_effort": true,
     "cache_read_input_token_cost_batches": 5e-09,
-    "context_window": 1050000
+    "context_window": 1050000,
+    "cache_creation_input_token_cost_12h": 2.5e-07
   },
   "claude-fable-5-2": {
     "cache_creation_input_token_cost": 1e-05,
@@ -5505,17 +5515,17 @@
     "supports_xhigh_reasoning_effort": true
   },
   "gpt-5.6-sol": {
-    "cache_creation_input_token_cost": 6.25e-06,
-    "cache_creation_input_token_cost_batches": 3.125e-06,
-    "cache_creation_input_token_cost_flex": 3.125e-06,
-    "cache_creation_input_token_cost_priority": 1.25e-05,
-    "cache_read_input_token_cost": 5e-07,
-    "cache_read_input_token_cost_flex": 2.5e-07,
-    "cache_read_input_token_cost_priority": 1e-06,
-    "input_cost_per_token": 5e-06,
-    "input_cost_per_token_batches": 2.5e-06,
-    "input_cost_per_token_flex": 2.5e-06,
-    "input_cost_per_token_priority": 1e-05,
+    "cache_creation_input_token_cost": 5e-06,
+    "cache_creation_input_token_cost_batches": 2.5e-06,
+    "cache_creation_input_token_cost_flex": 2.5e-06,
+    "cache_creation_input_token_cost_priority": 1e-05,
+    "cache_read_input_token_cost": 4e-07,
+    "cache_read_input_token_cost_flex": 2e-07,
+    "cache_read_input_token_cost_priority": 8e-07,
+    "input_cost_per_token": 4e-06,
+    "input_cost_per_token_batches": 2e-06,
+    "input_cost_per_token_flex": 2e-06,
+    "input_cost_per_token_priority": 8e-06,
     "long_context_input_token_threshold": 272000,
     "long_context_input_cost_multiplier": 2.0,
     "long_context_output_cost_multiplier": 1.5,
@@ -5524,10 +5534,10 @@
     "max_output_tokens": 128000,
     "max_tokens": 128000,
     "mode": "chat",
-    "output_cost_per_token": 3e-05,
-    "output_cost_per_token_batches": 1.5e-05,
-    "output_cost_per_token_flex": 1.5e-05,
-    "output_cost_per_token_priority": 6e-05,
+    "output_cost_per_token": 2e-05,
+    "output_cost_per_token_batches": 1e-05,
+    "output_cost_per_token_flex": 1e-05,
+    "output_cost_per_token_priority": 4e-05,
     "supported_endpoints": [
       "/v1/chat/completions",
       "/v1/batch",
@@ -5554,7 +5564,8 @@
     "supports_tool_choice": true,
     "supports_vision": true,
     "supports_web_search": true,
-    "supports_xhigh_reasoning_effort": true
+    "supports_xhigh_reasoning_effort": true,
+    "cache_creation_input_token_cost_12h": 1e-05
   },
   "gpt-5.6-terra": {
     "cache_creation_input_token_cost": 2.5e-06,
@@ -5606,7 +5617,8 @@
     "supports_tool_choice": true,
     "supports_vision": true,
     "supports_web_search": true,
-    "supports_xhigh_reasoning_effort": true
+    "supports_xhigh_reasoning_effort": true,
+    "cache_creation_input_token_cost_12h": 5e-06
   },
   "gpt-5.6-luna": {
     "cache_creation_input_token_cost": 2.5e-07,
@@ -5658,7 +5670,8 @@
     "supports_tool_choice": true,
     "supports_vision": true,
     "supports_web_search": true,
-    "supports_xhigh_reasoning_effort": true
+    "supports_xhigh_reasoning_effort": true,
+    "cache_creation_input_token_cost_12h": 5e-07
   },
   "gpt-5.5": {
     "cache_read_input_token_cost": 5e-07,

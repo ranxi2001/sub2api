@@ -137,42 +137,6 @@ func TestCodexTicketIPPoolRefreshPrefersTicketExit(t *testing.T) {
 	require.Equal(t, "http://u:secret@a.example.com:8080", exit.url, "a removed exit is not reused")
 }
 
-func TestManualHarvestPoolExitKeepsSwitchesAndWraps(t *testing.T) {
-	repo := &ipPoolProxyRepoStub{proxies: ipPoolTestProxies()}
-	svc := ipPoolTestService(t, OpenAICodexTicketHarvestIPPoolURL, repo)
-	ctx := context.Background()
-	a, b := "http://u:secret@a.example.com:8080", "socks5h://b.example.com:1080"
-	tried := map[string]bool{}
-
-	first, name, err := svc.acquireManualHarvestPoolExit(ctx, "", tried, false)
-	require.NoError(t, err)
-	require.Contains(t, []string{a, b}, first.proxy)
-	require.Contains(t, []string{"IP池 · 东京", "IP池 · 大阪"}, name)
-
-	kept, _, err := svc.acquireManualHarvestPoolExit(ctx, first.proxy, tried, false)
-	require.NoError(t, err)
-	require.Equal(t, first.proxy, kept.proxy)
-
-	switched, _, err := svc.acquireManualHarvestPoolExit(ctx, first.proxy, tried, true)
-	require.NoError(t, err)
-	require.NotEqual(t, first.proxy, switched.proxy)
-
-	wrapped, _, err := svc.acquireManualHarvestPoolExit(ctx, switched.proxy, tried, true)
-	require.NoError(t, err)
-	require.NotEqual(t, switched.proxy, wrapped.proxy, "a new pass after every exit was tried avoids the current one")
-
-	repo.proxies = repo.proxies[:1]
-	svc.harvestIPPoolSyncedAt = time.Time{}
-	only, _, err := svc.acquireManualHarvestPoolExit(ctx, a, map[string]bool{a: true}, true)
-	require.NoError(t, err)
-	require.Equal(t, a, only.proxy, "a single-member pool keeps its only exit")
-
-	repo.proxies = nil
-	svc.harvestIPPoolSyncedAt = time.Time{}
-	_, _, err = svc.acquireManualHarvestPoolExit(ctx, a, map[string]bool{}, true)
-	require.Error(t, err)
-}
-
 func TestHarvestIPPoolAttemptBudgetAndNodeName(t *testing.T) {
 	controls := CodexHarvestControls{Speed: CodexHarvestSpeed{MaxNodeAttempts: 3}}
 	require.Equal(t, 1, harvestMaxNodeAttempts(controls, false))

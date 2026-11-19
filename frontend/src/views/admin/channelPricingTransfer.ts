@@ -31,7 +31,7 @@ function integer(value: unknown): number {
 }
 
 function entry(value: unknown, t: Translate): PricingFormEntry {
-  const row = object(value, [...priceFields, 'models', 'billing_mode', 'fast_multiplier', 'flex_multiplier', 'reasoning_effort_multipliers', 'image_input_price', 'image_output_price', 'intervals', 'time_pricing'])
+  const row = object(value, [...priceFields, 'models', 'billing_mode', 'fast_multiplier', 'flex_multiplier', 'ultrafast_multiplier', 'reasoning_effort_multipliers', 'image_input_price', 'image_output_price', 'intervals', 'time_pricing'])
   if (!Array.isArray(row.models) || !row.models.length || row.models.some(m => typeof m !== 'string' || !m.trim())) return invalid()
   if (!['token', 'per_request', 'image', 'video'].includes(String(row.billing_mode))) return invalid()
   if (!Array.isArray(row.intervals)) return invalid()
@@ -66,6 +66,7 @@ function entry(value: unknown, t: Translate): PricingFormEntry {
     image_output_price: number(row.image_output_price),
     fast_multiplier: number(row.fast_multiplier, true),
     flex_multiplier: number(row.flex_multiplier, true),
+    ...(row.ultrafast_multiplier !== undefined ? { ultrafast_multiplier: number(row.ultrafast_multiplier, true) } : {}),
     reasoning_effort_multipliers: reasoning,
     intervals,
     time_pricing: {

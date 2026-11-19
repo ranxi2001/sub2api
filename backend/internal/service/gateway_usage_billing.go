@@ -227,7 +227,7 @@ func resolveUsageBillingRequestID(ctx context.Context, upstreamRequestID string)
 	}
 	if ctx != nil {
 		if clientRequestID, _ := ctx.Value(ctxkey.ClientRequestID).(string); strings.TrimSpace(clientRequestID) != "" {
-			return "client:" + strings.TrimSpace(clientRequestID)
+			return ClientUsageRequestID(clientRequestID)
 		}
 		if requestID, _ := ctx.Value(ctxkey.RequestID).(string); strings.TrimSpace(requestID) != "" {
 			return "local:" + strings.TrimSpace(requestID)
@@ -280,7 +280,7 @@ func resolveUsageBillingPayloadFingerprint(ctx context.Context, requestPayloadHa
 	}
 	if ctx != nil {
 		if clientRequestID, _ := ctx.Value(ctxkey.ClientRequestID).(string); strings.TrimSpace(clientRequestID) != "" {
-			return "client:" + strings.TrimSpace(clientRequestID)
+			return ClientUsageRequestID(clientRequestID)
 		}
 		if requestID, _ := ctx.Value(ctxkey.RequestID).(string); strings.TrimSpace(requestID) != "" {
 			return "local:" + strings.TrimSpace(requestID)
@@ -335,7 +335,7 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 	// user-specific) rate multiplier consumes subscription quota at the expected
 	// speed. TotalCost remains the raw (pre-multiplier) value; downstream guards
 	// on "> 0" still correctly skip free subscriptions (RateMultiplier == 0).
-	if p.IsSubscriptionBill && p.Subscription != nil && p.Cost.TotalCost > 0 {
+	if p.IsSubscriptionBill && p.Subscription != nil && p.Cost.ActualCost > 0 {
 		cmd.SubscriptionID = &p.Subscription.ID
 		cmd.SubscriptionCost = p.Cost.ActualCost
 	} else if p.Cost.ActualCost > 0 {
@@ -850,6 +850,13 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	if overrideTarget, ok := s.resolveCacheTTLUsageOverrideTarget(ctx, account); ok {
 		applyCacheTTLOverride(&result.Usage, overrideTarget)
 		cacheTTLOverridden = (result.Usage.CacheCreation5mTokens + result.Usage.CacheCreation1hTokens) > 0
+	} else if account.IsCacheTTLBillingFromRequestEnabled() {
+		// 上游强制改写 TTL 时，按客户端请求的档位计费；未显式请求 1h 一律按 5m。
+		requestedTTL := result.RequestedCacheTTL
+		if requestedTTL != cacheTTLTarget1h {
+			requestedTTL = cacheTTLTarget5m
+		}
+		cacheTTLOverridden = reclassifyCacheCreationByRequestedTTL(&result.Usage, requestedTTL)
 	}
 
 	// 获取费率倍数（优先级：用户专属 > 分组默认 > 系统默认）
@@ -950,13 +957,7 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 			account.ID, *apiKey.GroupID, result.UpstreamModel, result.Model,
 			// Anthropic's input_tokens excludes cache_read and cache_creation (billed separately);
 			// OpenAI gateway uses actualInputTokens which also excludes cache_read for the same reason.
-			UsageTokens{
-				InputTokens:         result.Usage.InputTokens,
-				OutputTokens:        result.Usage.OutputTokens,
-				CacheCreationTokens: result.Usage.CacheCreationInputTokens,
-				CacheReadTokens:     result.Usage.CacheReadInputTokens,
-				ImageOutputTokens:   result.Usage.ImageOutputTokens,
-			},
+			result.Usage.billingUsageTokens(),
 			cost.TotalCost-cacheStorageCost, pricingAt,
 			accountStatsLongContextPricingEnabled(nil), result.upstreamPriceFactor(),
 		)
@@ -1384,6 +1385,23 @@ func (s *GatewayService) calculateImageCost(
 	return s.billingService.CalculateImageCost(billingModel, sizeTier, result.ImageCount, groupConfig, multiplier)
 }
 
+func (usage ClaudeUsage) billingUsageTokens() UsageTokens {
+	creationTokens := usage.CacheCreationInputTokens
+	if creationTokens <= 0 {
+		creationTokens = max(usage.CacheCreation5mTokens, 0) + max(usage.CacheCreation1hTokens, 0)
+	}
+	tokens := UsageTokens{
+		InputTokens:           usage.InputTokens,
+		OutputTokens:          usage.OutputTokens,
+		CacheCreationTokens:   creationTokens,
+		CacheReadTokens:       usage.CacheReadInputTokens,
+		CacheCreation5mTokens: usage.CacheCreation5mTokens,
+		CacheCreation1hTokens: usage.CacheCreation1hTokens,
+		ImageOutputTokens:     usage.ImageOutputTokens,
+	}
+	return tokens
+}
+
 // calculateTokenCost 计算 Token 计费：路径选择（分组/渠道定价 → 内置定价）
 // 统一交给 BillingService.CalculateTokenCostForRequest，与模型广场的阶梯表查询同源。
 func (s *GatewayService) calculateTokenCost(
@@ -1394,15 +1412,7 @@ func (s *GatewayService) calculateTokenCost(
 	multiplier float64,
 	pricingAt time.Time,
 ) *CostBreakdown {
-	tokens := UsageTokens{
-		InputTokens:           result.Usage.InputTokens,
-		OutputTokens:          result.Usage.OutputTokens,
-		CacheCreationTokens:   result.Usage.CacheCreationInputTokens,
-		CacheReadTokens:       result.Usage.CacheReadInputTokens,
-		CacheCreation5mTokens: result.Usage.CacheCreation5mTokens,
-		CacheCreation1hTokens: result.Usage.CacheCreation1hTokens,
-		ImageOutputTokens:     result.Usage.ImageOutputTokens,
-	}
+	tokens := result.Usage.billingUsageTokens()
 
 	var resolved *ResolvedPricing
 	if s.resolver != nil && apiKey.Group != nil {

@@ -108,7 +108,6 @@ func (s *AccountTestService) syncAstraAccountScheduling(ctx context.Context) {
 		fields = append(fields, zap.String("mode", action.Action))
 		logger.L().Info("astra_account_scheduling_changed", fields...)
 		astraRecentScheduling.add(AstraSchedulingRecord{CheckedAt: time.Now(), AccountID: id, Schedulable: ready, Reason: reason, Mode: action.Action})
-		recordCodexHarvestScheduling(account, action.Action, reason, ready)
 	}
 }
 

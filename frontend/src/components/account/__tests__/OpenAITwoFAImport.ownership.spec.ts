@@ -3,16 +3,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AxiosAdapter, InternalAxiosRequestConfig } from 'axios'
 import OpenAITwoFAImport from '../OpenAITwoFAImport.vue'
 import { apiClient } from '@/api/client'
-import { deleteTwoFALogin, getTwoFALogin, startTwoFALogin } from '@/api/admin/accountTokenGuard'
-import type { TwoFALoginJob } from '@/api/admin/accountTokenGuard'
+import { deleteTwoFALogin, getTwoFALogin, startTwoFALogin } from '@/api/admin/openaiRelogin'
+import type { TwoFALoginJob } from '@/api/admin/openaiRelogin'
 
 vi.mock('vue-i18n', async original => ({ ...await original<typeof import('vue-i18n')>(), useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('@/api/admin/credentialEncryption', () => ({
   getCredentialEncryption: vi.fn().mockResolvedValue({ configured: true, source: 'server_config' }),
   initializeCredentialEncryption: vi.fn(),
 }))
-vi.mock('@/api/admin/accountTokenGuard', async original => ({
-  ...await original<typeof import('@/api/admin/accountTokenGuard')>(),
+vi.mock('@/api/admin/openaiRelogin', async original => ({
+  ...await original<typeof import('@/api/admin/openaiRelogin')>(),
   startTwoFALogin: vi.fn(), getTwoFALogin: vi.fn(), deleteTwoFALogin: vi.fn(),
 }))
 enableAutoUnmount(afterEach)
@@ -128,13 +128,13 @@ describe('mounted 2FA ownership fences', () => {
       await wrapper.get('[data-testid="two-fa-start"]').trigger('click')
       await flushPromises()
       expect(startTwoFALogin).toHaveBeenCalledTimes(8)
-      expect(wrapper.text()).not.toContain('tokenGuard.twoFA.states.failed')
+      expect(wrapper.text()).not.toContain('openaiRelogin.twoFA.states.failed')
       wrapper.unmount()
     } finally { vi.useRealTimers() }
   })
 
   it('recovers accepted start IDs through real Axios after Stop and waits for deferred retirement', async () => {
-    const actual = await vi.importActual<typeof import('@/api/admin/accountTokenGuard')>('@/api/admin/accountTokenGuard')
+    const actual = await vi.importActual<typeof import('@/api/admin/openaiRelogin')>('@/api/admin/openaiRelogin')
     const adapterBefore = apiClient.defaults.adapter
     const responses: { config: InternalAxiosRequestConfig; gate: ReturnType<typeof deferred<void>>; email: string }[] = []
     const retirement = deferred<void>()

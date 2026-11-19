@@ -217,6 +217,16 @@ func (s *AccountTestService) FetchUpstreamSupportedModels(ctx context.Context, a
 	return models, err
 }
 
+func visibleUpstreamModelIDs(account *Account, models []string) []string {
+	filtered := make([]string, 0, len(models))
+	for _, model := range models {
+		if !isHiddenOpenAISubscriptionModel(account, model) {
+			filtered = append(filtered, model)
+		}
+	}
+	return filtered
+}
+
 // SyncUpstreamModelCatalog fetches the account's live model list, enriches
 // missing capability fields from the provider registry used by the upstream,
 // and persists a normalized account snapshot when complete metadata is available.
@@ -264,15 +274,7 @@ func (s *AccountTestService) SyncUpstreamModelCatalog(ctx context.Context, accou
 	} else if saveErr := s.saveGrokCatalogObservation(ctx, account, grokObservation); saveErr != nil {
 		return nil, newUpstreamModelSyncInternalError("Failed to save upstream model catalog", saveErr)
 	}
-	if account != nil {
-		filtered := make([]string, 0, len(models))
-		for _, model := range models {
-			if !isHiddenOpenAISubscriptionModel(account, model) {
-				filtered = append(filtered, model)
-			}
-		}
-		models = filtered
-	}
+	models = visibleUpstreamModelIDs(account, models)
 	catalog := &UpstreamModelCatalog{Models: models, Metadata: make(map[string]UpstreamModelMetadata), DiscoverySource: "upstream"}
 	if !liveListAvailable {
 		// Every provider can use configured IDs when its list endpoint is absent.

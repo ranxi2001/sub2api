@@ -21,6 +21,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
+	"github.com/Wei-Shaw/sub2api/internal/serverless"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 )
@@ -1146,10 +1147,17 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 		}
 
 		status := c.Writer.Status()
+		if serverless.ForwardClientCanceled(c) {
+			// The primary may not have parsed the body/model before transfer.
+			// Record the local outcome without inventing an upstream response.
+			service.MarkOpsClientCancellation(c, false)
+			logOpsStreamError(c, ops, status)
+			return
+		}
 		// Trust only the forwarding boundary's local marker. The captured SSE
 		// parser cannot distinguish a bridge failure from an upstream failure and
 		// otherwise overwrites real HTTP 200 evidence with a synthetic 502.
-		if marked, ok := service.GetOpsStreamError(c); ok && (marked.BridgeFailure != nil || marked.TransportFailure != nil || marked.RecoveryFailure != nil) {
+		if marked, ok := service.GetOpsStreamError(c); ok && (marked.BridgeFailure != nil || marked.TransportFailure != nil || marked.RecoveryFailure != nil || marked.UpstreamWSFailure != nil) {
 			// A trusted final marker must not erase failures from earlier WS turns.
 			logOpsStreamError(c, ops, status)
 			return
@@ -1557,6 +1565,17 @@ func logOpsStreamErrorValue(c *gin.Context, ops *service.OpsService, wireStatus 
 			errorBody = string(payload)
 		}
 	}
+	if failure := streamErr.UpstreamWSFailure; failure != nil {
+		fields := gin.H{"type": normalizedType, "code": streamErr.Code, "message": streamErr.Message,
+			"protocol": "websocket", "turn": streamErr.Turn, "phase": failure.Phase,
+			"wire_status": wireStatus, "status": streamErr.IntendedStatus, "execution_state": "unknown"}
+		if failure.CloseCode != 0 {
+			fields["upstream_close_code"] = failure.CloseCode
+		}
+		if payload, err := json.Marshal(gin.H{"error": fields}); err == nil {
+			errorBody = string(payload)
+		}
+	}
 	if streamErr.BridgeFailure != nil {
 		if payload, err := json.Marshal(gin.H{"error": streamErr.BridgeFailure.Details()}); err == nil {
 			errorBody = string(payload)
@@ -1678,6 +1697,13 @@ func logOpsStreamErrorValue(c *gin.Context, ops *service.OpsService, wireStatus 
 		entry.StatusCode, entry.UpstreamStatusCode = wireStatus, nil
 		entry.IsBusinessLimited = false
 		entry.UpstreamErrorDetail = nil
+	}
+	if streamErr.UpstreamWSFailure != nil {
+		entry.ErrorPhase, entry.ErrorOwner, entry.ErrorSource = "upstream", "provider", "upstream_transport"
+		entry.IsBusinessLimited = false
+		// A WS business status is not an HTTP response from the provider.
+		entry.UpstreamStatusCode, entry.UpstreamErrorMessage, entry.UpstreamErrorDetail = nil, nil, nil
+		entry.UpstreamErrors = nil
 	}
 	suppressOpsUpstreamAttributionForClientRejection(entry)
 

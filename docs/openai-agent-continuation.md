@@ -1,5 +1,7 @@
 # 加密代理任务续接与恢复边界
 
+管理员也可显式启用独立的[旧版兼容模式](openai-legacy-compatibility.md)，停用新增的 agent 冻结与恢复机制；默认关闭，优先级高于本文策略。
+
 本页说明 #727 已合入源码的归属保护，关联 [Issue #715](https://github.com/ranxi2001/sub2api/issues/715)。源码合并、Release 和实例部署分别核实；不能只凭版本号认为当前实例已启用这些路径，也不能把离线回归当作真实供应商的格式兼容证明。
 
 下文描述默认严格策略。管理员可通过默认 `false` 的 `gateway.disable_encrypted_agent_owner_binding` 显式允许完整已交付历史尝试其他合格账号；配置方法、交付安全、统一节点切换与回 strict 的混合 owner 限制见[加密 agent 历史账号策略](encrypted-agent-owner-policy.md)。开关不保证上游密文兼容，也不允许重放不确定交付的任务。

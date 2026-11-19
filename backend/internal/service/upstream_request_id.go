@@ -13,6 +13,12 @@ import (
 // 未指定时不记录上游请求标识。
 const AccountExtraUpstreamRequestIDHeader = "upstream_request_id_header"
 
+// ProviderUsageIDHeader advertises a correlation key for ordinary HTTP usage, not
+// evidence that a usage record exists or that any money moved.
+const ProviderUsageIDHeader = "X-Sub2api-Usage-Id"
+
+func ClientUsageRequestID(id string) string { return "client:" + strings.TrimSpace(id) }
+
 const (
 	maxUpstreamRequestIDHeaderNameLen = 64
 	// maxUsageUpstreamRequestIDLen 与 usage_logs.upstream_request_id VARCHAR(128) 对齐。
@@ -47,6 +53,27 @@ func usageUpstreamRequestIDPtr(account *Account, h http.Header, wsMode bool) *st
 		return nil
 	}
 	id := UpstreamRequestIDFromHeaders(account, h)
+	if account != nil && account.Type == AccountTypeAPIKey {
+		rawBinding, bound := account.Extra["provider_binding"]
+		binding, _ := rawBinding.(map[string]any)
+		if binding["site_type"] == "sub2api" || !bound {
+			// A configured header remains authoritative. Otherwise accept ONLY a
+			// direct Sub2API's dedicated identifier, never a vendor's trace ID.
+			name := UpstreamRequestIDHeaderName(account)
+			if name == "" {
+				name = ProviderUsageIDHeader
+			}
+			values := h.Values(name)
+			if len(values) != 1 {
+				return nil
+			}
+			id = values[0]
+			// A proxy may fold two field lines into a comma-separated value.
+			if !ProviderProfitRequestIDUsable(id) {
+				return nil
+			}
+		}
+	}
 	if id == "" {
 		return nil
 	}

@@ -149,6 +149,15 @@ func (e *openAIWSIngressTurnError) Unwrap() error {
 	return e.cause
 }
 
+// OpenAIWSIngressStage identifies the failed relay boundary without exposing
+// the wrapper type or discarding the original transport cause.
+func (e *openAIWSIngressTurnError) OpenAIWSIngressStage() string {
+	if e == nil {
+		return ""
+	}
+	return e.stage
+}
+
 func wrapOpenAIWSIngressTurnError(stage string, cause error, wroteDownstream bool) error {
 	if cause == nil {
 		return nil

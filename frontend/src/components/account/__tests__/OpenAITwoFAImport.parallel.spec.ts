@@ -1,16 +1,16 @@
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import OpenAITwoFAImport from '../OpenAITwoFAImport.vue'
-import { deleteTwoFALogin, getTwoFALogin, startTwoFALogin } from '@/api/admin/accountTokenGuard'
-import type { TokenGuardReloginAccount, TwoFALoginJob } from '@/api/admin/accountTokenGuard'
+import { deleteTwoFALogin, getTwoFALogin, startTwoFALogin } from '@/api/admin/openaiRelogin'
+import type { OpenAIReloginCredentials, TwoFALoginJob } from '@/api/admin/openaiRelogin'
 
 vi.mock('vue-i18n', async original => ({ ...await original<typeof import('vue-i18n')>(), useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('@/api/admin/credentialEncryption', () => ({
   getCredentialEncryption: vi.fn().mockResolvedValue({ configured: true, source: 'server_config' }),
   initializeCredentialEncryption: vi.fn(),
 }))
-vi.mock('@/api/admin/accountTokenGuard', async original => ({
-  ...await original<typeof import('@/api/admin/accountTokenGuard')>(),
+vi.mock('@/api/admin/openaiRelogin', async original => ({
+  ...await original<typeof import('@/api/admin/openaiRelogin')>(),
   startTwoFALogin: vi.fn(), getTwoFALogin: vi.fn(), deleteTwoFALogin: vi.fn(),
 }))
 
@@ -54,7 +54,7 @@ describe('mounted 2FA bounded account pipelines', () => {
       return { id: entry.email, status: 'running' }
     })
     vi.mocked(getTwoFALogin).mockImplementation(id => logins.get(id)!.promise)
-    const importCredential = vi.fn(async (credential: Record<string, unknown>, email: string, login: TokenGuardReloginAccount) => {
+    const importCredential = vi.fn(async (credential: Record<string, unknown>, email: string, login: OpenAIReloginCredentials) => {
       expect(credential).toEqual({ synthetic_account: email })
       expect(login).toEqual({ email, password: `password-${emails.indexOf(email)}`, mfa_secret: `secret-${emails.indexOf(email)}` })
       events.push(`import:${email}`)
@@ -117,8 +117,8 @@ describe('mounted 2FA bounded account pipelines', () => {
     expect(importCredential.mock.calls.map(call => call[1])).toEqual(expect.arrayContaining(emails.slice(2)))
     expect(importCredential).toHaveBeenCalledTimes(3)
     expect(wrapper.findAll('li').map(row => row.findAll('span')[1]!.text())).toEqual([
-      'tokenGuard.twoFA.states.failed', 'tokenGuard.twoFA.states.failed',
-      'tokenGuard.twoFA.states.importFailed', 'tokenGuard.twoFA.states.created', 'tokenGuard.twoFA.states.created',
+      'openaiRelogin.twoFA.states.failed', 'openaiRelogin.twoFA.states.failed',
+      'openaiRelogin.twoFA.states.importFailed', 'openaiRelogin.twoFA.states.created', 'openaiRelogin.twoFA.states.created',
     ])
     expect(wrapper.text()).not.toContain('synthetic enrollment failure')
   })

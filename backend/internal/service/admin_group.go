@@ -1210,6 +1210,9 @@ func normalizeGroupModelPricing(platform string, pricing []ChannelModelPricing) 
 		if strings.TrimSpace(out[i].Platform) == "" {
 			out[i].Platform = platform
 		}
+		if err := validateImageMinimumCharge(platform, out[i]); err != nil {
+			return nil, infraerrors.BadRequest("INVALID_IMAGE_MINIMUM_CHARGE", err.Error())
+		}
 		for j := range out[i].Models {
 			out[i].Models[j] = strings.TrimSpace(out[i].Models[j])
 		}

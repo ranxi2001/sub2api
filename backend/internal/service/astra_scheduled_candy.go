@@ -47,7 +47,7 @@ func (s *OpenAIGatewayService) observeScheduledAstraCandy(ctx context.Context, h
 	s.astraCandyRunning++
 	s.astraCandyMu.Unlock()
 	h := headers.Clone()
-	id, name := account.ID, account.Name
+	id := account.ID
 	// The stream's request context is commonly cancelled immediately after close.
 	// Use a separate bounded lifetime, carrying no caller cancellation/deadline.
 	go func() {
@@ -60,12 +60,7 @@ func (s *OpenAIGatewayService) observeScheduledAstraCandy(ctx context.Context, h
 			s.astraCandyMu.Unlock()
 			return
 		}
-		reason := s.runScheduledAstraCandy(probeCtx, h, id, &copy)
-		kind := "candy_fail"
-		if reason == "candy_passed" {
-			kind = "candy_pass"
-		}
-		recordCodexHarvestFlow(CodexHarvestFlowEvent{Stage: "select", Kind: kind, AccountID: id, AccountName: name, Model: copy.Model, Reason: reason, Result: reason, Detail: reason})
+		s.runScheduledAstraCandy(probeCtx, h, id, &copy)
 	}()
 }
 

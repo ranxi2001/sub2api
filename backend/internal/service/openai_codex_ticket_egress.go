@@ -370,7 +370,7 @@ func (s *OpenAIGatewayService) pinStoredCodexTicketEgress(ctx context.Context, t
 	if err != nil {
 		return "", noop, ErrOpenAICodexTicketUnavailable
 	}
-	recordCodexHarvestNode(node.Name, "Selector", 0)
+
 	return sidecar.ProxyURL, release, nil
 }
 

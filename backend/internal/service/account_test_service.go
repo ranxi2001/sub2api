@@ -1437,6 +1437,9 @@ func (s *AccountTestService) observeGrokTestResponse(ctx context.Context, accoun
 	if resp == nil {
 		return
 	}
+	if recovery, ok := ctx.Value(grokTestRecoveryContextKey{}).(*grokTestRecovery); ok && account.IsGrokOAuth() {
+		recovery.observed = true
+	}
 	now := time.Now()
 	// Error bodies carry Grok's free-usage, billing, and content-policy
 	// classifications when quota headers are absent. Read only non-success
@@ -1470,10 +1473,10 @@ func (s *AccountTestService) observeGrokTestResponse(ctx context.Context, accoun
 		if limited && !skipAccountState {
 			persistGrokRateLimit(ctx, s.accountRepo, account, resetAt)
 		} else if isSuccessfulGrokRateLimitRecovery(account, snapshot) {
-			clearGrokRateLimitAfterRecovery(ctx, s.accountRepo, account)
+			s.recoverGrokTestRateLimit(ctx, account)
 		}
 	} else if s.accountRepo != nil && isSuccessfulGrokRateLimitRecovery(account, &xai.QuotaSnapshot{StatusCode: resp.StatusCode}) {
-		clearGrokRateLimitAfterRecovery(ctx, s.accountRepo, account)
+		s.recoverGrokTestRateLimit(ctx, account)
 	}
 	if s.accountRepo == nil || len(responseBody) == 0 {
 		if resp.StatusCode == http.StatusPaymentRequired && s.accountRepo != nil {
@@ -3763,10 +3766,12 @@ func (s *AccountTestService) sendErrorAndEnd(c *gin.Context, errorMsg string) er
 	return fmt.Errorf("%s", errorMsg)
 }
 
-// RunTestBackground executes an account test in-memory (no real HTTP client),
-// capturing SSE output via httptest.NewRecorder, then parses the result.
+// RunTestBackground captures an account test's SSE in memory, then parses the
+// result. Grok recovery evidence is returned for the runner to apply after save.
 func (s *AccountTestService) RunTestBackground(ctx context.Context, accountID int64, modelID string) (*ScheduledTestResult, error) {
 	startedAt := time.Now()
+	recovery := &grokTestRecovery{}
+	ctx = context.WithValue(ctx, grokTestRecoveryContextKey{}, recovery)
 
 	w := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(w)
@@ -3788,6 +3793,7 @@ func (s *AccountTestService) RunTestBackground(ctx context.Context, accountID in
 	}
 
 	return &ScheduledTestResult{
+		grokRecovery: recovery,
 		Status:       status,
 		ResponseText: responseText,
 		ErrorMessage: errMsg,

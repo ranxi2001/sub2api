@@ -6,6 +6,8 @@ on:
     paths:
       - '.github/scripts/prepare-discovery-red-compat.py'
       - '.github/scripts/test_discovery_red_compat.py'
+      - '.github/scripts/prepare-openai-usage-red-compat.py'
+      - '.github/scripts/test_openai_usage_red_compat.py'
       - '.github/workflows/issue715-agent-recovery.yml'
       - 'backend/internal/service/openai_*'
       - 'backend/internal/handler/openai_*'
@@ -60,8 +62,9 @@ jobs:
           original=6df0cd5bb0ce4d774d34004008f9dd661d236468
           bash .github/scripts/historical-recovery-timezone-callers.sh
           targets=(backend/internal/service/openai_codex_model_metadata.go backend/internal/service/openai_codex_models_service.go backend/internal/service/openai_excel_bps_models_manifest.go)
+          models_caller=backend/internal/service/openai_models_list.go
           git fetch --no-tags --depth=1 origin "$original"
-          trap 'git restore --source=HEAD -- "${targets[@]}" backend/internal/service/openai_request_timezone_egress.go backend/internal/service/openai_ws_client.go; git diff --exit-code' EXIT
+          trap 'git restore --source=HEAD -- "${targets[@]}" "$models_caller" backend/internal/service/openai_request_timezone_egress.go backend/internal/service/openai_ws_client.go; git diff --exit-code' EXIT
           git restore --source="$original" -- "${targets[@]}"
           for target in "${targets[@]}"; do
             expected=$(git rev-parse "$original:$target")
@@ -69,6 +72,21 @@ jobs:
             echo "baseline=$original path=$target expected_blob=$expected tested_blob=$actual"
             test "$expected" = "$actual"
           done
+          # The historical manifest predates the whitelist-only policy API.
+          # Reconnect only its caller; retain candidate policy declarations and
+          # the exact historical capability implementation and test assertions.
+          python3 - "$models_caller" <<'PYTHON'
+          from pathlib import Path
+          import sys
+          path = Path(sys.argv[1])
+          source = path.read_text()
+          current = 's.fetchNativeCodexModelsManifestWithPolicy(ctx, account, clientVersion, "", policy)'
+          historical = 's.fetchNativeCodexModelsManifest(ctx, account, clientVersion, "")'
+          if source.count(current) != 1:
+              raise SystemExit("missing or ambiguous historical manifest caller")
+          path.write_text(source.replace(current, historical, 1))
+          PYTHON
+          echo "historical manifest compatibility caller path=$models_caller blob=$(git hash-object "$models_caller")"
           set +e
           (cd backend && go test -tags=unit ./internal/service -run '^TestIssue715(BridgeDoesNotAdvertiseEncryptedAgent|FetchedAndPinnedBridgeCapabilities|LiveBridgeCapabilityCannotOverrideWire)$' -count=1 -v -timeout=10m) > "$RUNNER_TEMP/issue715-red.log" 2>&1
           result=$?
@@ -104,7 +122,7 @@ jobs:
           targets=(backend/internal/handler/openai_gateway_handler.go backend/internal/service/openai_account_scheduler.go backend/internal/service/openai_gateway_forward.go backend/internal/service/openai_gateway_response_handling.go backend/internal/service/openai_gateway_service.go backend/internal/service/openai_ws_forwarder_ingress.go backend/internal/service/openai_ws_v2_passthrough_adapter.go backend/internal/service/openai_ws_http_bridge.go backend/internal/service/openai_ws_pool.go)
           added=(backend/internal/service/openai_agent_message_recovery.go backend/internal/service/openai_agent_message_recovery_cache.go backend/internal/service/openai_agent_message_delivery.go backend/internal/repository/gateway_cache_agent_recovery.go backend/internal/repository/gateway_cache_agent_shadow_epoch.go backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_agent_message_recovery_wait.go backend/internal/service/openai_ws_search_activation.go backend/internal/service/openai_409_omit_history.go backend/internal/service/openai_409_readable_shadow.go backend/internal/repository/gateway_cache_readable_shadow.go backend/internal/service/openai_400_omit_history.go backend/internal/service/openai_history_omission.go backend/internal/service/openai_lossy_history_restart.go)
           # The exact original gateway struct predates analysis admission state.
-          added+=(backend/internal/service/openai_ws_readable_continuation.go backend/internal/service/openai_agent_replay_metadata.go backend/internal/service/openai_agent_recovery_diagnostics.go backend/internal/service/openai_tool_provenance.go backend/internal/repository/gateway_cache_tool_provenance.go)
+          added+=(backend/internal/service/openai_ws_readable_continuation.go backend/internal/service/openai_agent_replay_metadata.go backend/internal/service/openai_agent_recovery_diagnostics.go backend/internal/service/openai_tool_provenance.go backend/internal/repository/gateway_cache_tool_provenance.go backend/internal/service/openai_ws_model_failure.go)
           handler_compat=aa8e596e6d6f3e4648d6beba73b39b240dd5357a
           handler_leaf=backend/internal/handler/openai_agent_message_recovery.go
           error_leaf=backend/internal/service/openai_agent_message_recovery_error.go
@@ -168,6 +186,8 @@ jobs:
           done
           for path in "${added[@]}"; do test ! -e "$path"; done
           bash .github/scripts/historical-ws-projection-types.sh "$original"
+          python3 -m unittest discover -s .github/scripts -p 'test_openai_usage_red_compat.py' -v
+          python3 .github/scripts/prepare-openai-usage-red-compat.py . "$original"
           set +e
           (cd backend && go test -tags=unit ./internal/handler -run '^TestIssue715HTTPResumesSameTaskAcrossTwoTurns$' -count=1 -v -timeout=10m) > "$RUNNER_TEMP/issue715-recovery-red.log" 2>&1
           result=$?
@@ -277,7 +297,11 @@ jobs:
           ws_original=a575df898ccd0876c4c0eb1559da38cedfdfe99d
           ws_targets=(backend/internal/handler/openai_gateway_handler.go backend/internal/service/openai_ws_forwarder_ingress.go backend/internal/service/openai_ws_v2_passthrough_adapter.go backend/internal/service/openai_ws_http_bridge.go backend/internal/service/openai_ws_pool.go)
           # Neither helper exists on the restored historical socket structure.
-          ws_added=(backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_ws_search_activation.go)
+          ws_added=(backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_ws_search_activation.go backend/internal/service/openai_ws_model_failure.go)
+          # Issue907 depends on recovery APIs absent from this delivery baseline.
+          # Pin only its unrelated callers to the exact pre-Issue907 production.
+          model_compat=4ba33f8713cbf6c6406e0f2639ffcc2ef1e31c87
+          model_callers=(backend/internal/service/openai_ws_forwarder_support.go backend/internal/service/openai_ws_forwarder_v2.go)
           ws_added+=(backend/internal/service/openai_ws_readable_continuation.go backend/internal/service/openai_agent_recovery_diagnostics.go backend/internal/service/openai_tool_provenance.go backend/internal/repository/gateway_cache_tool_provenance.go)
           handler_compat=aa8e596e6d6f3e4648d6beba73b39b240dd5357a
           handler_leaf=backend/internal/handler/openai_agent_message_recovery.go
@@ -298,9 +322,17 @@ jobs:
           git fetch --no-tags --depth=1 origin "$ws_original"
           git fetch --no-tags --depth=1 origin "$scheduler_compat"
           git fetch --no-tags --depth=1 origin "$metadata_compat"
-          trap 'git restore --source=HEAD -- "${targets[@]}" "$added" "${ws_targets[@]}" "${ws_added[@]}" "$scheduler_leaf" "$wait_added" "${omission_added[@]}" "$handler_leaf" "$error_leaf" "$metadata_leaf" "$projection_types" backend/internal/service/openai_request_timezone_egress.go backend/internal/service/openai_ws_client.go; git diff --exit-code' EXIT
+          trap 'git restore --source=HEAD -- "${targets[@]}" "$added" "${ws_targets[@]}" "${ws_added[@]}" "${model_callers[@]}" "$scheduler_leaf" "$wait_added" "${omission_added[@]}" "$handler_leaf" "$error_leaf" "$metadata_leaf" "$projection_types" backend/internal/service/openai_request_timezone_egress.go backend/internal/service/openai_ws_client.go; git diff --exit-code' EXIT
           git restore --source="$original" -- "${targets[@]}"
           git restore --source="$ws_original" -- "${ws_targets[@]}"
+          git fetch --no-tags --depth=1 origin "$model_compat"
+          git restore --source="$model_compat" -- "${model_callers[@]}"
+          for leaf in "${model_callers[@]}"; do
+            expected=$(git rev-parse "$model_compat:$leaf")
+            actual=$(git hash-object "$leaf")
+            test "$expected" = "$actual"
+            echo "model_error_compatibility baseline=$model_compat path=$leaf expected=$expected tested=$actual"
+          done
           git restore --source="$metadata_compat" -- "$metadata_leaf"
           test "$(git hash-object "$metadata_leaf")" = "$(git rev-parse "$metadata_compat:$metadata_leaf")"
           echo "compatibility_leaf_baseline=$metadata_compat path=$metadata_leaf blob=$(git hash-object "$metadata_leaf")"

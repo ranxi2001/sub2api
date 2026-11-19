@@ -24,7 +24,7 @@
           <th colspan="3" class="pz-bg pt-2 text-center">
             <div class="pz-title border-b pb-2 font-semibold">
               {{ t('modelPlaza.table.paidPrice') }}
-              <span class="pz-unit ml-1 normal-case font-normal">{{ t('modelPlaza.table.unitPerMillion') }}</span>
+              <span v-if="hasTokenPricing" class="pz-unit ml-1 normal-case font-normal">{{ t('modelPlaza.table.unitPerMillion') }}</span>
             </div>
           </th>
           <th
@@ -33,7 +33,7 @@
           >
             <div class="border-b border-gray-200 pb-2 text-gray-400 dark:border-dark-600 dark:text-dark-500">
               {{ t('modelPlaza.table.officialPrice') }}
-              <span class="ml-1 normal-case font-normal text-gray-400 dark:text-dark-500">{{ t('modelPlaza.table.unitPerMillion') }}</span>
+              <span v-if="hasTokenPricing" class="ml-1 normal-case font-normal text-gray-400 dark:text-dark-500">{{ t('modelPlaza.table.unitPerMillion') }}</span>
             </div>
           </th>
           <th
@@ -66,6 +66,11 @@
           <td class="border-r border-gray-100 py-2.5 pl-5 pr-4 align-middle dark:border-dark-700/60">
             <div class="flex flex-wrap items-center gap-1.5">
               <span class="font-medium text-gray-900 dark:text-white">{{ m.name }}</span>
+              <span v-if="billingMode(m) === BILLING_MODE_TOKEN && (m.pricing?.image_minimum_charge ?? 0) > 0"
+                class="rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-700 dark:bg-amber-900/20 dark:text-amber-300"
+                data-image-minimum-charge :title="t('imageUsage.minimumHelp')">
+                {{ t('imageUsage.minimumBadge', { amount: m.pricing?.image_minimum_charge }) }}
+              </span>
               <!-- 时段徽章紧跟模型名,其余徽章排在后面,空间不足时先换行的是它们 -->
               <span
                 v-if="period"
@@ -378,6 +383,8 @@ const PER_MILLION = 1_000_000
  * 2. 组内按官方输出价从高到低,无官方价的排最后;
  * 3. 同价按名称降序(新版本号在前,如 gpt-5.6 先于 gpt-5.5)。
  */
+const hasTokenPricing = computed(() => props.models.some(m => billingMode(m) === BILLING_MODE_TOKEN))
+
 const sortedModels = computed(() => {
   return [...props.models].sort((a, b) => {
     const ta = billingMode(a) === BILLING_MODE_TOKEN

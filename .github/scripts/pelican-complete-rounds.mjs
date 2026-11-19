@@ -13,8 +13,10 @@ const pause = () => new Promise(resolve => setTimeout(resolve, 250))
 export function createPageNavigation(page) {
   const pending = new Set()
   const waiters = new Set()
-  page.on('request', request => pending.add(request))
+  let activity = 0
+  page.on('request', request => { activity++; pending.add(request) })
   const completed = request => {
+    activity++
     pending.delete(request)
     if (!pending.size) for (const resolve of [...waiters]) resolve()
   }
@@ -27,19 +29,39 @@ export function createPageNavigation(page) {
     // Document load + our real completion inventory does not depend on that
     // stale frame flag. Keep one 20s deadline, including document readiness.
     await page.waitForLoadState('load', { timeout: 20_000 })
-    while (pending.size) await new Promise((resolve, reject) => {
-      const done = () => { clearTimeout(timer); waiters.delete(done); resolve() }
-      const timer = setTimeout(() => {
-        waiters.delete(done)
-        reject(new Error('browser requests did not finish before navigation'))
-      }, Math.max(0, deadline - Date.now()))
-      waiters.add(done)
-    })
+    for (;;) {
+      while (pending.size) await new Promise((resolve, reject) => {
+        const done = () => { clearTimeout(timer); waiters.delete(done); resolve() }
+        const timer = setTimeout(() => {
+          waiters.delete(done)
+          reject(new Error('browser requests did not finish before navigation'))
+        }, Math.max(0, deadline - Date.now()))
+        waiters.add(done)
+      })
+      // load can fire before Vue schedules its auth refresh. Observe a quiet
+      // interval after draining, so that deferred requests cannot be aborted
+      // by the next document navigation. Keep the original total deadline.
+      const remaining = deadline - Date.now()
+      if (remaining <= 0) throw new Error('browser requests did not finish before navigation')
+      const observed = activity
+      await new Promise(resolve => setTimeout(resolve, Math.min(250, remaining)))
+      if (!pending.size && activity === observed) return
+    }
   }
   return {
     settle,
-    async goto(url) { await settle(); await page.goto(url, { waitUntil: 'load' }); await settle() },
-    async reload() { await settle(); await page.reload({ waitUntil: 'load' }); await settle() },
+    async goto(url, beforeNavigate = () => {}) {
+      await settle()
+      beforeNavigate()
+      await page.goto(url, { waitUntil: 'load' })
+      await settle()
+    },
+    async reload(beforeNavigate = () => {}) {
+      await settle()
+      beforeNavigate()
+      await page.reload({ waitUntil: 'load' })
+      await settle()
+    },
   }
 }
 
@@ -129,9 +151,13 @@ export async function completeScheduledRounds(c) {
   }
 
   async function groupHistory(label, expected) {
-    const listed = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/admin/pelican-group-test-results'
-      && response.request().method() === 'GET' && response.status() === 200)
-    await navigation.goto(`${origin}/admin/pelican-tests`)
+    // Arm after old-document polling has drained. Its response body disappears
+    // on navigation and must never stand in for the destination's history.
+    let listed
+    await navigation.goto(`${origin}/admin/pelican-tests`, () => {
+      listed = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/admin/pelican-group-test-results'
+        && response.request().method() === 'GET' && response.status() === 200)
+    })
     const response = await listed
     const list = unwrap(await response.json())
     assert.equal(list.total, expected.length)
@@ -381,10 +407,11 @@ export async function completeScheduledRounds(c) {
     const stored = await readGroupPlan()
     assert.deepEqual(stored.pelican_config, body.pelican_config)
     await form.waitFor({ state: 'hidden' })
-    await navigation.settle()
-    const listRead = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/admin/pelican-group-tests'
-      && response.request().method() === 'GET')
-    await navigation.reload()
+    let listRead
+    await navigation.reload(() => {
+      listRead = page.waitForResponse(response => new URL(response.url()).pathname === '/api/v1/admin/pelican-group-tests'
+        && response.request().method() === 'GET')
+    })
     const listResponse = await listRead
     assert.equal(listResponse.status(), 200)
     const list = unwrap(await listResponse.json())

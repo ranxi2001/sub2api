@@ -124,8 +124,8 @@ const PaginationStub = {
 }
 
 const BulkEditAccountModalStub = {
-  props: ['show', 'target'],
-  template: '<div data-test="bulk-edit-modal" :data-show="String(show)" :data-target-mode="target?.mode ?? \'\'" :data-target-ids="JSON.stringify(target?.accountIds ?? [])"></div>'
+  props: ['show', 'target', 'filteredPreview'],
+  template: '<div data-test="bulk-edit-modal" :data-show="String(show)" :data-target-mode="target?.mode ?? \'\'" :data-filter-preview="String(filteredPreview)" :data-target-ids="JSON.stringify(target?.accountIds ?? [])"></div>'
 }
 
 const makeProbeAccount = (id: number, rate = 0.25) => ({
@@ -328,7 +328,26 @@ describe('admin AccountsView bulk edit scope', () => {
 
     expect(wrapper.get('[data-test="bulk-edit-modal"]').attributes('data-show')).toBe('true')
     expect(wrapper.get('[data-test="bulk-edit-modal"]').attributes('data-target-mode')).toBe('selected')
+    expect(wrapper.get('[data-test="bulk-edit-modal"]').attributes('data-filter-preview')).toBe('true')
     expect(wrapper.get('[data-test="bulk-edit-modal"]').attributes('data-target-ids')).toBe('[7,11]')
+  })
+
+  it('passes only the explicitly checked IDs across pages to the upstream action', async () => {
+    listAccounts.mockImplementation(async (page: number) =>
+      page === 2 ? probePage([21, 22], 22, 2) : probePage([7, 8], 22, 1))
+    const wrapper = mountProbeView({ BulkEditAccountModal: BulkEditAccountModalStub })
+    await flushPromises()
+    await wrapper.get('[data-account-id="7"] [data-test="select-row"] input').trigger('change')
+    await wrapper.get('[data-test="next-page"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-account-id="22"] [data-test="select-row"] input').trigger('change')
+    await wrapper.get('[data-test="edit-filtered"]').trigger('click')
+    const modal = wrapper.get('[data-test="bulk-edit-modal"]')
+    expect(modal.attributes('data-filter-preview')).toBe('false')
+    expect(modal.attributes('data-target-ids')).toBe('[7,22]')
+    await wrapper.get('[data-account-id="21"] [data-test="select-row"] input').trigger('change')
+    expect(modal.attributes('data-target-ids')).toBe('[7,22]')
+    wrapper.unmount()
   })
 
   it('keeps checked OAuth IDs when a stale filtered-edit action fires', async () => {

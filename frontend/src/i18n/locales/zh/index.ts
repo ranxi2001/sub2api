@@ -1,3 +1,4 @@
+import imageUsage from './imageUsage'
 import coupon from './coupon'
 import qqbot from './qqbot'
 import matureProviders from './matureProviders'
@@ -22,7 +23,7 @@ import controlledExperiments from './controlledExperiments'
 import accountOps from './accountOps'
 import aiOps from './aiOps'
 import aiOpsControl from './aiOpsControl'
-import tokenGuard from './tokenGuard'
+import openaiRelogin from './openaiRelogin'
 import pelicanTests from './pelicanTests'
 import modelTrace from './modelTrace'
 import tokenGuardV2 from './tokenGuardV2'
@@ -43,6 +44,7 @@ import latencyObservability from './latencyObservability'
 import autoConfig from './autoConfig'
 
 export default {
+  imageUsage,
   coupon,
   ...qqbot,
   matureProviders,
@@ -68,7 +70,7 @@ export default {
   accountOps,
   aiOps,
   aiOpsControl,
-  tokenGuard,
+  openaiRelogin,
   pelicanTests,
   modelTrace,
   tokenGuardV2,

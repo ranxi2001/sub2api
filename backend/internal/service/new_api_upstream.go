@@ -127,6 +127,10 @@ func (s *UpstreamBillingProbeService) newAPIRequest(ctx context.Context, a *Acco
 	if e != nil {
 		return newAPIError("request_build_failed")
 	}
+	// Identify these management queries instead of inheriting Go's generic UA,
+	// which some upstream gateways reject on token inventory routes.
+	// Explicit account overrides still take precedence.
+	req.Header.Set("User-Agent", "Sub2API-Upstream-Probe/1.0")
 	a.ApplyHeaderOverrides(req.Header)
 	for key := range req.Header {
 		if strings.EqualFold(key, "Authorization") || strings.EqualFold(key, "New-Api-User") || strings.EqualFold(key, "Cookie") {
@@ -290,6 +294,12 @@ func newAPISnapshot(a *Account, t NewAPIToken, d *newAPIData, interval int, now 
 			snap.Data[k] = rate
 		}
 		snap.Data["peak_rate_enabled"] = false
+	}
+	if scale := NewAPICostScale(a); NewAPICostSyncEnabled(a) {
+		if cost, ok := NewAPICostToSync(snap, scale); ok {
+			snap.Data["cost_multiplier_scale"] = scale
+			snap.Data["cost_multiplier"] = cost
+		}
 	}
 	return snap
 }

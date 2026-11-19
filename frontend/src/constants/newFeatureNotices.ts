@@ -4,6 +4,10 @@
  * browser; use a new ID to announce the feature again in a later release.
  */
 export const NEW_FEATURE_NOTICES = {
+  imageUsageBilling: 'image-usage-minimum-charge-20261119',
+  newAPICostConversion: 'new-api-cost-conversion-20261119',
+  accountOpsBalanceNotification: 'account-ops-per-account-balance-notification-20261119',
+  channelUltrafastPricing: 'channel-ultrafast-pricing-initial-announcement',
   groupForceUltrafast: 'group-force-ultrafast-initial-announcement',
   passthroughModelFilter: 'openai-passthrough-model-filter-initial-announcement',
   vertexMultiRegion: 'vertex-multi-region-initial-announcement',
@@ -56,6 +60,7 @@ export const NEW_FEATURE_NOTICES = {
   apiKeyLongContext: 'api-key-long-context-control-initial-announcement',
   apiKeyContextTokenLimit: 'api-key-context-token-limit-initial-announcement',
   apiKeyUsageDateRange: 'api-key-usage-date-range-initial-announcement',
+  providerProfit: 'profit-operations-provider-reconciliation',
   profitOperationsToday: 'profit-operations-today-filter-initial-announcement',
   profitOperationsTimeRanges: 'profit-operations-time-ranges-initial-announcement',
   userLiveLoad: 'user-live-load-initial-announcement',
@@ -68,6 +73,7 @@ export const NEW_FEATURE_NOTICES = {
   aiOpsProposalCancel: 'ai-ops-proposal-cancel-initial-announcement',
   bepusdtPayment: 'bepusdt-embedded-payment-initial-announcement',
   accountDailyScheduling: 'account-daily-schedulable-timers-initial-announcement',
+  batchUpstreamWhitelist: 'account-batch-upstream-whitelist-v1',
   accountAutoRefreshUpstreamModels: 'account-auto-refresh-upstream-models-initial-announcement',
   streamFirstEventTiming: 'stream-first-event-timing-initial-announcement',
   openaiImageHeaderTimeoutGroups: 'openai-image-header-timeout-groups-initial-announcement',
@@ -77,4 +83,5 @@ export const NEW_FEATURE_NOTICES = {
   bpsAccountSearch: 'bps-account-search-initial-announcement',
   bpsAccountMultiProxy: 'bps-account-multi-proxy-request-routing',
   openaiAccountMultiProxy: '2026-11-16-openai-account-multi-proxy',
+  cacheTtlBillingFromRequest: 'anthropic-apikey-cache-ttl-billing-from-request-initial-announcement',
 } as const

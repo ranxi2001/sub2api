@@ -58,6 +58,47 @@ func TestUsageUpstreamRequestIDPtr(t *testing.T) {
 	require.Len(t, *got, maxUsageUpstreamRequestIDLen)
 }
 
+func TestImportedSub2APIUsageReadsOnlyDirectReceiptID(t *testing.T) {
+	a := &Account{Type: AccountTypeAPIKey, Extra: map[string]any{"provider_binding": map[string]any{"site_type": "sub2api"}}}
+	h := http.Header{}
+	h.Set("X-Request-Id", "vendor-trace")
+	require.Nil(t, usageUpstreamRequestIDPtr(a, h, false))
+	h.Set(ProviderUsageIDHeader, "client:fixture-id")
+	require.Equal(t, "client:fixture-id", *usageUpstreamRequestIDPtr(a, h, false))
+	require.Nil(t, usageUpstreamRequestIDPtr(a, h, true))
+	h.Add(ProviderUsageIDHeader, "different")
+	require.Nil(t, usageUpstreamRequestIDPtr(a, h, false))
+	a.Extra[AccountExtraUpstreamRequestIDHeader] = strings.ToLower(ProviderUsageIDHeader)
+	require.Nil(t, usageUpstreamRequestIDPtr(a, h, false), "explicitly naming the same header cannot select its first value")
+	h.Set(ProviderUsageIDHeader, "first,second")
+	require.Nil(t, usageUpstreamRequestIDPtr(a, h, false))
+	delete(a.Extra, AccountExtraUpstreamRequestIDHeader)
+	require.Nil(t, usageUpstreamRequestIDPtr(a, h, false))
+	h.Set(ProviderUsageIDHeader, strings.Repeat("x", 129))
+	require.Nil(t, usageUpstreamRequestIDPtr(a, h, false))
+	a.Extra[AccountExtraUpstreamRequestIDHeader] = "X-Request-Id"
+	require.Equal(t, "vendor-trace", *usageUpstreamRequestIDPtr(a, h, false))
+	delete(a.Extra, AccountExtraUpstreamRequestIDHeader)
+	a.Extra["provider_binding"] = map[string]any{"site_type": "newapi"}
+	require.Nil(t, usageUpstreamRequestIDPtr(a, h, false))
+}
+
+func TestHandEnteredAPIKeyReadsDirectUsageIdentifier(t *testing.T) {
+	a := &Account{Type: AccountTypeAPIKey}
+	h := http.Header{}
+	h.Set("X-Request-Id", "trace-not-a-bill")
+	require.Nil(t, usageUpstreamRequestIDPtr(a, h, false))
+	h.Set(ProviderUsageIDHeader, "client:manual-fixture")
+	require.Equal(t, "client:manual-fixture", *usageUpstreamRequestIDPtr(a, h, false))
+	require.Nil(t, usageUpstreamRequestIDPtr(a, h, true))
+	for _, values := range [][]string{{"one", "two"}, {"one,two"}, {" leading-space"}, {strings.Repeat("x", 125)}} {
+		h[http.CanonicalHeaderKey(ProviderUsageIDHeader)] = values
+		require.Nil(t, usageUpstreamRequestIDPtr(a, h, false))
+	}
+	a.Extra = map[string]any{AccountExtraUpstreamRequestIDHeader: "X-Request-Id"}
+	require.Equal(t, "trace-not-a-bill", *usageUpstreamRequestIDPtr(a, h, false))
+}
+
 func TestValidateUpstreamRequestIDHeaderExtra(t *testing.T) {
 	require.NoError(t, ValidateUpstreamRequestIDHeaderExtra(nil))
 	require.NoError(t, ValidateUpstreamRequestIDHeaderExtra(map[string]any{}))

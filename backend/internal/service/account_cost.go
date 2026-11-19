@@ -57,6 +57,12 @@ func accountCostMultiplierNumber(raw any) (float64, bool) {
 
 // Null removes an override and restores the default; zero is an explicit cost.
 func ValidateAccountCostMultiplierExtra(extra map[string]any) error {
+	if raw := extra[NewAPIApplyUSDRateExtraKey]; raw != nil {
+		if _, ok := raw.(bool); !ok {
+			return ErrNewAPIConfiguration
+		}
+	}
+
 	if raw := extra[AccountCostAutoSyncExtraKey]; raw != nil {
 		if _, ok := raw.(bool); !ok {
 			return infraerrors.BadRequest("INVALID_COST_MULTIPLIER_AUTO_SYNC", "cost_multiplier_auto_sync must be a boolean")

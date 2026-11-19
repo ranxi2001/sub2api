@@ -401,6 +401,57 @@ describe('EditAccountModal', () => {
     expect(account.credentials.model_mapping).toEqual({ 'gpt-5.2': 'gpt-5.2' })
   })
 
+  it('shows and saves the cache TTL billing switch after switching OpenAI API key to Anthropic', async () => {
+    const account = { ...buildAccount(), group_ids: [10], extra: {} }
+    updateAccountMock.mockReset().mockResolvedValue({ ...account, platform: 'anthropic' })
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await flushPromises()
+    const toggle = '[data-testid="cache-ttl-billing-from-request-toggle"]'
+    const badges = () => wrapper.findAllComponents(NewFeatureBadge).filter(
+      (badge) => badge.props('noticeId') === NEW_FEATURE_NOTICES.cacheTtlBillingFromRequest
+    )
+    expect(wrapper.find(toggle).exists()).toBe(false)
+    expect(badges()).toHaveLength(0)
+
+    await wrapper.get('[data-testid="edit-account-platform"]').setValue('anthropic')
+    await flushPromises()
+    expect(wrapper.find(toggle).exists()).toBe(true)
+    expect(badges()).toHaveLength(1)
+    await wrapper.get(toggle).trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[0]?.[1]).toMatchObject({
+      platform: 'anthropic', extra: expect.objectContaining({ cache_ttl_billing_from_request: true })
+    })
+  })
+
+  it('hides the cache TTL billing switch and does not save it after switching Anthropic API key to OpenAI', async () => {
+    const account = {
+      ...buildAccount(), id: 24, platform: 'anthropic', type: 'apikey',
+      credentials: { api_key: 'sk-relay', base_url: 'https://relay.example.com' },
+      extra: { cache_ttl_billing_from_request: true }
+    } as any
+    updateAccountMock.mockReset().mockResolvedValue({ ...account, platform: 'openai' })
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await flushPromises()
+    const toggle = '[data-testid="cache-ttl-billing-from-request-toggle"]'
+    expect(wrapper.find(toggle).exists()).toBe(true)
+
+    await wrapper.get('[data-testid="edit-account-platform"]').setValue('openai')
+    await flushPromises()
+    expect(wrapper.find(toggle).exists()).toBe(false)
+    expect(wrapper.findAllComponents(NewFeatureBadge).filter(
+      (badge) => badge.props('noticeId') === NEW_FEATURE_NOTICES.cacheTtlBillingFromRequest
+    )).toHaveLength(0)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const payload = updateAccountMock.mock.calls[0]?.[1]
+    expect(payload).toMatchObject({ platform: 'openai' })
+    expect(payload?.extra ?? {}).not.toHaveProperty('cache_ttl_billing_from_request')
+  })
+
   it('preserves common unsaved edits and restores the source platform when the dialog reopens', async () => {
     const wrapper = mountModal()
     await flushPromises()
@@ -2430,20 +2481,20 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock.mock.calls[0]?.[1]?.upstream_billing_probe_enabled).toBe(true)
   })
 
-  it('keeps New API multipliers manual despite legacy automatic sync flags', async () => {
+  it('keeps customer billing manual and honors disabled New API cost sync', async () => {
     const account = buildAccount()
     account.extra = {
       upstream_billing_provider: 'new_api',
       upstream_billing_probe_enabled: true,
       upstream_billing_rate_sync_enabled: true,
-      cost_multiplier_auto_sync: true,
+      cost_multiplier_auto_sync: false,
       cost_multiplier: 0.2
     }
     updateAccountMock.mockReset().mockResolvedValue(account)
     checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
     const wrapper = mountModal(account)
     expect(wrapper.find('[data-testid="upstream-billing-rate-sync"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="account-cost-auto-sync"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="account-cost-auto-sync"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('admin.accounts.upstreamBilling.newAPI.groupRatioHint')
     expect(wrapper.get<HTMLInputElement>('[data-testid="account-rate-multiplier"]').element.disabled).toBe(false)
     expect(wrapper.get<HTMLInputElement>('[data-testid="account-cost-multiplier"]').element.disabled).toBe(false)
@@ -2456,8 +2507,25 @@ describe('EditAccountModal', () => {
       rate_multiplier: 0.7,
       upstream_billing_probe_enabled: true,
       upstream_billing_rate_sync_enabled: false,
-      extra: { cost_multiplier: 0.3, cost_multiplier_auto_sync: false }
+      extra: { cost_multiplier: 0.3 }
     })
+  })
+
+  it('preserves New API converted cost settings when saving an unrelated account edit', async () => {
+    const account = buildAccount()
+    account.extra = { ...account.extra, upstream_billing_provider: 'new_api', new_api_apply_usd_rate: true, cost_multiplier_auto_sync: true, cost_multiplier: 0.7 }
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    expect(wrapper.get<HTMLInputElement>('[data-testid="account-cost-multiplier"]').element.disabled).toBe(true)
+    expect(wrapper.get<HTMLInputElement>('[data-testid="account-rate-multiplier"]').element.disabled).toBe(false)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const extra = updateAccountMock.mock.calls[0]?.[1].extra
+    expect(extra).not.toHaveProperty('cost_multiplier')
+    expect(extra).not.toHaveProperty('cost_multiplier_auto_sync')
+    expect(extra).not.toHaveProperty('new_api_apply_usd_rate')
   })
 
   it('enabling rate sync also enables probing and stops submitting a manual rate', async () => {
@@ -3759,6 +3827,46 @@ describe('OpenAI connection account type boundary in the actual editor', () => {
     expect(mimicExtra).toMatchObject({ anthropic_mimic_claude_code: true, unrelated: 'preserve' })
     expect(mimicExtra).not.toHaveProperty('anthropic_strip_claude_code_identity')
     expect(mimicExtra).not.toHaveProperty('anthropic_mimic_claude_code_deduct_tokens')
+  })
+
+  it('restores and saves the Anthropic API key cache TTL billing-from-request switch', async () => {
+    const account = {
+      ...buildAccount(),
+      id: 22,
+      platform: 'anthropic',
+      type: 'apikey',
+      credentials: { api_key: 'sk-relay', base_url: 'https://relay.example.com' },
+      extra: { anthropic_passthrough: true, cache_ttl_billing_from_request: true, unrelated: 'preserve' }
+    } as any
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await flushPromises()
+
+    const toggle = () => wrapper.get('[data-testid="cache-ttl-billing-from-request-toggle"]')
+    expect(toggle().classes()).toContain('bg-primary-600')
+
+    const badges = () => wrapper.findAllComponents(NewFeatureBadge).filter(
+      (badge) => badge.props('noticeId') === NEW_FEATURE_NOTICES.cacheTtlBillingFromRequest
+    )
+    expect(badges()).toHaveLength(1)
+    expect(badges()[0].props('userId')).toBe(41)
+    await badges()[0].get('button').trigger('click')
+    expect(badges().filter((badge) => badge.find('button').exists())).toHaveLength(0)
+
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({
+      anthropic_passthrough: true, cache_ttl_billing_from_request: true, unrelated: 'preserve'
+    })
+
+    await toggle().trigger('click')
+    await flushPromises()
+    await wrapper.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const disabledExtra = updateAccountMock.mock.calls[1]?.[1]?.extra
+    expect(disabledExtra).toMatchObject({ anthropic_passthrough: true, unrelated: 'preserve' })
+    expect(disabledExtra).not.toHaveProperty('cache_ttl_billing_from_request')
   })
 
   it.each([false, true])('restores and changes Anthropic estimated deduction from %s', async (deduct) => {

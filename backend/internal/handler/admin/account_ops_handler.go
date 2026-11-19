@@ -18,6 +18,19 @@ type AccountOpsHandler struct {
 func NewAccountOpsHandler(svc *service.AccountOpsService, email *service.EmailService) *AccountOpsHandler {
 	return &AccountOpsHandler{svc: svc, email: email}
 }
+func (h *AccountOpsHandler) SetBalanceLowNotification(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	var v struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err != nil || id <= 0 || c.ShouldBindJSON(&v) != nil || v.Enabled == nil {
+		response.BadRequest(c, "Invalid balance notification request")
+		return
+	}
+	cfg, err := h.svc.SetBalanceLowNotification(c.Request.Context(), id, *v.Enabled)
+	h.scopedResult(c, cfg, err)
+}
+
 func (h *AccountOpsHandler) SetOAuthLifecycle(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	var v struct {

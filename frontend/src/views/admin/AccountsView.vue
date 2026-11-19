@@ -530,10 +530,12 @@
       :selected-platforms="selPlatforms"
       :selected-types="selTypes"
       :target="bulkEditTarget ?? undefined"
+      :filtered-preview="bulkEditFromFilters"
       :proxies="proxies"
       :groups="groups"
       @close="showBulkEdit = false"
       @updated="handleBulkUpdated"
+      @whitelists-saved="reload"
     />
     <TempUnschedStatusModal :show="showTempUnsched" :account="tempUnschedAcc" @close="showTempUnsched = false" @reset="handleTempUnschedReset" />
     <ConfirmDialog :show="showDeleteDialog" :title="t('admin.accounts.deleteAccount')" :message="t('admin.accounts.deleteConfirm', { name: deletingAcc?.name })" :confirm-text="t('common.delete')" :cancel-text="t('common.cancel')" :danger="true" @confirm="confirmDelete" @cancel="showDeleteDialog = false" />
@@ -713,6 +715,7 @@ const export2faIds = ref<number[]>([])
 const showExportDataDialog = ref(false)
 const includeProxyOnExport = ref(true)
 const showBulkEdit = ref(false)
+const bulkEditFromFilters = ref(false)
 const bulkEditTarget = ref<AccountBulkEditTarget | null>(null)
 const showTempUnsched = ref(false)
 const showDeleteDialog = ref(false)
@@ -2453,6 +2456,7 @@ const collectSelectionMetadata = (rows: Account[]) => {
 }
 
 const openBulkEditSelected = () => {
+  bulkEditFromFilters.value = false
   bulkEditTarget.value = {
     mode: 'selected',
     accountIds: [...selIds.value],
@@ -2488,6 +2492,7 @@ const openBulkEditFiltered = async () => {
       appStore.showError(t('admin.accounts.bulkEdit.noSelection'))
       return
     }
+    bulkEditFromFilters.value = true
     const { selectedPlatforms, selectedTypes } = collectSelectionMetadata(rows)
     bulkEditTarget.value = {
       mode: 'selected',

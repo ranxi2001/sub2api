@@ -186,12 +186,15 @@ func TestServerlessTransferCancellationWhileWaitingForHeadersReachesPod(t *testi
 	store.config = routeConfig(srv.URL)
 	store.config.FallbackToPrimary = true
 	m := managerWithHeaderBudget(t, cache, store, 0)
+	var logs bytes.Buffer
+	m.logger = slog.New(slog.NewJSONHandler(&logs, nil))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	req := testRequest(http.MethodPost, "/v1/responses", strings.NewReader("{}")).WithContext(ctx)
 	finished := make(chan struct{})
+	w := httptest.NewRecorder()
 	go func() {
-		transferIngressRouter(m, &primaryHits).ServeHTTP(httptest.NewRecorder(), req)
+		transferIngressRouter(m, &primaryHits).ServeHTTP(w, req)
 		close(finished)
 	}()
 	waitForTransferSignal(t, started, "business request did not reach Pod")
@@ -200,6 +203,13 @@ func TestServerlessTransferCancellationWhileWaitingForHeadersReachesPod(t *testi
 	waitForTransferSignal(t, finished, "transfer kept waiting after client cancellation")
 	require.Equal(t, int32(1), podHits.Load())
 	require.Zero(t, primaryHits.Load())
+	require.Empty(t, w.Body.String(), "cancellation must not synthesize a 503 response")
+	require.NotEqual(t, http.StatusServiceUnavailable, w.Code)
+	var entry map[string]any
+	decoder := json.NewDecoder(&logs)
+	require.NoError(t, decoder.Decode(&entry))
+	require.Equal(t, "serverless.forward_client_canceled", entry["msg"])
+	require.ErrorIs(t, decoder.Decode(&entry), io.EOF)
 }
 
 func TestServerlessProbeIsIndependentOfBusinessHeaderBudget(t *testing.T) {

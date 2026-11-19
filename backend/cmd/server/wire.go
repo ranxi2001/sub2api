@@ -136,7 +136,7 @@ func provideCleanup(
 	controlledExperiment *service.ControlledExperimentService,
 	accountOps *service.AccountOpsService,
 	accountPerformance *service.AccountPerformanceService,
-	accountTokenGuard *service.AccountTokenGuardService,
+	openAIRelogin *service.OpenAIReloginService,
 	accountTokenGuardV2 *service.AccountTokenGuardV2Service,
 	backupSvc *service.BackupService,
 	paymentOrderExpiry *service.PaymentOrderExpiryService,
@@ -188,9 +188,9 @@ func provideCleanup(
 				}
 				return nil
 			}},
-			{"AccountTokenGuardService", func() error {
-				if accountTokenGuard != nil {
-					accountTokenGuard.Stop()
+			{"OpenAIReloginService", func() error {
+				if openAIRelogin != nil {
+					openAIRelogin.Stop()
 				}
 				return nil
 			}},

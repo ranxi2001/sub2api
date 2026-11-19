@@ -3,6 +3,7 @@
 FRONTEND_CRITICAL_VITEST := \
 	src/components/account/__tests__/AccountUsageCell.spec.ts \
 	src/views/admin/__tests__/ChannelsView.bedrockCompat.spec.ts \
+	src/views/admin/__tests__/ChannelsView.ultrafastPricing.spec.ts \
 	src/views/admin/__tests__/GroupsView.codexManifest.spec.ts \
 	src/views/admin/__tests__/GroupsView.openaiForcedTier.spec.ts \
 	src/views/admin/__tests__/groupsOpenAIFast.spec.ts \
@@ -55,10 +56,11 @@ FRONTEND_CRITICAL_VITEST := \
 	src/api/__tests__/groupCacheTest.spec.ts \
 	src/views/admin/__tests__/GroupCacheTestView.spec.ts \
 	src/components/account/__tests__/OpenAIRequestTimezoneField.spec.ts \
-	src/components/admin/__tests__/HarvestGatewayBorrowPanel.spec.ts \
 	src/components/admin/__tests__/AstraGatewayRuntime.spec.ts \
 	src/components/admin/__tests__/AstraGatewayHistory.spec.ts \
 	src/views/admin/ops/__tests__/TokenGuardV2View.spec.ts \
+	src/components/admin/operations/__tests__/OpenAIReloginSettings.spec.ts \
+	src/api/admin/__tests__/openaiRelogin.spec.ts \
 	src/features/channel-monitor-v2/__tests__/MonitorCandySettings.spec.ts \
 	src/features/channel-monitor-v2/__tests__/MonitorStatusCards.spec.ts \
 	src/features/channel-monitor-v2/__tests__/monitorCards.spec.ts \
@@ -124,6 +126,7 @@ FRONTEND_CRITICAL_VITEST := \
 	src/components/account/__tests__/OpenAIReferralCell.transport.spec.ts \
 	src/components/account/__tests__/OpenAIQuotaResetCell.spark_shadow.spec.ts \
 	src/components/account/__tests__/ExcelBPS403Badge.spec.ts \
+	src/components/account/__tests__/BatchUpstreamWhitelist.spec.ts \
 	src/components/account/__tests__/BulkEditAccountModal.spec.ts \
 	src/constants/__tests__/platforms.spec.ts \
 	src/components/account/__tests__/credentialsBuilder.platformCatalog.spec.ts \
@@ -154,7 +157,6 @@ FRONTEND_CRITICAL_VITEST := \
 	src/api/__tests__/admin.accounts.performance.spec.ts \
 	src/components/user/profile/__tests__/ProfileIdentityBindingsSection.spec.ts \
 	src/views/admin/__tests__/SettingsView.spec.ts \
-	src/views/admin/__tests__/HarvestFlowView.spec.ts \
 	src/views/admin/settings/MihomoSettings.spec.ts \
 	src/views/admin/settings/MihomoCountryFilter.spec.ts \
 	src/features/channel-monitor-v2/__tests__/designSystem.structure.spec.ts \

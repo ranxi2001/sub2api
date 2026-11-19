@@ -25,7 +25,8 @@ jobs:
     timeout-minutes: 5
     outputs:
       shell: ${{ steps.select.outputs['shell'] }}
-      test: ${{ steps.select.outputs['test'] }}
+      unit-test: ${{ steps.select.outputs['unit-test'] }}
+      integration-test: ${{ steps.select.outputs['integration-test'] }}
       frontend: ${{ steps.select.outputs['frontend'] }}
       golangci-lint: ${{ steps.select.outputs['golangci-lint'] }}
       release-helpers: ${{ steps.select.outputs['release-helpers'] }}
@@ -64,10 +65,71 @@ jobs:
           /bin/sh deploy/tests/docker-runtime-resources-test.sh
           /bin/sh deploy/test-caddyfile-cache.sh
 
-  test:
+  unit-test:
     needs: changes
-    if: needs.changes.outputs['test'] == 'true'
+    if: needs.changes.outputs['unit-test'] == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact candidate head
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          check-latest: false
+          cache: false
+      - name: Verify Go version
+        run: go version | grep -q 'go1.27.4'
+      - name: Resolve Go cache paths and bootstrap key
+        id: go-cache
+        run: |
+          echo "modules=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+          echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+          version="$(go env GOVERSION)"
+          arch="$(node -p process.arch)"
+          echo "bootstrap=setup-go-${RUNNER_OS}-${arch}-${ImageOS}-go-${version#go}-" >> "$GITHUB_OUTPUT"
+      - name: Restore Go module and build caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ steps.go-cache.outputs.modules }}
+            ${{ steps.go-cache.outputs.build }}
+          key: go-tests-v2-${{ runner.os }}-${{ runner.arch }}-unit-${{ matrix.shard }}-${{ hashFiles('backend/go.mod', 'backend/go.sum') }}-${{ env.EXPECTED_HEAD_SHA }}
+          restore-keys: |
+            go-tests-v2-${{ runner.os }}-${{ runner.arch }}-unit-${{ matrix.shard }}-${{ hashFiles('backend/go.mod', 'backend/go.sum') }}-
+            ${{ steps.go-cache.outputs.bootstrap }}${{ hashFiles('backend/go.sum') }}
+            ${{ steps.go-cache.outputs.bootstrap }}
+      - name: Install Redis for isolated snapshot adapter checks
+        run: |
+          bash .github/scripts/ci-ubuntu-mirrors.sh
+          if ! command -v redis-server >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends redis-server
+          fi
+          redis-server --version
+      - name: Unit tests with timings
+        run: python3 .github/ci/go_tests.py unit --shard ${{ matrix.shard }} --total ${{ strategy.job-total }} --output "$RUNNER_TEMP/go-test-results"
+      - name: Upload unit test timings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-unit-${{ matrix.shard }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/go-test-results
+          retention-days: 14
+          if-no-files-found: warn
+
+  integration-test:
+    needs: changes
+    if: needs.changes.outputs['integration-test'] == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
     services:
       postgres:
         image: postgres:16-alpine
@@ -99,12 +161,29 @@ jobs:
         with:
           go-version-file: backend/go.mod
           check-latest: false
-          cache: true
-          cache-dependency-path: backend/go.sum
+          cache: false
       - name: Verify Go version
+        run: go version | grep -q 'go1.27.4'
+      - name: Resolve Go cache paths and bootstrap key
+        id: go-cache
         run: |
-          go version | grep -q 'go1.27.4'
-      - name: Install Redis for isolated snapshot adapter checks
+          echo "modules=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+          echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+          version="$(go env GOVERSION)"
+          arch="$(node -p process.arch)"
+          echo "bootstrap=setup-go-${RUNNER_OS}-${arch}-${ImageOS}-go-${version#go}-" >> "$GITHUB_OUTPUT"
+      - name: Restore Go module and build caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ steps.go-cache.outputs.modules }}
+            ${{ steps.go-cache.outputs.build }}
+          key: go-tests-v2-${{ runner.os }}-${{ runner.arch }}-integration-${{ hashFiles('backend/go.mod', 'backend/go.sum') }}-${{ env.EXPECTED_HEAD_SHA }}
+          restore-keys: |
+            go-tests-v2-${{ runner.os }}-${{ runner.arch }}-integration-${{ hashFiles('backend/go.mod', 'backend/go.sum') }}-
+            ${{ steps.go-cache.outputs.bootstrap }}${{ hashFiles('backend/go.sum') }}
+            ${{ steps.go-cache.outputs.bootstrap }}
+      - name: Install Redis for isolated integration fixtures
         run: |
           bash .github/scripts/ci-ubuntu-mirrors.sh
           if ! command -v redis-server >/dev/null; then
@@ -112,21 +191,51 @@ jobs:
             sudo apt-get install -y --no-install-recommends redis-server
           fi
           redis-server --version
-      - name: Usage trend local bucket regressions
-        working-directory: backend
-        run: go test -tags=integration ./internal/repository -run '^TestUsageTrendAggregateTimezone' -count=1 -v
-      - name: Unit tests
-        working-directory: backend
-        run: make test-unit
-      - name: Integration tests
-        working-directory: backend
+      - name: Integration tests with timings
         env:
           PROMPT_AUDIT_TEST_POSTGRES_DSN: 'postgres://fixture:fixture@127.0.0.1:15432/shadow_audit?sslmode=disable'
           PROMPT_AUDIT_TEST_REDIS_ADDR: '127.0.0.1:16379'
           # Keep real network timing fixtures isolated from other package/DB workloads.
           # Every integration package and its existing assertions still run.
           GOFLAGS: '-p=1'
-        run: make test-integration
+        run: python3 .github/ci/go_tests.py integration --output "$RUNNER_TEMP/go-test-results"
+      - name: Upload integration test timings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-integration-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/go-test-results
+          retention-days: 14
+          if-no-files-found: warn
+
+  # Preserve the existing check name and reject unsuccessful selected suites.
+  # An obsolete cancelled workflow must not queue this gate and block its successor.
+  test:
+    needs: [changes, unit-test, integration-test]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require all selected test jobs
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          UNIT_SELECTED: ${{ needs.changes.outputs['unit-test'] }}
+          UNIT_RESULT: ${{ needs.unit-test.result }}
+          INTEGRATION_SELECTED: ${{ needs.changes.outputs['integration-test'] }}
+          INTEGRATION_RESULT: ${{ needs.integration-test.result }}
+        run: |
+          test "$CHANGES_RESULT" = success
+          for suite in UNIT INTEGRATION; do
+            selected="${suite}_SELECTED"
+            result="${suite}_RESULT"
+            if [[ "${!selected}" == true ]]; then
+              test "${!result}" = success || exit 1
+            elif [[ "${!selected}" == false ]]; then
+              test "${!result}" = skipped || exit 1
+            else
+              exit 1
+            fi
+          done
 
   frontend:
     needs: changes

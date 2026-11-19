@@ -253,8 +253,11 @@ jobs:
             # and the base BPS search fixtures. Do not apply them twice here.
             # The separate search-business fixture still depends on the removed
             # search helper, so this loop alone owns its historical adaptation.
+            # The shared replay helper already owns PR899 platform-edit fixtures;
+            # do not exclude the same files again in this loop.
+            # The later WS close diagnostic fixture also requires candidate-only APIs.
             # Never change the selected ticket oracle or candidate GREEN tests.
-            for target in backend/internal/service/temp_unsched_pending_test.go backend/internal/service/temp_unsched_stream_timing_test.go backend/internal/service/temp_unsched_ws_forward_test.go backend/internal/service/openai_auth_connection_status_test.go backend/internal/service/openai_auth_connections_account_type_test.go backend/internal/service/account_ops_balance_test.go backend/internal/service/openai_excel_bps_bridge_failure_test.go backend/internal/service/quality_5xx_immediate_test.go backend/internal/service/openai_ws_agent_recovery_test.go backend/internal/service/openai_excel_bps_search_business_test.go backend/internal/service/gemini_compat_response_format_test.go; do
+            for target in backend/internal/service/temp_unsched_pending_test.go backend/internal/service/temp_unsched_stream_timing_test.go backend/internal/service/temp_unsched_ws_forward_test.go backend/internal/service/openai_auth_connection_status_test.go backend/internal/service/openai_auth_connections_account_type_test.go backend/internal/service/account_ops_balance_test.go backend/internal/service/openai_excel_bps_bridge_failure_test.go backend/internal/service/quality_5xx_immediate_test.go backend/internal/service/openai_ws_agent_recovery_test.go backend/internal/service/openai_excel_bps_search_business_test.go backend/internal/service/gemini_compat_response_format_test.go backend/internal/service/openai_ws_close_logging_test.go backend/internal/service/upstream_request_id_test.go; do
               candidate_blob=$(git rev-parse "$CANDIDATE_SHA:$target")
               test "$(git hash-object "$tested_tree/$target")" = "$candidate_blob"
               if git cat-file -e "$baseline:$target" 2>/dev/null; then

@@ -18,3 +18,24 @@ python3 -m unittest discover -s .github/ci -p 'test_*.py' -v
 ```
 
 它使用临时 Git 仓库和模拟 GitHub 返回值，覆盖删除、重命名、依赖变更、检查命令变更、旧成功复用、失败/API 异常回退及手动全量，不运行 Go/前端应用测试。
+
+## Go 测试并行与耗时报告
+
+后端选择器分别决定 `unit-test` 和 `integration-test`。单元测试在四个 GitHub 托管 runner 上按 package 分片，集成测试在独立 runner 同时执行；`test` 保留为汇总检查，任何应运行的分片失败、取消或跳过都会失败。复用单元测试证据要求四个分片全部成功，且源码、辅助脚本、分片权重和 job 定义一致；手动/tag 仍强制全量。整个旧 workflow 被新 head 取消时，汇总 job 也取消，避免 always() 任务在队列中阻塞后续运行；取消状态不算通过。
+
+`.github/ci/go_tests.py` 从 `go list -tags=unit ./...` 动态发现全部包，再按 `go-test-weights.json` 的历史耗时从重到轻分配。新包按 1 秒估算并自动纳入；无测试包也保留。权重仅影响分配，不筛选测试。初始权重来自 [2026-11-17 的成功运行](https://github.com/ranxi2001/sub2api/actions/runs/44150112506)，其中 handler 581.520 秒、service 363.216 秒。包内用例尚未进一步拆分，因此单个重包仍可能决定单元测试关键路径。
+
+单元测试的每个 package 显式使用 `-timeout=20m`，容纳已接近 Go 默认 10 分钟上限的 handler 全量套件；四分片仍运行全部用例，job 的 40 分钟上限继续生效。
+
+运行仍经过 backend Makefile：`test-unit-packages` 接收包列表，嵌套收款模块的 `test-collection` 在第 0 片执行一次；默认 `make test-unit` 仍包含两者。单元测试保留 Go 测试结果缓存。集成测试保留 PostgreSQL/Redis、Docker testcontainers 和 `GOFLAGS=-p=1`，增加 `-count=1` 确保外部服务检查实际执行。原先单独运行的 `TestUsageTrendAggregateTimezone` 已包含在完整集成套件内，不再重复启动仓库集成环境。每个单元分片和集成 runner 都安装并检查 redis-server，分别满足快照适配器和认证缓存跨进程 Pub/Sub 用例；服务容器不能替代这些用例自行启动的独立 Redis 进程。
+
+缓存按 OS、架构、go.mod/go.sum、suite/分片与源码 SHA 分隔，按同一依赖和分片前缀恢复最近的编译缓存；各分片不竞争同一写入 key。相同 key 的成功重跑可直接命中。分片缓存未命中时，使用与 setup-go 相同的绝对路径和键格式，按当前 Go 版本/runner 镜像回退读取 production 已有的共享缓存（先匹配 go.sum，再匹配版本前缀），只向分片 key 写入；避免新 PR 因无法读取其他 PR 的专属缓存而完全冷启动。独立 runner 会增加总资源和冷启动开销；这里不变更 Runner 账户配额，也不使用生产服务器编译。
+
+每个 job 输出 summary 和保留 14 天的 `go-unit-<shard>-<attempt>` / `go-integration-<attempt>` artifact：
+
+- `*.jsonl`：原始 `go test -json` 事件流，可直接使用 jq；make 命令回显等非 JSON 文本保留在 `.log` 中。
+- `*.log`：还原的测试输出；编译器 stderr 另见 Actions 日志。
+- `timings.json`、`summary.md`：命令墙钟时间、退出码、package / case 最慢 30 项、pass/fail/skip 计数。
+- `shards.json`：四片完整包列表，便于核对漏测或重新平衡。
+
+[Go JSON 事件](https://pkg.go.dev/cmd/test2json)中的 Elapsed 不包含编译和 Runner 排队；命中测试缓存时可能回放之前的耗时，嵌套/并行用例也不能直接累加。评估加速应同时比较 Actions 的排队时间、job/step 墙钟时间及新报告，不能把四分片等同于四倍加速。首阶段保留完整回归，不引入基于依赖图的用例裁剪；慢测试时钟改造、进一步集成分片、Runner 扩容与发布缓存按采集结果另行评估。

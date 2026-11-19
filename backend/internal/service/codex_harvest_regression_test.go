@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"sync/atomic"
@@ -58,42 +57,10 @@ func TestCodexHarvestAdmissionMatchesInjection(t *testing.T) {
 	}
 }
 
-func TestCodexHarvestSnapshotScopeConsistency(t *testing.T) {
-	for _, scopeError := range []bool{false, true} {
-		out := harvestScopeAccount(5, true, 26)
-		attachReadyCodexTicket(&out, "gpt-6-astra")
-		skipped := harvestScopeAccount(6, true, 26)
-		skipped.Extra = map[string]any{OpenAICodexSkipHarvestExtraKey: true}
-		attachReadyCodexTicket(&skipped, "gpt-6-astra")
-		svc, _, repo := harvestScopeService(t, `{"mode":"selected","group_ids":[3]}`, nil, 1)
-		repo.values[SettingKeyOpenAICodexTicketFailClosed] = "true"
-		if scopeError {
-			repo.values[SettingKeyOpenAICodexTicketHarvestScope] = `{`
-		}
-		snapshot := BuildCodexHarvestFlow(context.Background(), svc.cfg, svc.settingService, []Account{out, skipped})
-		require.False(t, snapshot.Accounts[0].InScope)
-		require.True(t, snapshot.Accounts[0].Tickets[0].Blocked)
-		require.Zero(t, snapshot.Accounts[0].ReadyCount)
-		require.Equal(t, 1, snapshot.Accounts[0].BlockedCount)
-		require.False(t, snapshot.Accounts[1].Tickets[0].Blocked)
-		require.Equal(t, 1, snapshot.Accounts[1].ReadyCount)
-		require.Equal(t, 1, snapshot.Counts.TicketsReady)
-		if scopeError {
-			raw, err := json.Marshal(snapshot.Harvest)
-			require.NoError(t, err)
-			require.Contains(t, string(raw), `"scope_error":true`)
-			require.NotEqual(t, "all", snapshot.Harvest.ScopeMode)
-		}
-	}
-}
-
 func TestCodexHarvestSnapshotPreservesEmptyModels(t *testing.T) {
 	cfg := &config.Config{Gateway: config.GatewayConfig{OpenAICodexTicket: config.OpenAICodexTicketConfig{
 		Enabled: true, FailClosed: true, Models: []string{},
 	}}}
-	snapshot := BuildCodexHarvestFlow(context.Background(), cfg, nil, []Account{harvestScopeAccount(1, true, 3)})
-	require.Empty(t, snapshot.Harvest.Models)
-	require.Empty(t, snapshot.Accounts[0].Tickets)
 	gateway := &OpenAIGatewayService{cfg: cfg}
 	require.Empty(t, gateway.openAICodexTicketConfig().Models)
 	require.False(t, gateway.openAICodexTicketGatedModel("gpt-6-astra"))

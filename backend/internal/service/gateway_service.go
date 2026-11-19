@@ -679,6 +679,11 @@ type ClaudeUsage struct {
 	CacheCreation5mTokens    int // 5分钟缓存创建token（来自嵌套 cache_creation 对象）
 	CacheCreation1hTokens    int // 1小时缓存创建token（来自嵌套 cache_creation 对象）
 	ImageOutputTokens        int `json:"image_output_tokens,omitempty"`
+
+	cacheCreationInputTokensPresent     bool
+	cacheCreationInputTokensFromDetails bool
+	promptTotalTokens                   int
+	promptTotalPresent                  bool
 }
 
 // ForwardResult 转发结果
@@ -715,6 +720,9 @@ type ForwardResult struct {
 	// lowers it to UpstreamResponseServiceTier when the upstream reports a
 	// cheaper tier (see ResolveBillingServiceTier).
 	ServiceTier *string
+	// RequestedCacheTTL 记录客户端请求里的缓存 TTL（"5m" / "1h"），仅在账号开启
+	// cache_ttl_billing_from_request 时由 Forward 填写，供计费按请求档位归类缓存写入。
+	RequestedCacheTTL string
 
 	// 图片生成计费字段（图片生成模型使用）
 	ImageCount int // 生成的图片数量
@@ -824,13 +832,19 @@ func (e *UpstreamFailoverError) IsCredentialFailure() bool {
 	return e != nil && e.Stage == GatewayFailureStageAccountAuth
 }
 
+// ErrOpenAIWSModelUnavailable preserves model-scoped failures through stream
+// and WebSocket close wrappers without charging other models' account health.
+var ErrOpenAIWSModelUnavailable = errors.New("upstream websocket model unavailable")
+
+const OpenAIWSModelUnavailableReason GatewayFailureReason = "openai_ws_model_unavailable"
+
 // ShouldReportAccountScheduleFailure prevents provider- and request-scoped
 // credential failures from being misattributed to the selected account. Legacy
 // and inference failures retain their existing scheduler-health behavior,
 // except an Excel BPS 429, which only cools the account's BPS route, and a
 // local BPS image admission rejection, which never reached the upstream.
 func (e *UpstreamFailoverError) ShouldReportAccountScheduleFailure() bool {
-	if e == nil || e.Reason == ExcelBPSRateLimitedReason || e.Reason == GrokUnknownForbiddenReason || e.IsExcelBPSImageAdmissionRejection() {
+	if e == nil || e.Reason == OpenAIWSModelUnavailableReason || e.Reason == ExcelBPSRateLimitedReason || e.Reason == GrokUnknownForbiddenReason || e.IsExcelBPSImageAdmissionRejection() {
 		return false
 	}
 	return !e.IsCredentialFailure() || e.Scope == GatewayFailureScopeAccount

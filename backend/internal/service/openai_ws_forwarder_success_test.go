@@ -1752,7 +1752,7 @@ func TestOpenAIGatewayService_Forward_WSv2StoreFalseSessionConnIsolation(t *test
 	require.Equal(t, int64(2), upgradeCount.Load(), "不同 session(store=false) 应隔离连接，避免续链状态互相覆盖")
 }
 
-func TestOpenAIGatewayService_Forward_WSv2StoreFalseDisableForceNewConnAllowsReuse(t *testing.T) {
+func TestOpenAIGatewayService_Forward_WSv2StoreFalseDisableForceNewConnReusesOnlySameSession(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	var upgradeCount atomic.Int64
@@ -1840,6 +1840,15 @@ func TestOpenAIGatewayService_Forward_WSv2StoreFalseDisableForceNewConnAllowsReu
 	require.NotNil(t, result1)
 	require.Equal(t, int64(1), upgradeCount.Load())
 
+	recSame := httptest.NewRecorder()
+	cSame, _ := gin.CreateTestContext(recSame)
+	cSame.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
+	cSame.Request.Header.Set("session_id", "session_store_false_reuse_a")
+	sameResult, err := svc.Forward(context.Background(), cSame, account, body)
+	require.NoError(t, err)
+	require.NotNil(t, sameResult)
+	require.Equal(t, int64(1), upgradeCount.Load(), "same session still reuses its connection when force-new is disabled")
+
 	rec2 := httptest.NewRecorder()
 	c2, _ := gin.CreateTestContext(rec2)
 	c2.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
@@ -1847,7 +1856,7 @@ func TestOpenAIGatewayService_Forward_WSv2StoreFalseDisableForceNewConnAllowsReu
 	result2, err := svc.Forward(context.Background(), c2, account, body)
 	require.NoError(t, err)
 	require.NotNil(t, result2)
-	require.Equal(t, int64(1), upgradeCount.Load(), "关闭强制新连后，不同 session(store=false) 可复用连接")
+	require.Equal(t, int64(2), upgradeCount.Load(), "disabling force-new must not reuse another session handshake")
 }
 
 func TestOpenAIGatewayService_Forward_WSv2ReadTimeoutAppliesPerRead(t *testing.T) {

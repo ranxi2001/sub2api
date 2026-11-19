@@ -109,7 +109,7 @@ func TestFreeUltrafastMixedCacheAndLongContext(t *testing.T) {
 			err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
 				Result: &OpenAIForwardResult{RequestID: "synthetic-ultra-cache-" + name, Model: "gpt-6.2-astra", ServiceTier: &tier, Duration: time.Second,
 					Usage: OpenAIUsage{InputTokens: ordinary + 11 + 13 + 17, OutputTokens: 19, CacheCreationInputTokens: 24, CacheCreation30mInputTokens: 11, CacheCreation12hInputTokens: 13, CacheReadInputTokens: 17}},
-				APIKey: &APIKey{ID: 1020, GroupID: &group.ID, Group: group}, User: &User{ID: 2020}, Account: &Account{ID: 3020, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}})
+				APIKey: &APIKey{ID: 1020, GroupID: &group.ID, Group: group}, User: &User{ID: 2020}, Account: &Account{ID: 3020, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, PricingAt: time.Date(2026, 11, 18, 0, 0, 0, 0, time.UTC)})
 			require.NoError(t, err)
 			log := repo.lastLog
 			require.NotNil(t, log)
@@ -119,7 +119,7 @@ func TestFreeUltrafastMixedCacheAndLongContext(t *testing.T) {
 				outputFactor = 1.5
 			}
 			standard := (float64(ordinary)*in+11*write+13*write12h+17*read)*inputFactor + 19*out*outputFactor
-			require.InDelta(t, standard*6, log.TotalCost, 1e-9)
+			require.InDelta(t, standard*3, log.TotalCost, 1e-9)
 			require.Equal(t, QuantizeUsageBillingAmount(standard*.6), log.ActualCost)
 			var saved struct{ CustomerCostDetails map[string]any }
 			encoded, err := json.Marshal(log)

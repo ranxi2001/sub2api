@@ -9,19 +9,21 @@ import (
 // are Standard components before the customer rate; upstream UsageLog monetary
 // fields and the billing command remain authoritative and unchanged.
 type CustomerCostDetails struct {
-	CacheCostDetails  []CustomerCacheCostDetail `json:"cache_cost_details,omitempty"`
-	Version           int                       `json:"version"`
-	FreeFast          bool                      `json:"free_fast"`
-	FreeUltrafast     bool                      `json:"free_ultrafast,omitempty"`
-	InputCost         float64                   `json:"input_cost"`
-	OutputCost        float64                   `json:"output_cost"`
-	ImageInputCost    float64                   `json:"image_input_cost"`
-	ImageOutputCost   float64                   `json:"image_output_cost"`
-	CacheCreationCost float64                   `json:"cache_creation_cost"`
-	CacheReadCost     float64                   `json:"cache_read_cost"`
-	TotalCost         float64                   `json:"total_cost"`
-	ActualCost        float64                   `json:"actual_cost"`
-	Multiplier        float64                   `json:"multiplier"`
+	ImageMinimumCharge           float64                   `json:"image_minimum_charge,omitempty"`
+	ImageMinimumChargeAdjustment float64                   `json:"image_minimum_charge_adjustment,omitempty"`
+	CacheCostDetails             []CustomerCacheCostDetail `json:"cache_cost_details,omitempty"`
+	Version                      int                       `json:"version"`
+	FreeFast                     bool                      `json:"free_fast"`
+	FreeUltrafast                bool                      `json:"free_ultrafast,omitempty"`
+	InputCost                    float64                   `json:"input_cost"`
+	OutputCost                   float64                   `json:"output_cost"`
+	ImageInputCost               float64                   `json:"image_input_cost"`
+	ImageOutputCost              float64                   `json:"image_output_cost"`
+	CacheCreationCost            float64                   `json:"cache_creation_cost"`
+	CacheReadCost                float64                   `json:"cache_read_cost"`
+	TotalCost                    float64                   `json:"total_cost"`
+	ActualCost                   float64                   `json:"actual_cost"`
+	Multiplier                   float64                   `json:"multiplier"`
 }
 
 // Capture the calculation that actually supplied the customer charge. Never

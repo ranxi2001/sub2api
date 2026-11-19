@@ -105,6 +105,11 @@ type openAIAgentRecoveryRequest struct {
 // producer; it cannot prove a provider will accept its own output in the future.
 // Ordinary sticky writes, HTTP 200 and reasoning are not proof.
 func (s *OpenAIGatewayService) WithOpenAIAgentMessageRecovery(ctx context.Context, c *gin.Context, body []byte, sessionHash, model string) context.Context {
+	if s.openAILegacyCompatibility() {
+		// Mask any inherited snapshot; compatibility must not consult or publish
+		// agent-owner records, nor create bound/no-replay state.
+		return context.WithValue(ctx, openAIAgentRecoveryContextKey{}, (*openAIAgentRecoveryRequest)(nil))
+	}
 	request := &openAIAgentRecoveryRequest{groupID: getOpenAIGroupIDFromContext(c), model: model, session: sessionHash}
 	request.disableOwnerBinding = s != nil && s.cfg != nil && s.cfg.Gateway.DisableEncryptedAgentOwnerBinding
 	if request.disableOwnerBinding || (openAI409HasProviderState(body) && s != nil && s.settingService != nil && s.settingService.IsOpenAI409OmitEncryptedHistoryEnabled(ctx)) || openAIAgentRecoveryHTTPUser(c, getAPIKeyIDFromContext(c)) > 0 {
@@ -261,7 +266,7 @@ func openAIAgentRecoveryInputDigest(body []byte) [32]byte {
 }
 
 func (s *OpenAIGatewayService) preserveOpenAIAgentHistory(body []byte) bool {
-	return s != nil && s.cfg != nil && s.cfg.Gateway.DisableEncryptedAgentOwnerBinding && len(openAIAgentRecoveryItemDigests(body)) > 0
+	return s != nil && !s.openAILegacyCompatibility() && s.cfg != nil && s.cfg.Gateway.DisableEncryptedAgentOwnerBinding && len(openAIAgentRecoveryItemDigests(body)) > 0
 }
 
 func openAIAgentRecoveryItemDigests(body []byte) [][32]byte {

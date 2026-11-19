@@ -73,7 +73,6 @@ type AccountHandler struct {
 	upstreamBillingProbe    *service.UpstreamBillingProbeService
 	ollamaCloudUsage        *service.OllamaCloudUsageService
 	codexTicketSettings     *service.SettingService
-	codexHarvest            *service.CodexHarvestService
 	openAIGatewayService    *service.OpenAIGatewayService
 	cfg                     *config.Config
 	opencodeGoUsage         *service.OpenCodeGoUsageService
@@ -3335,8 +3334,8 @@ func (h *AccountHandler) SyncUpstreamModels(c *gin.Context) {
 		response.BadRequest(c, "Invalid upstream model sync options")
 		return
 	}
-	if options.Automatic && !options.Apply {
-		response.BadRequest(c, "Automatic model sync requires apply=true")
+	if err := options.Validate(); err != nil {
+		response.BadRequest(c, err.Error())
 		return
 	}
 	if _, observer := service.ObserverGroupIDs(c.Request.Context()); observer && options.Apply {
@@ -3344,7 +3343,7 @@ func (h *AccountHandler) SyncUpstreamModels(c *gin.Context) {
 		return
 	}
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
+	if err != nil || accountID <= 0 {
 		response.BadRequest(c, "Invalid account ID")
 		return
 	}
@@ -3380,7 +3379,7 @@ func (h *AccountHandler) SyncUpstreamModels(c *gin.Context) {
 		response.Error(c, http.StatusBadGateway, "Failed to sync upstream models from upstream")
 		return
 	}
-	if catalog != nil && account != nil && account.IsGrok() && account.ID > 0 && h.accountTestService != nil {
+	if !options.WhitelistOnly && catalog != nil && account != nil && account.IsGrok() && account.ID > 0 && h.accountTestService != nil {
 		if latest, readErr := h.adminService.GetAccount(c.Request.Context(), account.ID); readErr == nil && latest != nil {
 			catalog.GrokModelDiagnostics = h.accountTestService.GetGrokModelDiagnostics(c.Request.Context(), latest)
 		}

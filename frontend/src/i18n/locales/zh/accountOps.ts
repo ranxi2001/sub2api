@@ -1,4 +1,6 @@
 export default {
+  "accountBalanceNotification": "请求余额不足通知",
+  "accountBalanceNotificationHint": "仅控制此账号请求返回余额不足时的邮件和机器人提醒；余额阈值规则独立设置。全局开关关闭时不会发送。",
   "providerBalanceSource": "供应商平台余额",
   "providerRefreshDisabled": "供应商定时刷新未开启，请在渠道运维中设置。",
   "manageProviderBalance": "查看／刷新供应商余额",

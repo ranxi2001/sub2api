@@ -111,6 +111,7 @@ func truncateAuditExtraString(value string, limit int) string {
 
 // auditSensitiveReads 需要审计的敏感 GET 读取（method+FullPath → 动作名）。
 var auditSensitiveReads = map[string]string{
+	"GET /api/v1/admin/account-ops/relogin/config":                            "admin.relogin.config.read",
 	"GET /api/v1/admin/ops/ai/actions":                                        "admin.ops.ai.actions.read",
 	"GET /api/v1/admin/ops/ai/runs":                                           "admin.ops.ai.runs.read",
 	"GET /api/v1/admin/ops/ai/runs/:id":                                       "admin.ops.ai.run.read",
@@ -173,6 +174,9 @@ var auditActionOverrides = map[string]string{
 // auditBodyOmittedRoutes 请求体几乎整体由凭证构成的路由（如整块粘贴 auth JSON 的导入接口）。
 // 这类 body 的凭证内嵌在普通字符串值里，键级脱敏无法覆盖，整体不入库。
 var auditBodyOmittedRoutes = map[string]struct{}{
+	"POST /api/v1/usage/settled-debits":                                                    {},
+	"PUT /api/v1/admin/providers/:id/profit-channel":                                       {},
+	"POST /api/v1/admin/providers/:id/profit-charges/sync":                                 {},
 	"POST /api/v1/admin/accounts/:id/auth-connections/:connection_id/authorization-status": {},
 	"POST /api/v1/admin/accounts/:id/auth-connections/:connection_id/callback":             {},
 	"POST /api/v1/admin/upstream-channels":                                                 {},
@@ -185,7 +189,8 @@ var auditBodyOmittedRoutes = map[string]struct{}{
 	"POST /api/v1/admin/accounts/:id/export-session":                                       {},
 	"PUT /api/v1/admin/account-ops/webhooks/:id":                                           {},
 	"PUT /api/v1/admin/account-ops/config":                                                 {},
-	"POST /api/v1/admin/account-ops/token-guard/two-fa-login":                              {},
+	"PUT /api/v1/admin/account-ops/relogin/config":                                         {},
+	"POST /api/v1/admin/account-ops/relogin/two-fa-login":                                  {},
 	"POST /api/v1/auth/passkey/login/finish":                                               {},
 	"POST /api/v1/user/passkeys/register/finish":                                           {},
 	"POST /api/v1/admin/accounts/import/codex-session":                                     {},

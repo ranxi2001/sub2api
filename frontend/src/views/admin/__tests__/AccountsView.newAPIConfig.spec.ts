@@ -1,8 +1,9 @@
+import { createPinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import AccountsView from '../AccountsView.vue'
 
-const { list, getConfig, saveConfig, probe, auth } = vi.hoisted(() => ({ list: vi.fn(), getConfig: vi.fn(), saveConfig: vi.fn(), probe: vi.fn(), auth: { token: 'test-token', isAdmin: true, isSimpleMode: false } }))
+const { list, getConfig, saveConfig, probe, auth } = vi.hoisted(() => ({ list: vi.fn(), getConfig: vi.fn(), saveConfig: vi.fn(), probe: vi.fn(), auth: { user: { id: 42 }, token: 'test-token', isAdmin: true, isSimpleMode: false } }))
 vi.mock('@/api/admin', () => ({ adminAPI: {
   accounts: {
     getManagementCapabilities: vi.fn().mockResolvedValue({ concurrency_upgrade_enabled: false }), list,
@@ -19,7 +20,7 @@ vi.mock('vue-i18n', async () => ({ ...await vi.importActual('vue-i18n'), useI18n
 const row = { id: 7, name: 'current', platform: 'openai', type: 'apikey', status: 'active', concurrency: 1, priority: 1, group_ids: [], credentials: { base_url: 'https://upstream.example' }, extra: { upstream_billing_probe: { status: 'unsupported', last_attempt_at: '', next_probe_at: '' } } }
 let wrapper: VueWrapper | undefined
 const open = async () => {
-  wrapper = mount(AccountsView, { global: { stubs: {
+  wrapper = mount(AccountsView, { global: { plugins: [createPinia()], stubs: {
     AppLayout: { template: '<div><slot /></div>' },
     TablePageLayout: { template: '<div><slot name="table" /></div>' },
     DataTable: { props: ['data'], template: '<div><div v-for="row in data" :key="row.id"><slot name="cell-upstream_billing_rate" :row="row" /></div></div>' },

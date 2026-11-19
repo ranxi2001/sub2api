@@ -137,6 +137,12 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 			)
 		}
 
+		if openAIWSModelFailureStatus(account, message) != 0 {
+			model, _ := payload["model"].(string)
+			s.handleOpenAIWSModelFailure(ctx, account, model, message)
+			lease.MarkBroken()
+			return &openAIWSModelRejectionError{payload: append([]byte(nil), message...)}
+		}
 		if eventType == "error" {
 			errCodeRaw, errTypeRaw, errMsgRaw := parseOpenAIWSErrorEventFields(message)
 			prewarmModel, _ := reqBody["model"].(string)
@@ -233,7 +239,7 @@ func normalizeOpenAIWSTerminalEvent(eventType string) string {
 // markOpenAIWSClientVisibleFailure records only terminal/error protocol events
 // that were delivered to the client. Callers invoke it only after any hidden
 // failover/recovery decision and a successful downstream write.
-func markOpenAIWSClientVisibleFailure(c *gin.Context, eventType string, payload []byte) {
+func markOpenAIWSClientVisibleFailure(c *gin.Context, eventType string, payload []byte, upstream ...*OpsUpstreamWSFailure) {
 	eventType = strings.TrimSpace(eventType)
 	if eventType != "error" && eventType != "response.failed" {
 		return
@@ -270,7 +276,14 @@ func markOpenAIWSClientVisibleFailure(c *gin.Context, eventType string, payload 
 	if message == "" {
 		message = "upstream websocket request failed"
 	}
-	MarkOpsStreamFailure(c, errType, code, message, status)
+	var origin *OpsUpstreamWSFailure
+	if len(upstream) > 0 {
+		origin = upstream[0]
+	}
+	MarkOpsStreamErrorValue(c, OpsStreamError{
+		ErrType: errType, Code: code, Message: message, IntendedStatus: status,
+		CountTowardsSLA: true, UpstreamWSFailure: origin,
+	})
 }
 
 func openAIWSPayloadTransientStatus(payload []byte) int {
@@ -358,10 +371,15 @@ func (s *OpenAIGatewayService) handleOpenAIWSTerminalTransientFailure(ctx contex
 	return terminalEvent
 }
 
-func (s *OpenAIGatewayService) handleOpenAIWSErrorEventTransientFailure(ctx context.Context, account *Account, canonicalModel string, headers http.Header, payload []byte) {
+// The result reports a handled model rejection; other account side effects do
+// not authorize the new model-failure replay path.
+func (s *OpenAIGatewayService) handleOpenAIWSErrorEventTransientFailure(ctx context.Context, account *Account, canonicalModel string, headers http.Header, payload []byte) bool {
 	eventType, _, _ := parseOpenAIWSEventEnvelope(payload)
 	if eventType != "error" {
-		return
+		return false
+	}
+	if openAIWSModelFailureStatus(account, payload) != 0 {
+		return s.handleOpenAIWSModelFailure(ctx, account, canonicalModel, payload)
 	}
 	s.rateLimitService.observeQualityStatus(ctx, account, openAIStreamFailureStatus(payload, extractOpenAISSEErrorMessage(payload)))
 	status := openAIWSPayloadTransientStatus(payload)
@@ -372,6 +390,7 @@ func (s *OpenAIGatewayService) handleOpenAIWSErrorEventTransientFailure(ctx cont
 		}
 		s.handleOpenAIAccountUpstreamError(ctx, account, status, headers, payload, canonicalModel)
 	}
+	return false
 }
 
 // handleOpenAIWSFailureAccountSideEffects applies both structured credential
@@ -380,6 +399,9 @@ func (s *OpenAIGatewayService) handleOpenAIWSErrorEventTransientFailure(ctx cont
 func (s *OpenAIGatewayService) handleOpenAIWSFailureAccountSideEffects(ctx context.Context, account *Account, canonicalModel string, headers http.Header, payload []byte) bool {
 	message := extractOpenAISSEErrorMessage(payload)
 	status := openAIStreamFailureStatus(payload, message)
+	if openAIWSModelFailureStatus(account, payload) != 0 {
+		return s.handleOpenAIWSModelFailure(ctx, account, canonicalModel, payload)
+	}
 	s.rateLimitService.observeQualityStatus(ctx, account, status)
 	switch status {
 	case http.StatusUnauthorized, http.StatusTooManyRequests, 529:
@@ -833,6 +855,8 @@ func openAIWSErrorHTTPStatusFromRaw(codeRaw, errTypeRaw string) int {
 	code := strings.ToLower(strings.TrimSpace(codeRaw))
 	errType := strings.ToLower(strings.TrimSpace(errTypeRaw))
 	switch {
+	case code == "encrypted_agent_recovery_owner_unavailable":
+		return http.StatusConflict
 	case strings.Contains(errType, "invalid_request"),
 		strings.Contains(code, "invalid_request"),
 		strings.Contains(code, "bad_request"),

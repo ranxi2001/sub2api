@@ -41,9 +41,6 @@ func TestCodex780RouteFailuresKeepShapeAndSafeReason(t *testing.T) {
 			require.EqualError(t, r.Err, tt.want)
 			require.Len(t, r.State, 780)
 			require.Equal(t, 33, r.Shape.Blocks)
-			stage := probeValidationStageFromEvents(map[string]CodexHarvestFlowEvent{"probe": {ID: "test", At: now, Result: r.Kind, Kind: "probe_miss", Length: 780, Blocks: 33, ExpectedLength: 780, ExpectedBlocks: 33, HTTPStatus: 200}})
-			require.Equal(t, "fail", stage.Status)
-			require.Equal(t, "invalid_route", stage.Detail)
 		})
 	}
 }

@@ -28,6 +28,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/securityaudit"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	openaiwsv2 "github.com/Wei-Shaw/sub2api/internal/service/openai_ws_v2"
 
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
@@ -175,6 +176,8 @@ func newOpenAIWSLocalAdmissionCloseError(reason string) error {
 func shouldReportOpenAIWSProxyAccountFailure(err error) bool {
 	var recovery *service.OpenAIAgentRecoveryError
 	return err != nil &&
+		!errors.Is(err, service.ErrOpenAIWSUnsupportedWarmup) &&
+		!openAIWSIngressEndedByClient(err) &&
 		!errors.As(err, &recovery) &&
 		!errors.Is(err, errOpenAIWSUnsupportedModelSwitch) &&
 		!errors.Is(err, errOpenAIWSLocalAdmissionRejected) &&
@@ -225,10 +228,19 @@ func openAIWSIngressEndedByClient(err error) bool {
 	if errors.As(err, &closeErr) && closeErr.StatusCode() == coderws.StatusNormalClosure {
 		return true
 	}
-	if coderws.CloseStatus(err) == coderws.StatusNormalClosure {
+	if errors.Is(err, context.Canceled) {
 		return true
 	}
-	return errors.Is(err, context.Canceled)
+	// A peer's 1000 is only a transport handshake. An upstream read/write
+	// failure still belongs to the provider; a completed turn returns nil.
+	var turnErr interface{ OpenAIWSIngressStage() string }
+	if errors.As(err, &turnErr) {
+		switch turnErr.OpenAIWSIngressStage() {
+		case "read_upstream", "write_upstream":
+			return false
+		}
+	}
+	return coderws.CloseStatus(err) == coderws.StatusNormalClosure
 }
 
 // admitOpenAIWSTurn acquires one WebSocket turn's key reservation and user
@@ -677,6 +689,11 @@ func NewOpenAIGatewayHandler(
 // Responses handles OpenAI Responses API endpoint
 // POST /openai/v1/responses
 func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
+	if c.GetHeader("X-Image-Usage") != "" {
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "X-Image-Usage is supported only by /v1/images/generations and /v1/images/edits")
+		return
+	}
+
 	// 局部兜底：确保该 handler 内部任何 panic 都不会击穿到进程级。
 	streamStarted := false
 	defer h.recoverResponsesPanic(c, &streamStarted)
@@ -2984,6 +3001,11 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 // ResponsesWebSocket handles OpenAI Responses API WebSocket ingress endpoint
 // GET /openai/v1/responses (Upgrade: websocket)
 func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
+	if c.GetHeader("X-Image-Usage") != "" {
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "X-Image-Usage is supported only by /v1/images/generations and /v1/images/edits")
+		return
+	}
+
 	if !isOpenAIWSUpgradeRequest(c.Request) {
 		h.errorResponse(c, http.StatusUpgradeRequired, "invalid_request_error", "WebSocket upgrade required (Upgrade: websocket)")
 		return
@@ -4073,7 +4095,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				if scheduleModel == "" {
 					scheduleModel = turnRequestedModel
 				}
-				h.gatewayService.ReportOpenAIAccountScheduleResult(account, scheduleModel, openAIForwardSucceededForScheduling(result), result.FirstTokenMs)
+				h.gatewayService.ReportOpenAIAccountScheduleResult(account, scheduleModel, openAIForwardSucceededForScheduling(result), result.FirstTokenMs, turnErr)
 				inboundEndpoint := GetInboundEndpoint(c)
 				upstreamEndpoint := resolveOpenAIUpstreamEndpoint(c, account, result)
 				quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
@@ -4364,7 +4386,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				if hasClientCloseErr {
 					closedFields = append(closedFields, zap.String("reason", closeErr.Reason()))
 				} else {
-					closedFields = append(closedFields, zap.Error(err))
+					closedFields = append(closedFields, zap.String("error", openaiwsv2.ErrorStringForLog(err)))
 				}
 				reqLog.Info("openai.websocket_ingress_closed_normally", closedFields...)
 				// A bare coderws.CloseError or a plain cancellation carries no
@@ -4395,9 +4417,13 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, wsForwardModel, false, nil), false, nil, err)
 			}
 			closeStatus, closeReason := summarizeWSCloseErrorForLog(err)
+			var upstreamClose coderws.CloseError
+			if errors.As(err, &upstreamClose) {
+				closeReason = openaiwsv2.CloseReasonForLog(upstreamClose.Reason)
+			}
 			proxyFailedFields := []zap.Field{
 				zap.Int64("account_id", account.ID),
-				zap.Error(err),
+				zap.String("error", openaiwsv2.ErrorStringForLog(err)),
 				zap.String("close_status", closeStatus),
 				zap.String("close_reason", closeReason),
 			}
@@ -5143,12 +5169,19 @@ func closeOpenAIWSFailoverExhausted(c *gin.Context, conn *coderws.Conn, failover
 	errorCode := "upstream_ws_failover_exhausted"
 	message := "upstream websocket proxy failed"
 	closeStatus := coderws.StatusInternalError
+	writeErrorFrame := false
 
 	if failoverErr != nil {
 		if reason := strings.TrimSpace(string(failoverErr.Reason)); reason != "" {
 			errorCode = reason
 		}
-		if failoverErr.Stage == service.GatewayFailureStageAccountAuth {
+		if failoverErr.Reason == service.OpenAIWSModelUnavailableReason {
+			intendedStatus = failoverErr.StatusCode
+			errorType, errorCode = "invalid_request_error", "model_not_found"
+			message = "requested model is unavailable on eligible upstream accounts; reconnect with complete context"
+			closeStatus = coderws.StatusTryAgainLater
+			writeErrorFrame = true
+		} else if failoverErr.Stage == service.GatewayFailureStageAccountAuth {
 			intendedStatus = http.StatusServiceUnavailable
 			errorType = "api_error"
 			message = service.GrokCredentialUnavailableClientMessage
@@ -5176,12 +5209,15 @@ func closeOpenAIWSFailoverExhausted(c *gin.Context, conn *coderws.Conn, failover
 	if failoverErr != nil {
 		if code, safeMessage, ok := service.OpenAIUpstreamRecoveryRateLimit(failoverErr.StatusCode, failoverErr.ResponseBody); ok {
 			errorCode, message = code, safeMessage
-			payload, _ := json.Marshal(gin.H{"type": "error", "status": intendedStatus,
-				"error": gin.H{"type": errorType, "code": errorCode, "message": message}})
-			writeCtx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
-			_ = service.WriteCapturedWSClient(writeCtx, conn, coderws.MessageText, payload)
-			cancel()
+			writeErrorFrame = true
 		}
+	}
+	if writeErrorFrame {
+		payload, _ := json.Marshal(gin.H{"type": "error", "status": intendedStatus,
+			"error": gin.H{"type": errorType, "code": errorCode, "message": message}})
+		writeCtx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+		_ = service.WriteCapturedWSClient(writeCtx, conn, coderws.MessageText, payload)
+		cancel()
 	}
 	service.MarkOpsStreamFailure(c, errorType, errorCode, message, intendedStatus)
 	closeOpenAIClientWS(conn, closeStatus, message)
@@ -5834,8 +5870,7 @@ func summarizeWSCloseErrorForLog(err error) (string, string) {
 	closeReason := "-"
 	var closeErr coderws.CloseError
 	if errors.As(err, &closeErr) {
-		reason := strings.TrimSpace(closeErr.Reason)
-		if reason != "" {
+		if reason := strings.TrimSpace(closeErr.Reason); reason != "" {
 			closeReason = reason
 		}
 	}

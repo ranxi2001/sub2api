@@ -29,7 +29,12 @@ describe("groupsOpenAIFast", () => {
       });
       expect(locale.groups.openaiFast.ultrafastHint).toContain("GPT-6 Astra");
       expect(locale.groups.openaiFast.ultrafastHint).toContain("GPT-6.1 Sol");
+      expect(locale.groups.openaiFast.ultrafastHint).toContain("GPT-6.2");
+      expect(locale.groups.openaiFast.ultrafastHint).toContain("2027");
     }
+    expect(zh.groups.openaiFast.ultrafastHint).toContain("2027-03-01 00:00（太平洋时间）");
+    expect(zh.groups.openaiFast.ultrafastHint).toContain("3 倍计费，之后恢复 6 倍");
+    expect(en.groups.openaiFast.ultrafastHint).toContain("3× Standard before March 1, 2027 00:00 Pacific, then 6×");
   });
 
   it("provides localized switch labels", () => {

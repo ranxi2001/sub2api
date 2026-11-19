@@ -192,7 +192,7 @@ func (s *AccountOpsService) deliverNotification(ctx context.Context, e *AccountO
 	}
 	if err != nil {
 		state = "failed"
-	} else if c.Allows(e.Kind) {
+	} else if c.AllowsAccount(e.Kind, e.AccountID) {
 		if e.Kind == "balance_threshold" || e.Kind == "quota_threshold" {
 			thresholdState, checkErr := s.recheckThreshold(ctx, e, c)
 			if checkErr != nil {
@@ -244,7 +244,7 @@ func (s *AccountOpsService) deliverNotification(ctx context.Context, e *AccountO
 			}
 			c = freshConfig
 			delay = time.Duration(c.CooldownMinutes) * time.Minute
-			if !c.Allows(e.Kind) {
+			if !c.AllowsAccount(e.Kind, e.AccountID) {
 				s.finishNotification(ctx, e, "suppressed", delay)
 				return
 			}
@@ -323,7 +323,7 @@ func (s *AccountOpsService) deliverNotification(ctx context.Context, e *AccountO
 				s.finishNotification(ctx, e, "failed", delay)
 				return
 			}
-			if !latest.Allows(e.Kind) {
+			if !latest.AllowsAccount(e.Kind, e.AccountID) {
 				cancel()
 				s.finishNotification(ctx, e, "suppressed", delay)
 				return

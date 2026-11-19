@@ -1,4 +1,4 @@
-# Tests changed by 4b78bceae..12065e8d9 upstream import. Historical overlays only.
+# Upstream import (4b78bceae..12065e8d9) and later independent tests. Historical overlays only.
 backend/cmd/server/wire_gen_test.go
 backend/internal/config/config_test.go
 backend/internal/domain/constants_test.go
@@ -138,3 +138,34 @@ backend/internal/web/embed_test.go
 backend/internal/web/html_cache_headers_test.go
 backend/migrations/group_force_openai_ultrafast_migration_test.go
 backend/migrations/group_usage_rollup_migration_test.go
+# Later profit-consumption APIs are absent from the complete historical trees.
+# Restore existing profit tests; omit provider-site tests only when absent there.
+backend/internal/service/profit_operations_test.go
+backend/internal/service/provider_profit_site_test.go
+
+# Later cache-tier, relogin and model-policy tests need their matching production APIs.
+# Full old-source overlays use baseline fixtures; current-head GREEN retains them.
+backend/internal/service/anthropic_prompt_total_test.go
+backend/internal/service/antigravity_gateway_service_test.go
+backend/internal/service/channel_pricing_multipliers_test.go
+backend/internal/service/codex_account_availability_test.go
+backend/internal/service/gateway_cache_compatibility_boundary_test.go
+backend/internal/service/gateway_cache_creation_usage_test.go
+backend/internal/service/gateway_cache_ttl_override_test.go
+backend/internal/service/openai_cache_write_ttl_test.go
+backend/internal/service/openai_gateway_native_cache_creation_test.go
+backend/internal/service/openai_gpt62_fork_test.go
+backend/internal/service/openai_json_object_field_edit_test.go
+backend/internal/service/openai_relogin_settings_test.go
+backend/internal/service/openai_subscription_long_context_test.go
+backend/internal/service/openai_two_fa_login_test.go
+backend/internal/service/upstream_batch_whitelist_identity_policy_test.go
+
+# Image usage settlement fixtures need the candidate billing implementation.
+backend/internal/handler/image_billing_response_test.go
+backend/internal/service/image_usage_billing_test.go
+
+# Account balance notifications require newer AccountOps APIs.
+backend/internal/service/account_ops_balance_notification_test.go
+backend/internal/service/grok_rate_limit_history_test.go
+backend/internal/service/new_api_cost_test.go

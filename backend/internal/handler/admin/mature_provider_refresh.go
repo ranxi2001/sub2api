@@ -33,6 +33,7 @@ func (h *ChannelHandler) StopMatureProviderRefresh() {
 	if h.providerCancel != nil {
 		h.providerCancel()
 	}
+	h.profitJobs.stop()
 	h.providerWG.Wait()
 }
 

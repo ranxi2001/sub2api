@@ -1,5 +1,7 @@
 # Codex 并行采集与凭据配对（2.8.1）
 
+> 此文档记录已移除界面的历史行为。当前删除范围及共享后端归属见 [智能运维功能移除](smart-ops-retirement.md)。
+
 > 历史实现记录：本文描述旧版门票采集与复用流程，仅供版本追溯，不作为当前部署或配置指南。新人请从[新人入门](新人入门.md)开始；协议配置和账号质量检测分别参阅 [Excel / BPS](excel-bps.md) 与[质量运维](account-quality-operations.md)。不要按本文启用旧开关或部署配套服务。
 
 管理页「打票流水 → 单号定向打票」新增「并行获取凭证」。默认 10 路，可选 2–32 路；原「开始打票」保持串行。API 沿用 `POST /api/v1/admin/accounts/:id/manual-harvest`，新增 `collect_lanes`；省略、0 或 1 为串行。

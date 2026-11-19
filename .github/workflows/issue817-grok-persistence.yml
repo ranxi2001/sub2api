@@ -1,0 +1,238 @@
+name: Issue817 Grok persistence recovery
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'backend/internal/service/account_test_service.go'
+      - 'backend/internal/service/grok_scheduled_test_recovery.go'
+      - 'backend/internal/service/grok_rate_limit_history.go'
+      - 'backend/internal/service/grok_rate_limit_history_test.go'
+      - 'backend/internal/service/scheduled_test_runner_service.go'
+      - 'backend/internal/service/scheduled_test_port.go'
+      - 'backend/internal/service/ratelimit_service.go'
+      - 'backend/internal/service/quality_quota_integration_helper.go'
+      - 'backend/internal/service/openai_gateway_grok.go'
+      - 'backend/internal/service/scheduled_test_service.go'
+      - 'backend/internal/service/grok_token_provider.go'
+      - 'backend/internal/pkg/xai/**'
+      - 'backend/internal/repository/account_repo.go'
+      - 'backend/internal/repository/account_repo_integration_test.go'
+      - 'backend/internal/repository/scheduler_cache.go'
+      - 'backend/internal/repository/scheduled_test_repo.go'
+      - 'backend/internal/repository/integration_harness_test.go'
+      - 'backend/go.mod'
+      - 'backend/go.sum'
+      - 'backend/internal/repository/grok_scheduled_persistence_integration_test.go'
+      - '.github/workflows/issue817-grok-persistence.yml'
+      - '.github/scripts/issue817-race-gate.sh'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue817-grok-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  grok-persistence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        behavior: [red, negative_red, backoff_red, edit_red, green]
+    services:
+      postgres:
+        image: postgres:18.1-alpine3.23
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sub2api_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sub2api_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+      redis:
+        image: redis:8.4-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      SUB2API_TEST_POSTGRES_DSN: 'host=127.0.0.1 port=5432 dbname=sub2api_test user=postgres password=postgres sslmode=disable TimeZone=UTC'
+      SUB2API_TEST_REDIS_URL: 'redis://127.0.0.1:6379/0'
+      BEHAVIOR: ${{ matrix.behavior }}
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Pin candidate and old observer source
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          git rev-parse HEAD | tee evidence/head.txt
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          if [ "$BEHAVIOR" != green ]; then
+            if [ "$BEHAVIOR" = red ]; then
+              original=45ebcb708867dd61caae10435d19d2df17cd41f3
+              source=backend/internal/service/account_test_service.go
+            elif [ "$BEHAVIOR" = negative_red ]; then
+              original=e9e2d4ac9a18f9eeab510cfb2c4213e6041455d6
+              source=backend/internal/repository/account_repo.go
+            elif [ "$BEHAVIOR" = backoff_red ]; then
+              original=48ae8cfef14dab52e90e5103057dc65f5d601dea
+              source=backend/internal/repository/account_repo.go
+            else
+              original=0e2b93a9c99f329748fc43f3f4f625a17c253db0
+              source=backend/internal/repository/account_repo.go
+            fi
+            expected_blob="$(git rev-parse "$original:$source")"
+            printf '%s %s %s\n' "$original" "$source" "$expected_blob" > evidence/original-blob.txt
+            git show "$original:$source" > "$source"
+            test "$(git hash-object "$source")" = "$expected_blob"
+            git diff --stat > evidence/red-source-diff.txt
+          else
+            git diff --exit-code
+          fi
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Compile production packages without test tags
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd backend && go build ./internal/service ./internal/repository) > evidence/production-build.log 2>&1
+          cat evidence/production-build.log
+      - name: Same oracle old observer RED and current GREEN
+        shell: bash
+        run: |
+          set -euo pipefail
+          pattern='^TestIssue817GrokScheduledRecoveryRequiresSavedResult$/(headerless_create|available_create)$'
+          children=(headerless_create available_create)
+          parent=TestIssue817GrokScheduledRecoveryRequiresSavedResult
+          diagnostic='Grok observer must keep the observed limit until result Create succeeds'
+          if [ "$BEHAVIOR" = negative_red ]; then
+            pattern='^TestIssue817GrokScheduledRecoveryRequiresSavedResult$/negative_(shorter_429|equal_429|exhausted_200)_auto_(off|on)_(saved|prune)$'
+            children=()
+            diagnostic='actual negative observation must survive deferred positive recovery'
+          fi
+          if [ "$BEHAVIOR" = green ]; then
+            pattern='^(TestIssue817GrokScheduledRecoveryRequiresSavedResult|TestIssue817GrokManualRecoveryRemainsImmediate|TestIssue817GrokNegativePreservesAdaptiveCooldown)$'
+            children+=(headerless_saved available_saved headerless_prune available_prune auto_recover_off_create auto_recover_off_saved 429_create 429_saved exhausted_200_create exhausted_200_saved failed_stream_create failed_stream_saved newer_generation owned_pause_and_model)
+          fi
+          if [ "$BEHAVIOR" = green ] || [ "$BEHAVIOR" = negative_red ]; then
+            for negative in shorter_429 equal_429 later_429 exhausted_200; do
+              for auto in off on; do
+                for fault in saved create prune; do
+                  if [ "$BEHAVIOR" = green ] || { [ "$negative" != later_429 ] && [ "$fault" != create ]; }; then
+                    children+=("negative_${negative}_auto_${auto}_${fault}")
+                  fi
+                done
+              done
+            done
+          fi
+          if [ "$BEHAVIOR" = backoff_red ]; then
+            parent=TestIssue817GrokNegativePreservesAdaptiveCooldown
+            pattern='^TestIssue817GrokNegativePreservesAdaptiveCooldown$/(forty_minutes|thirty_minutes_exact|thirty_minutes_below)$'
+            diagnostic='actual negative must preserve the exact adaptive cooldown tier after expiry'
+            children=()
+            for tier in forty_minutes thirty_minutes_exact thirty_minutes_below; do
+              for negative in shorter_429 equal_429 exhausted_200; do
+                children+=("$tier/$negative")
+              done
+            done
+          fi
+          if [ "$BEHAVIOR" = edit_red ]; then
+            parent=TestIssue817GrokNegativePreservesAdaptiveCooldown
+            pattern='^TestIssue817GrokNegativePreservesAdaptiveCooldown$/(forty_minutes|thirty_minutes_exact|ten_minutes_exact)$'
+            diagnostic='stale configuration edit must preserve the latest negative generation and history'
+            children=()
+            for tier in forty_minutes thirty_minutes_exact ten_minutes_exact; do
+              for negative in shorter_429 equal_429 exhausted_200; do
+                children+=("$tier/$negative")
+              done
+            done
+          fi
+          set +e
+          bash .github/scripts/issue817-race-gate.sh "$BEHAVIOR" "$PWD" "$pattern" > evidence/grok-gate.log 2>&1
+          result=$?
+          set -e
+          cat evidence/grok-gate.log
+          test "$(cat evidence/binary-identity-ok.txt)" = passed
+          if grep -Eiq 'no tests to run|--- SKIP:|panic:|WARNING: DATA RACE|race detected during execution|segmentation fault|SIGSEGV|\[build failed\]|setup failed' evidence/grok-gate.log; then
+            exit 1
+          fi
+          if [ "$BEHAVIOR" != green ]; then
+            test "$result" -eq 1
+            for child in "${children[@]}"; do
+              grep -F -- "--- FAIL: $parent/$child (" evidence/grok-gate.log
+              # Each child must reach its own named business assertion.
+              awk -v parent="$parent" -v child="$child" -v diagnostic="$diagnostic" '
+                $0 ~ "=== RUN.*" parent "/" child "$" { active=1; next }
+                active && /=== RUN/ { active=0 }
+                active && index($0,diagnostic) { found=1 }
+                END { exit !found }
+              ' evidence/grok-gate.log
+            done
+          else
+            test "$result" -eq 0
+            for child in "${children[@]}"; do
+              grep -F -- "--- PASS: TestIssue817GrokScheduledRecoveryRequiresSavedResult/$child (" evidence/grok-gate.log
+            done
+            grep -F -- '--- PASS: TestIssue817GrokManualRecoveryRemainsImmediate (' evidence/grok-gate.log
+            for mode in default text; do
+              grep -F -- "--- PASS: TestIssue817GrokManualRecoveryRemainsImmediate/$mode (" evidence/grok-gate.log
+            done
+            for tier in forty_minutes thirty_minutes_exact thirty_minutes_below ten_minutes_exact ten_minutes_below; do
+              for negative in shorter_429 equal_429 exhausted_200; do
+                grep -F -- "--- PASS: TestIssue817GrokNegativePreservesAdaptiveCooldown/$tier/$negative (" evidence/grok-gate.log
+              done
+            done
+          fi
+      - name: Retain merged SaveResult and quota contracts
+        if: matrix.behavior == 'green'
+        shell: bash
+        run: |
+          set -euo pipefail
+          pattern='^(TestIssue817SaveResultFailureDoesNotAcknowledge|TestIssue817ConnectivitySaveFailureDoesNotCompleteOrRecover|TestIssue817QuotaSkipPreservesPending5xxExecution)$'
+          (cd backend && go test -race -tags=integration ./internal/repository -run "$pattern" -count=1 -v -timeout=10m) > evidence/retained.log 2>&1
+          cat evidence/retained.log
+          if grep -Eiq 'no tests to run|--- SKIP:|panic:|WARNING: DATA RACE|race detected during execution|SIGSEGV|\[build failed\]' evidence/retained.log; then
+            exit 1
+          fi
+          for name in TestIssue817SaveResultFailureDoesNotAcknowledge TestIssue817ConnectivitySaveFailureDoesNotCompleteOrRecover TestIssue817QuotaSkipPreservesPending5xxExecution; do
+            grep -F -- "--- PASS: $name (" evidence/retained.log
+          done
+          pattern='^TestAccountRepoSuite$/(TestSetRateLimitedIfLaterDoesNotShortenReset|TestClearRateLimitIfObservedProtectsRearmed429Generation|TestGrokNegativeObservationAdvancesGenerationWithoutShorteningReset|TestGrokConfigurationEditRuntimeBoundary)$'
+          (cd backend && go test -race -tags=integration ./internal/repository -run "$pattern" -count=1 -v -timeout=10m) > evidence/generation-contracts.log 2>&1
+          cat evidence/generation-contracts.log
+          if grep -Eiq 'no tests to run|--- SKIP:|panic:|WARNING: DATA RACE|race detected during execution|SIGSEGV|\[build failed\]' evidence/generation-contracts.log; then
+            exit 1
+          fi
+          for name in TestSetRateLimitedIfLaterDoesNotShortenReset TestClearRateLimitIfObservedProtectsRearmed429Generation TestGrokNegativeObservationAdvancesGenerationWithoutShorteningReset TestGrokConfigurationEditRuntimeBoundary; do
+            grep -F -- "--- PASS: TestAccountRepoSuite/$name (" evidence/generation-contracts.log
+          done
+          for name in grok_oauth grok_apikey other_oauth; do
+            grep -F -- "--- PASS: TestAccountRepoSuite/TestGrokConfigurationEditRuntimeBoundary/$name (" evidence/generation-contracts.log
+          done
+          (cd backend && go test -race -tags=unit ./internal/service -run '^TestGrokAdaptiveCooldownRequiresMatchingHistory$' -count=1 -v -timeout=10m) > evidence/history-controls.log 2>&1
+          cat evidence/history-controls.log
+          if grep -Eiq 'no tests to run|--- SKIP:|panic:|WARNING: DATA RACE|race detected during execution|SIGSEGV|\[build failed\]' evidence/history-controls.log; then
+            exit 1
+          fi
+          for name in matching old_generation old_reset invalid_duration overflow zero legacy; do
+            grep -F -- "--- PASS: TestGrokAdaptiveCooldownRequiresMatchingHistory/$name (" evidence/history-controls.log
+          done
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: issue817-grok-${{ matrix.behavior }}-${{ github.run_id }}
+          path: evidence/
+          if-no-files-found: error

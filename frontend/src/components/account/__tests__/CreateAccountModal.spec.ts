@@ -2,10 +2,10 @@ vi.mock('@/components/common/NewFeatureBadge.vue', () => ({ default: { template:
 vi.mock('@/api/admin/upstreamChannels', () => ({ listUpstreamChannels: vi.fn(), readChannelBindings: vi.fn(), bindChannelAccounts: vi.fn() }))
 import { readChannelBindings, listUpstreamChannels } from '@/api/admin/upstreamChannels'
 import UpstreamChannelSelector from '../UpstreamChannelSelector.vue'
-import { deleteTwoFALogin, getTwoFALogin, startTwoFALogin } from '@/api/admin/accountTokenGuard'
+import { deleteTwoFALogin, getTwoFALogin, startTwoFALogin } from '@/api/admin/openaiRelogin'
 
-vi.mock('@/api/admin/accountTokenGuard', async original => ({
-  ...await original<typeof import('@/api/admin/accountTokenGuard')>(),
+vi.mock('@/api/admin/openaiRelogin', async original => ({
+  ...await original<typeof import('@/api/admin/openaiRelogin')>(),
   startTwoFALogin: vi.fn(), getTwoFALogin: vi.fn(), deleteTwoFALogin: vi.fn(),
 }))
 
@@ -496,6 +496,23 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
       platform: 'openai',
       type: 'apikey',
       extra: expect.objectContaining({ openai_response_tier_billing_enabled: true })
+    }))
+  })
+
+  it('offers the cache TTL billing-from-request switch only for Anthropic API-key accounts', async () => {
+    const wrapper = mountModal()
+    expect(wrapper.find('[data-testid="cache-ttl-billing-from-request-toggle"]').exists()).toBe(false)
+    await selectButtonByText(wrapper, 'admin.accounts.claudeConsole')
+    const toggle = wrapper.get('[data-testid="cache-ttl-billing-from-request-toggle"]')
+    expect(toggle.classes()).not.toContain('bg-primary-600')
+    await toggle.trigger('click')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Relay with TTL billing')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('test-api-key')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock).toHaveBeenCalledWith(expect.objectContaining({
+      platform: 'anthropic', type: 'apikey',
+      extra: expect.objectContaining({ cache_ttl_billing_from_request: true })
     }))
   })
 
@@ -1036,7 +1053,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
       expect(startTwoFALogin).toHaveBeenCalledTimes(3)
       expect(wrapper.getComponent(OpenAITwoFAImport).vm.$.uid).toBe(original.vm.$.uid)
       expect(wrapper.emitted('close')).toBeUndefined()
-      expect(original.get('[data-testid="two-fa-owned-jobs"]').text()).toContain('tokenGuard.twoFA.ownedJobs')
+      expect(original.get('[data-testid="two-fa-owned-jobs"]').text()).toContain('openaiRelogin.twoFA.ownedJobs')
       expect(original.get('[data-testid="two-fa-start"]').attributes('disabled')).toBeUndefined()
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
       await selectButtonByText(wrapper, 'common.back')

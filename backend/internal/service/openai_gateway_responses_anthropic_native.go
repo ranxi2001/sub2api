@@ -191,6 +191,7 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 	// 读间隔上限：上游挂住 SSE 时中止组装（缓冲路径尚未提交响应头，可回 502）。
 	streamInterval := anthropicNativeStreamInterval(s.cfg)
 	pump := newAnthropicNativeLinePump(scanner, streamInterval)
+	streamStatus := &anthropicCompatStream{body: resp.Body, pump: pump, maxLineSize: maxLineSize, requestID: requestID}
 	defer pump.stop()
 
 	logReadErr := func(err error) {
@@ -218,6 +219,7 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 				return onIdle()
 			}
 			logReadErr(rerr)
+			streamStatus.readErr = rerr
 			if !terminalSeen {
 				if resetErr, handled := handleOpenAIHTTP2PeerReset(c, account, requestID, rerr); handled {
 					return resultWithUsage(), resetErr
@@ -236,6 +238,7 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 				return onIdle()
 			}
 			logReadErr(rerr)
+			streamStatus.readErr = rerr
 			if !terminalSeen {
 				if resetErr, handled := handleOpenAIHTTP2PeerReset(c, account, requestID, rerr); handled {
 					return resultWithUsage(), resetErr
@@ -256,6 +259,7 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 		if event.Type == "error" {
 			return resultWithUsage(), writeNativeAnthropicSemanticFailure(c, []byte(payload), originalModel)
 		}
+		streamStatus.observe(&event, payload)
 		terminalSeen = terminalSeen || event.Type == "message_stop"
 
 		if event.Type == "message_start" && event.Message != nil {
@@ -290,19 +294,18 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 		}
 	}
 
+	if failure := streamStatus.failure(); failure != nil {
+		_ = resp.Body.Close()
+		writeResponsesError(c, http.StatusBadGateway, failure.errType, failure.message)
+		return resultWithUsage(), failure.err
+	}
+
 	if finalResp == nil {
 		writeResponsesError(c, http.StatusBadGateway, "server_error", "Upstream stream ended without a response")
 		return nil, fmt.Errorf("upstream stream ended without response")
 	}
 
-	if usage.InputTokens > 0 || usage.OutputTokens > 0 {
-		finalResp.Usage = apicompat.AnthropicUsage{
-			InputTokens:              usage.InputTokens,
-			OutputTokens:             usage.OutputTokens,
-			CacheCreationInputTokens: usage.CacheCreationInputTokens,
-			CacheReadInputTokens:     usage.CacheReadInputTokens,
-		}
-	}
+	normalizeAnthropicEventUsageForResponses(&apicompat.AnthropicStreamEvent{Message: finalResp}, usage)
 
 	if isClaude55SignedThinkingModel(upstreamModel) {
 		finalResp.Model = upstreamModel

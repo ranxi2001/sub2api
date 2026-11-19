@@ -1447,6 +1447,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		firstTurnStartedAt = hooks.InitialTurnStartedAt
 	}
 	failureAccountSideEffectsApplied := false
+	var modelUnavailable atomic.Bool
 	relayResult, relayExit := openaiwsv2.RunEntry(openaiwsv2.EntryInput{
 		Ctx:                ctx,
 		ClientConn:         policyClientConn,
@@ -1576,7 +1577,12 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					turnResult.Usage.CacheReadInputTokens,
 				)
 				if hooks != nil && hooks.AfterTurn != nil {
-					hooks.AfterTurn(turnNo, turnResult, nil)
+					var turnErr error
+					if modelUnavailable.Load() {
+						turnErr = ErrOpenAIWSModelUnavailable
+						turnResult.ObservedUsageOnError = true
+					}
+					hooks.AfterTurn(turnNo, turnResult, turnErr)
 				}
 			},
 			BeforeClientWrite: func(msgType coderws.MessageType, payload []byte) {
@@ -1587,10 +1593,14 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			AfterClientWrite: func(msgType coderws.MessageType, payload []byte, writeErr error) {
 				if msgType == coderws.MessageText && writeErr == nil {
 					eventType, _, _ := parseOpenAIWSEventEnvelope(payload)
-					markOpenAIWSClientVisibleFailure(c, eventType, payload)
+					markOpenAIWSClientVisibleFailure(c, eventType, payload, &OpsUpstreamWSFailure{Phase: "upstream_event"})
 				}
 				if msgType == coderws.MessageText && openAIWSPassthroughIsTerminalOutput(payload) {
 					turnLifecycle.finishTerminalWrite(writeErr == nil, clientFrameConn.markTurnCompleted)
+				}
+				if writeErr == nil && modelUnavailable.Load() {
+					_ = clientConn.Close(coderws.StatusTryAgainLater, "model unavailable on this account; reconnect with complete context")
+					_ = clientConn.CloseNow()
 				}
 			},
 			BeforeRelayCancel: func(exit openaiwsv2.RelayExit) {
@@ -1617,6 +1627,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				regionalMeterObserveUsage(ctx, payload, eventType)
 				if eventType == "response.created" {
 					failureAccountSideEffectsApplied = false
+				}
+				if openAIWSModelFailureStatus(account, payload) != 0 {
+					modelUnavailable.Store(true)
 				}
 				if (eventType == "error" || eventType == "response.failed") && markOpenAIWSV2PassthroughCyberPolicy(c, payload) {
 					return nil
@@ -1667,6 +1680,13 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			},
 		},
 	})
+	if modelUnavailable.Load() {
+		if turn := activeTurn.Swap(0); turn != 0 && hooks != nil && hooks.AfterTurn != nil {
+			hooks.AfterTurn(int(turn), nil, ErrOpenAIWSModelUnavailable)
+		}
+		return NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater,
+			"model unavailable on this account; reconnect with complete context", ErrOpenAIWSModelUnavailable)
+	}
 	// Relay has joined both directions. Only this unfinished turn may settle
 	// here: completed terminal callbacks already consumed activeTurn. Never use
 	// relayResult.Usage, which aggregates earlier completed turns.
@@ -1778,6 +1798,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		turnCount,
 	)
 
+	// The relay has joined both directions; snapshot the real upstream close
+	// before handler cleanup or generic client-request classification loses it.
+	if relayExit.Stage == "read_upstream" && activeTurn.Load() != 0 {
+		markOpenAIWSUpstreamClose(c, relayExit.Err)
+	}
 	relayErr := relayExit.Err
 	var firstOutputTimeoutErr *openAIWSPassthroughFirstOutputTimeoutError
 	if errors.As(relayErr, &firstOutputTimeoutErr) {
@@ -1942,10 +1967,7 @@ func openaiwsv2RelayMessageTypeName(msgType coderws.MessageType) string {
 }
 
 func relayErrorText(err error) string {
-	if err == nil {
-		return ""
-	}
-	return err.Error()
+	return openaiwsv2.ErrorStringForLog(err)
 }
 
 func openAIWSFirstTokenMsForLog(firstTokenMs *int) int {

@@ -98,6 +98,7 @@ func openAIWSUnsentAgentTurn(err error, body []byte, model string, turn int) err
 }
 
 type openAIWSUnsentOwnerProofKey struct{}
+type openAIWSUnsentAdmissionKey struct{}
 
 // Carry the route check's observations through the handler's auth boundary.
 // Rebuild consumes this current-turn evidence once; it cannot leak to later turns.
@@ -109,6 +110,10 @@ func WithOpenAIWSUnsentOwnerProof(ctx context.Context, err error) context.Contex
 		ctx = recovered.RecoveredWSContext(ctx)
 	}
 	var unsent *openAIWSUnsentTurnError
+	var admission *OpenAITurnAdmissionError
+	if errors.As(err, &unsent) && !unsent.keepAccount && errors.As(err, &admission) {
+		ctx = context.WithValue(ctx, openAIWSUnsentAdmissionKey{}, unsent)
+	}
 	if errors.As(err, &unsent) && unsent.completedSource != nil {
 		return context.WithValue(ctx, openAIWSUnsentOwnerProofKey{}, unsent.completedSource)
 	}
@@ -176,7 +181,12 @@ func openAIWSCompletedToolInputs(body []byte) bool {
 // Called before fresh admission/moderation of an unsent frame. Lookup is scoped
 // to this exact task; missing historical intent is never fabricated.
 func (s *OpenAIGatewayService) RebuildOpenAIWSUnsentTurn(ctx context.Context, c *gin.Context, body []byte, session, model string) (nextCtx context.Context, nextBody []byte, changed bool, resultErr error) {
+	if s.openAILegacyCompatibility() {
+		return ctx, body, false, nil
+	}
 	originalBody := body
+	unsent, _ := ctx.Value(openAIWSUnsentAdmissionKey{}).(*openAIWSUnsentTurnError)
+	ctx = context.WithValue(ctx, openAIWSUnsentAdmissionKey{}, (*openAIWSUnsentTurnError)(nil))
 	defer func() {
 		if resultErr != nil {
 			if restarter, available := any(s).(interface {
@@ -184,6 +194,26 @@ func (s *OpenAIGatewayService) RebuildOpenAIWSUnsentTurn(ctx context.Context, c 
 			}); available {
 				if next, clean, ok := restarter.restartOpenAIWSClientReadableHistory(ctx, c, originalBody, session, model, resultErr); ok {
 					nextCtx, nextBody, changed, resultErr = next, clean, true, nil
+				}
+			}
+			// A result-only delta is valid while its response anchor is alive.
+			// Once unsent admission loses that lane and local history cannot be
+			// rebuilt, ask the client for its full canonical input. Codex handles
+			// this standard code by retrying the full request. This does not grant
+			// ownership or authorize replay: the next request passes every gate.
+			var recovery *OpenAIAgentRecoveryError
+			if unsent != nil && errors.As(resultErr, &recovery) && recovery.Reason == "owner_conflict" &&
+				recovery.InternalSubreason() == "tool_unpaired" && recovery.diagnostic != nil &&
+				recovery.diagnostic.owners.observed && recovery.diagnostic.owners.total == 0 &&
+				gjson.GetBytes(originalBody, "previous_response_id").String() != "" &&
+				gjson.GetBytes(originalBody, "previous_response_id").Raw == gjson.GetBytes(unsent.body, "previous_response_id").Raw &&
+				openAIAgentRecoveryInputDigest(originalBody) == openAIAgentRecoveryInputDigest(unsent.body) {
+				counts, why := inspectOpenAIWSCompletedTools(originalBody)
+				if why == "tool_unpaired" && counts.calls == 0 && counts.results > 0 &&
+					len(gjson.GetBytes(originalBody, "input").Array()) == counts.results {
+					copy := *recovery
+					copy.Reason = "continuation_history_missing"
+					resultErr = &copy
 				}
 			}
 		}

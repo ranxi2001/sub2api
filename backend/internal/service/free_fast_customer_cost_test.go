@@ -48,6 +48,7 @@ func TestFreeFastCustomerCostSnapshot(t *testing.T) {
 func TestFreeFastCustomerCostVariants(t *testing.T) {
 	for _, tc := range []struct {
 		name                                    string
+		accountType                             string
 		input, output, write30m, write12h, read int
 		personal, model, reasoning              float64
 		long                                    bool
@@ -60,8 +61,13 @@ func TestFreeFastCustomerCostVariants(t *testing.T) {
 		{name: "whole request above threshold", input: 272001, output: 19, long: true},
 		{name: "cache crosses context tier", input: 271990, output: 19, write30m: 5, write12h: 6, read: 7, long: true},
 		{name: "context gate disabled above threshold", input: 272001, output: 19, contextDisabled: true},
+		{name: "subscription exemption above 500k", input: 500001, output: 19, accountType: AccountTypeOAuth},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			kind := tc.accountType
+			if kind == "" {
+				kind = AccountTypeAPIKey
+			}
 			repo := &openAIRecordUsageLogRepoStub{inserted: true}
 			rates := &openAIUserGroupRateRepoStub{}
 			rate := .5
@@ -118,7 +124,7 @@ func TestFreeFastCustomerCostVariants(t *testing.T) {
 						OutputTokens: tc.output, CacheCreationInputTokens: tc.write30m + tc.write12h,
 						CacheCreation30mInputTokens: tc.write30m, CacheCreation12hInputTokens: tc.write12h, CacheReadInputTokens: tc.read}},
 				APIKey: &APIKey{ID: 1020, GroupID: &gid, Group: group}, User: &User{ID: 2020},
-				Account: &Account{ID: 3020, Platform: PlatformOpenAI, Type: AccountTypeOAuth},
+				Account: &Account{ID: 3020, Platform: PlatformOpenAI, Type: kind},
 			})
 			require.NoError(t, err)
 			log := repo.lastLog

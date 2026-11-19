@@ -347,16 +347,20 @@ func (s *ScheduledTestRunnerService) runPelicanPlan(ctx context.Context, plan *S
 		if result.Status == "success" {
 			succeeded = true
 		}
-		if err := s.scheduledSvc.SaveResult(saveCtx, plan.ID, plan.MaxResults, result); err != nil {
-			allSaved = false
-			logger.LegacyPrintf("service.scheduled_test_runner", "pelican plan=%d save failed: %v", plan.ID, err)
+		saved, saveErr := s.scheduledSvc.saveResult(saveCtx, plan.ID, plan.MaxResults, result)
+		allSaved = allSaved && saved
+		if saveErr != nil {
+			logger.LegacyPrintf("service.scheduled_test_runner", "pelican plan=%d save failed: %v", plan.ID, saveErr)
 		}
 	}
+	if !allSaved {
+		// Partial history cannot cover a queued signal. Keep the claimed lease:
+		// releasing it would immediately replay probes and quality actions.
+		// Persistence-only recovery after lease expiry needs a durable continuation.
+		return false
+	}
 	if cleanup, ok := s.planRepo.(QualityOAuth401Repository); ok {
-		evidence := &QualityOAuth401Round{}
-		if allSaved {
-			evidence = QualityOAuth401Evidence(plan, results)
-		}
+		evidence := QualityOAuth401Evidence(plan, results)
 		deleted, cleanupErr := cleanup.CompleteQualityOAuth401Round(saveCtx, plan, until, evidence)
 		if cleanupErr != nil {
 			logger.LegacyPrintf("service.scheduled_test_runner", "quality OAuth 401 cleanup plan=%d account=%d failed", plan.ID, plan.AccountID)

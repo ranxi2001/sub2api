@@ -40,6 +40,9 @@ func (s *OpenAIGatewayService) TryOmitOpenAI409History(ctx context.Context, c *g
 }
 
 func (s *OpenAIGatewayService) TryRebuildOpenAI409History(ctx context.Context, c *gin.Context, body []byte, session, model string, cause error) (context.Context, []byte, bool, error) {
+	if s.openAILegacyCompatibility() {
+		return ctx, body, false, nil
+	}
 	var refusal *OpenAIAgentRecoveryError
 	if !errors.As(cause, &refusal) {
 		return ctx, body, false, nil
@@ -136,6 +139,9 @@ func (s *OpenAIGatewayService) TryRebuildOpenAI409History(ctx context.Context, c
 // account's conversation. Rebuild before selection, after all item fences were
 // read. A healthy single producer without pointers retains ordinary routing.
 func (s *OpenAIGatewayService) PrepareOpenAI409ReadableContinuation(ctx context.Context, c *gin.Context, body []byte, session, model string) (nextCtx context.Context, nextBody []byte, changed bool, resultErr error) {
+	if s.openAILegacyCompatibility() {
+		return ctx, body, false, nil
+	}
 	if next, clean, changed := s.PrepareOpenAILossyHistoryRestart(ctx, c, body, session, model); changed {
 		return next, clean, true, nil
 	}
@@ -175,6 +181,9 @@ func (s *OpenAIGatewayService) PrepareOpenAI409ReadableContinuation(ctx context.
 // It may only be discarded, under the explicit Beta policy, in favor of the
 // caller's own readable task. Existing foreign ownership/store failures deny.
 func (s *OpenAIGatewayService) CanDiscardOpenAI409ResponsePointer(ctx context.Context, body []byte, groupID int64, responseID string) bool {
+	if s.openAILegacyCompatibility() {
+		return false
+	}
 	if s != nil && s.settingService != nil {
 		policy, ok := any(s.cfg).(interface{ OpenAILossyHistoryRestartEnabled() bool })
 		if ok && policy.OpenAILossyHistoryRestartEnabled() && utf8.Valid(body) && openAIEncryptedJSONUnambiguous(body) &&

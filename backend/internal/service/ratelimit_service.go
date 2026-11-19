@@ -66,6 +66,9 @@ type SuccessfulTestRecoveryResult struct {
 type AccountRecoveryOptions struct {
 	InvalidateToken          bool
 	preserveGrokScopedBlocks bool
+	// Scheduled Grok tests recover only the observed rate-limit generation after
+	// saving. The generic callback must not clear newer or separately owned state.
+	preserveGrokRuntimeState bool
 }
 
 type geminiUsageCacheEntry struct {
@@ -2456,7 +2459,7 @@ func (s *RateLimitService) RecoverAccountState(ctx context.Context, accountID in
 
 	hasScopedGrokState := account.IsGrok() && !options.preserveGrokScopedBlocks &&
 		(hasGrokModelQuotaBlockForAccount(account.ID) || hasGrokTeamModelRateLimitForAccount(account))
-	if hasRecoverableRuntimeState(account) || hasScopedGrokState {
+	if (hasRecoverableRuntimeState(account) || hasScopedGrokState) && (!account.IsGrok() || !options.preserveGrokRuntimeState) {
 		if err := s.clearRateLimit(ctx, accountID, options.preserveGrokScopedBlocks && account.IsGrok()); err != nil {
 			return nil, err
 		}
@@ -2883,10 +2886,19 @@ func shouldSkipCodexPlanGatedImageModelCooldown(ctx context.Context, reason, req
 	return IsGPTImageGenerationModel(requestedModel) || IsGPTImageGenerationModel(modelKey)
 }
 
+type upstreamModelNotFoundCanonicalContextKey struct{}
+
 func modelRateLimitKeyForUpstreamModelNotFound(ctx context.Context, account *Account, requestedModel string) string {
 	modelKey := strings.TrimSpace(requestedModel)
 	if account == nil || modelKey == "" {
 		return modelKey
+	}
+	// The OpenAI gateway supplies the already-mapped scheduling model. Preserve
+	// it just as custom model rules do; alias chains must not cool a second model.
+	if account.Platform == PlatformOpenAI && ctx != nil {
+		if canonical, _ := ctx.Value(upstreamModelNotFoundCanonicalContextKey{}).(string); canonical != "" {
+			return canonical
+		}
 	}
 	if account.Platform == PlatformAntigravity {
 		if resolved := strings.TrimSpace(resolveFinalAntigravityModelKey(ctx, account, modelKey)); resolved != "" {

@@ -156,7 +156,15 @@ func runUnsentDeltaWithLossyPolicy(t *testing.T, mode string, switchTurn int, fe
 		raw, _ := json.Marshal(b)
 		return string(raw)
 	}
-	issue715WSSend(t, h.clientConn, create(`[{"role":"user","content":"Perform fixture exactly once and retain the task"},{"type":"reasoning","encrypted_content":"fixture-history-state","summary":[{"type":"summary_text","text":"fixture readable progress"}]}`+extraInput+`]`, ""))
+	initialInput := `[{"role":"user","content":"Perform fixture exactly once and retain the task"},{"type":"reasoning","encrypted_content":"fixture-history-state","summary":[{"type":"summary_text","text":"fixture readable progress"}]}` + extraInput + `]`
+	var canonical []json.RawMessage
+	require.NoError(t, json.Unmarshal([]byte(initialInput), &canonical))
+	rememberOutput := func(raw []byte) {
+		for _, item := range gjson.GetBytes(raw, "response.output").Array() {
+			canonical = append(canonical, json.RawMessage(item.Raw))
+		}
+	}
+	issue715WSSend(t, h.clientConn, create(initialInput, ""))
 	executions := 0
 	consume := func(raw []byte) {
 		items := gjson.GetBytes(raw, "response.output").Array()
@@ -192,6 +200,7 @@ func runUnsentDeltaWithLossyPolicy(t *testing.T, mode string, switchTurn int, fe
 		}
 	}
 	first := readTurn()
+	rememberOutput(first)
 	consume(first)
 	awaitUsage()
 	require.Equal(t, "response.completed", gjson.GetBytes(first, "type").String())
@@ -201,8 +210,11 @@ func runUnsentDeltaWithLossyPolicy(t *testing.T, mode string, switchTurn int, fe
 		require.NotContains(t, string(first), "call_takeover_once", "the nonempty terminal must exclude the delivered call")
 	}
 	for n := 2; n < switchTurn; n++ {
-		issue715WSSend(t, h.clientConn, create(fmt.Sprintf(`[{"role":"user","content":"fixture next %d"}]`, n), fmt.Sprintf("resp_delta_%d", n-1)))
+		input := fmt.Sprintf(`{"role":"user","content":"fixture next %d"}`, n)
+		canonical = append(canonical, json.RawMessage(input))
+		issue715WSSend(t, h.clientConn, create("["+input+"]", fmt.Sprintf("resp_delta_%d", n-1)))
 		round := readTurn()
+		rememberOutput(round)
 		consume(round)
 		awaitUsage()
 		require.Equal(t, "response.completed", gjson.GetBytes(round, "type").String())
@@ -223,7 +235,13 @@ func runUnsentDeltaWithLossyPolicy(t *testing.T, mode string, switchTurn int, fe
 		_, raw, e := h.clientConn.Read(readCtx)
 		if e == nil {
 			require.Equal(t, "error", gjson.GetBytes(raw, "type").String())
+			if fence == "missing_history" {
+				require.Equal(t, "previous_response_not_found", gjson.GetBytes(raw, "error.code").String())
+				require.EqualValues(t, 400, gjson.GetBytes(raw, "status").Int())
+			}
 			_, _, e = h.clientConn.Read(readCtx)
+		} else if fence == "missing_history" {
+			t.Fatalf("missing continuation must deliver the recovery event: %v", e)
 		}
 		select {
 		case <-finished:
@@ -235,6 +253,40 @@ func runUnsentDeltaWithLossyPolicy(t *testing.T, mode string, switchTurn int, fe
 		mu.Unlock()
 		require.Equal(t, switchTurn-1, n, "unsafe delta cannot emit another generation")
 		require.True(t, e != nil || gjson.GetBytes(raw, "type").String() == "error")
+		if fence == "missing_history" {
+			// Follow Codex's canonical-input retry contract on a new socket.
+			// The completed tool is not run again; only its existing result is sent.
+			canonical = append(canonical, json.RawMessage(`{"type":"function_call_output","call_id":"call_takeover_once","output":"fixture applied exactly once"}`))
+			input, marshalErr := json.Marshal(canonical)
+			require.NoError(t, marshalErr)
+			retryCtx, stop := context.WithTimeout(context.Background(), 8*time.Second)
+			defer stop()
+			retry, _, dialErr := coderws.Dial(retryCtx, h.wsURL, &coderws.DialOptions{HTTPHeader: headers})
+			require.NoError(t, dialErr)
+			defer func() {
+				_ = retry.CloseNow()
+				select {
+				case <-completion:
+				case <-retryCtx.Done():
+					t.Error("canonical retry handler did not finish")
+				}
+			}()
+			issue715WSSend(t, retry, create(string(input), ""))
+			resumed := issue715WSRead(t, retry)
+			require.Equal(t, "response.completed", gjson.GetBytes(resumed, "type").String(), "canonical retry must resume: %s", resumed)
+			consume(resumed)
+			awaitUsage()
+			mu.Lock()
+			sent := append([][]byte(nil), frames...)
+			selected := append([]string(nil), owners...)
+			mu.Unlock()
+			require.Len(t, sent, switchTurn)
+			require.Equal(t, "Bearer fixture-B", selected[switchTurn-1])
+			require.False(t, gjson.GetBytes(sent[switchTurn-1], "previous_response_id").Exists())
+			require.Contains(t, string(sent[switchTurn-1]), "Perform fixture exactly once")
+			require.Contains(t, string(sent[switchTurn-1]), "fixture applied exactly once")
+			require.Equal(t, 1, executions)
+		}
 		return
 	}
 	result := issue715WSRead(t, h.clientConn)

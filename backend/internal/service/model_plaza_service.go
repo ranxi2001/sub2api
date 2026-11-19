@@ -342,6 +342,7 @@ func (s *ModelPlazaService) fillDisplayPricing(ctx context.Context, m *PlazaMode
 func plazaPricingFromSchedule(raw *ChannelModelPricing, sched *ContextPricingSchedule) *ChannelModelPricing {
 	out := &ChannelModelPricing{BillingMode: BillingModeToken}
 	if raw != nil {
+		out.ImageMinimumCharge = raw.ImageMinimumCharge
 		out.ImageInputPrice = raw.ImageInputPrice
 		out.ImageOutputPrice = raw.ImageOutputPrice
 		out.PerRequestPrice = raw.PerRequestPrice
