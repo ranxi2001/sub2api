@@ -1169,6 +1169,11 @@ func (c CodexWSAnchorConfig) Validate() error {
 	return nil
 }
 
+type UpstreamRequestCompressionRule struct {
+	Origin   string `mapstructure:"origin"`
+	Encoding string `mapstructure:"encoding"`
+}
+
 type GatewayConfig struct {
 	// DisableEncryptedAgentOwnerBinding permits completed opaque agent history
 	// on another normally eligible native Responses account. Delivery fences,
@@ -1217,6 +1222,10 @@ type GatewayConfig struct {
 	RequestBodyMemoryBudgetBytes int64 `mapstructure:"request_body_memory_budget_bytes"`
 	// TextMaxBodySize limits endpoints that cannot carry inline image/video payloads.
 	TextMaxBodySize int64 `mapstructure:"text_max_body_size"`
+	// OpenAICodexRequestCompression controls first-party Codex HTTP Responses requests.
+	OpenAICodexRequestCompression string `mapstructure:"openai_codex_request_compression"`
+	// UpstreamRequestCompression selects a supported request content coding per origin.
+	UpstreamRequestCompression []UpstreamRequestCompressionRule `mapstructure:"upstream_request_compression"`
 	// 非流式上游响应体读取上限（字节），用于防止无界读取导致内存放大
 	UpstreamResponseReadMaxBytes int64 `mapstructure:"upstream_response_read_max_bytes"`
 	// 上游模型列表响应体读取上限（字节）
@@ -2894,6 +2903,7 @@ func setDefaults() {
 	// from the memory limit (see autoRequestBodyMemoryBudget).
 	viper.SetDefault("gateway.request_body_memory_budget_bytes", defaultRequestBodyMemoryBudgetBytes)
 	viper.SetDefault("gateway.text_max_body_size", int64(32*1024*1024))
+	viper.SetDefault("gateway.openai_codex_request_compression", "zstd")
 	viper.SetDefault("gateway.upstream_response_read_max_bytes", DefaultUpstreamResponseReadMaxBytes)
 	viper.SetDefault("gateway.models_list_read_max_bytes", DefaultModelsListReadMaxBytes)
 	viper.SetDefault("gateway.proxy_probe_response_read_max_bytes", int64(1024*1024))
@@ -3740,6 +3750,27 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.TextMaxBodySize <= 0 || c.Gateway.TextMaxBodySize > c.Gateway.MaxBodySize {
 		return fmt.Errorf("gateway.text_max_body_size must be positive and no greater than gateway.max_body_size")
+	}
+	switch c.Gateway.OpenAICodexRequestCompression {
+	case "", "zstd", "gzip", "off":
+	default:
+		return fmt.Errorf("gateway.openai_codex_request_compression must be zstd, gzip, or off")
+	}
+	compressionOrigins := make(map[string]struct{}, len(c.Gateway.UpstreamRequestCompression))
+	for _, rule := range c.Gateway.UpstreamRequestCompression {
+		u, err := url.Parse(rule.Origin)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" ||
+			!httpguts.ValidHostHeader(u.Host) || rule.Origin != u.Scheme+"://"+u.Host {
+			return fmt.Errorf("gateway.upstream_request_compression origins must be exact HTTP origins without a path, query, or credentials")
+		}
+		if rule.Encoding != "zstd" && rule.Encoding != "gzip" && rule.Encoding != "off" {
+			return fmt.Errorf("gateway.upstream_request_compression encodings must be zstd, gzip, or off")
+		}
+		key := strings.ToLower(rule.Origin)
+		if _, found := compressionOrigins[key]; found {
+			return fmt.Errorf("gateway.upstream_request_compression contains a duplicate origin")
+		}
+		compressionOrigins[key] = struct{}{}
 	}
 	if c.Gateway.UpstreamResponseReadMaxBytes <= 0 {
 		return fmt.Errorf("gateway.upstream_response_read_max_bytes must be positive")

@@ -144,11 +144,20 @@ jobs:
           weekly_compat=f895ea743f34a4c4ab6c9d01c01e13c931625a6e
           weekly_leaves=(backend/internal/service/openai_disable_scheduling_429.go backend/internal/service/openai_gateway_passthrough.go backend/internal/service/openai_plugin_transport.go backend/internal/service/openai_quota_service.go backend/internal/service/openai_quota_usage_snapshot.go backend/internal/service/openai_ws_forwarder_support.go backend/internal/service/openai_ws_forwarder_v2.go)
           projection_types=backend/internal/service/openai_ws_plaintext_projection.go
+          # The compression fallback calls OpenAIAgentRecoveryNoReplay, which
+          # is absent from this pre-recovery assembly. Pin both callers together.
+          compression_compat=dd263b60c5880531f2b1c9e5eb659a257542f50b
+          compression_leaves=(backend/internal/service/http_upstream_profile.go backend/internal/repository/upstream_request_compression.go)
           git fetch --no-tags --depth=1 origin "$original"
           git fetch --no-tags --depth=1 origin "$metadata_compat"
           git fetch --no-tags --depth=1 origin "$analysis_compat"
           git fetch --no-tags --depth=1 origin "$billing_compat"
-          trap 'git restore --source=HEAD -- "${targets[@]}" "${added[@]}" "$analysis_leaf" "$billing_leaf" "${weekly_leaves[@]}" "$handler_leaf" "$error_leaf" "$metadata_leaf" "$projection_types" backend/internal/service/openai_request_timezone_egress.go backend/internal/service/openai_ws_client.go; git diff --exit-code' EXIT
+          trap 'git restore --source=HEAD -- "${targets[@]}" "${added[@]}" "$analysis_leaf" "$billing_leaf" "${weekly_leaves[@]}" "${compression_leaves[@]}" "$handler_leaf" "$error_leaf" "$metadata_leaf" "$projection_types" backend/internal/service/openai_request_timezone_egress.go backend/internal/service/openai_ws_client.go; git diff --exit-code' EXIT
+          git fetch --no-tags --depth=1 origin "$compression_compat"
+          git restore --source="$compression_compat" -- "${compression_leaves[@]}"
+          for leaf in "${compression_leaves[@]}"; do
+            test "$(git hash-object "$leaf")" = "$(git rev-parse "$compression_compat:$leaf")"
+          done
           git restore --source="$original" -- "${targets[@]}"
           git restore --source="$metadata_compat" -- "$metadata_leaf"
           test "$(git hash-object "$metadata_leaf")" = "$(git rev-parse "$metadata_compat:$metadata_leaf")"
@@ -322,7 +331,14 @@ jobs:
           git fetch --no-tags --depth=1 origin "$ws_original"
           git fetch --no-tags --depth=1 origin "$scheduler_compat"
           git fetch --no-tags --depth=1 origin "$metadata_compat"
-          trap 'git restore --source=HEAD -- "${targets[@]}" "$added" "${ws_targets[@]}" "${ws_added[@]}" "${model_callers[@]}" "$scheduler_leaf" "$wait_added" "${omission_added[@]}" "$handler_leaf" "$error_leaf" "$metadata_leaf" "$projection_types" backend/internal/service/openai_request_timezone_egress.go backend/internal/service/openai_ws_client.go; git diff --exit-code' EXIT
+          compression_compat=dd263b60c5880531f2b1c9e5eb659a257542f50b
+          compression_leaves=(backend/internal/service/http_upstream_profile.go backend/internal/repository/upstream_request_compression.go)
+          trap 'git restore --source=HEAD -- "${targets[@]}" "$added" "${ws_targets[@]}" "${ws_added[@]}" "${model_callers[@]}" "$scheduler_leaf" "${compression_leaves[@]}" "$wait_added" "${omission_added[@]}" "$handler_leaf" "$error_leaf" "$metadata_leaf" "$projection_types" backend/internal/service/openai_request_timezone_egress.go backend/internal/service/openai_ws_client.go; git diff --exit-code' EXIT
+          git fetch --no-tags --depth=1 origin "$compression_compat"
+          git restore --source="$compression_compat" -- "${compression_leaves[@]}"
+          for leaf in "${compression_leaves[@]}"; do
+            test "$(git hash-object "$leaf")" = "$(git rev-parse "$compression_compat:$leaf")"
+          done
           git restore --source="$original" -- "${targets[@]}"
           git restore --source="$ws_original" -- "${ws_targets[@]}"
           git fetch --no-tags --depth=1 origin "$model_compat"

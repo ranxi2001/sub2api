@@ -334,6 +334,17 @@ gateway:
   # Pure-text endpoint body limit (embeddings and alpha/search), default 32 MiB.
   # 纯文本端点请求体上限（embeddings、alpha/search），默认 32 MiB。
   text_max_body_size: 33554432
+  # Default for first-party ChatGPT/Codex HTTP Responses: zstd, gzip, or "off".
+  # 只影响 ChatGPT/Codex 出站 HTTP Responses；修改后重启网关。
+  openai_codex_request_compression: zstd
+  # HTTP request-body compression to explicitly compatible upstreams only.
+  # 按上游地址覆盖；地址须含协议，不含路径。可选 zstd、gzip 或 "off"。
+  upstream_request_compression: []
+  # upstream_request_compression:
+  #   - origin: https://upstream-zstd.example.com
+  #     encoding: zstd
+  #   - origin: https://upstream-gzip.example.com
+  #     encoding: gzip
   # Max bytes to read for non-stream upstream responses (default: 8MB)
   # 非流式上游响应体读取上限（默认 8MB）
   upstream_response_read_max_bytes: 8388608

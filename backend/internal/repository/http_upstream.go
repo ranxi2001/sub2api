@@ -182,6 +182,7 @@ type httpUpstreamService struct {
 	clients                             map[string]*upstreamClientEntry     // 客户端缓存池，key 由隔离策略决定
 	// OpenAI 走 HTTP/HTTPS 代理时的 H2->H1 回退状态（key=标准化 proxyKey）
 	openAIHTTP2Fallbacks sync.Map
+	compressionCooldowns sync.Map // configured origin and coding -> last rejected path and expiry
 	// BPS fallback state is isolated from Codex and contains only hashed proxy keys.
 	bpsHTTP2Fallbacks map[[32]byte]bpsHTTP2Fallback
 }
@@ -280,7 +281,7 @@ func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID i
 
 	// 执行请求
 	client := s.httpClientForUpstreamRequest(entry.client, req)
-	client = httpClientWithGrokAccessDeniedFallback(client)
+	client = httpClientWithUpstreamPolicies(client, s.wrapUpstreamRequestCompression)
 	var bpsTrace *transportdiag.Trace
 	if profile == service.HTTPUpstreamProfileExcelBPS {
 		bpsTrace = transportdiag.FromContext(req.Context())
@@ -375,7 +376,7 @@ func (s *httpUpstreamService) DoWithTLS(req *http.Request, proxyURL string, acco
 	}
 
 	client := s.httpClientForUpstreamRequest(entry.client, req)
-	client = httpClientWithGrokAccessDeniedFallback(client)
+	client = httpClientWithUpstreamPolicies(client, s.wrapUpstreamRequestCompression)
 	resp, err := doWithOpenAIPreRequestRetry(client, req, proxyURL, upstreamProfile)
 	if err != nil {
 		atomic.AddInt64(&entry.inFlight, -1)
@@ -489,7 +490,7 @@ type grokAccessDeniedFallbackTransport struct {
 	base http.RoundTripper
 }
 
-func httpClientWithGrokAccessDeniedFallback(client *http.Client) *http.Client {
+func httpClientWithUpstreamPolicies(client *http.Client, wrap func(http.RoundTripper) http.RoundTripper) *http.Client {
 	if client == nil {
 		return nil
 	}
@@ -497,6 +498,9 @@ func httpClientWithGrokAccessDeniedFallback(client *http.Client) *http.Client {
 	base := clone.Transport
 	if base == nil {
 		base = http.DefaultTransport
+	}
+	if wrap != nil {
+		base = wrap(base)
 	}
 	// Observe each physical RoundTrip before the compatibility fallback so
 	// a rejected send followed by a successful retry remains two samples.

@@ -174,6 +174,55 @@ match `text/event-stream` and can buffer SSE until the response ends. Keep
 streaming responses uncompressed while retaining compression for the web UI,
 JSON, and static assets.
 
+## Gateway Request Compression
+
+Clients can send gateway HTTP request bodies with `Content-Encoding: zstd`
+or `Content-Encoding: gzip`. Existing body limits and decoded-body safeguards
+still apply. `Accept-Encoding` is for the response and does not compress an
+upload. Supported gateway WebSocket routes negotiate `permessage-deflate`
+with their peers; WebSocket messages do not use HTTP content encodings.
+
+Native first-party ChatGPT/Codex HTTP Responses requests use `zstd` by default,
+matching the coding chosen by Codex for this backend. The public OpenAI API
+key route, custom upstreams, and other endpoints are not compressed by this
+default. Set `gateway.openai_codex_request_compression` to `zstd`, `gzip` or
+`"off"`, or use `GATEWAY_OPENAI_CODEX_REQUEST_COMPRESSION=off` as a startup
+environment override. Change the configuration and restart or roll the gateway
+instances for rollback; there is no live reload for these settings.
+
+To override the default or compress requests to another compatible HTTP upstream, add its
+exact origin (scheme, hostname and explicit port if used, without a trailing
+slash) to `gateway.upstream_request_compression` in the server configuration:
+
+```yaml
+gateway:
+  upstream_request_compression:
+    - origin: https://upstream-zstd.example.com
+      encoding: zstd
+    - origin: https://upstream-gzip.example.com
+      encoding: gzip
+```
+
+An explicit origin rule takes precedence, including an `encoding: "off"`
+rule. To disable compression entirely, set the Codex mode to `"off"` and
+remove any enabled origin rules. Only enable an origin confirmed to accept
+that coding on its JSON API. The gateway compresses replayable JSON POST bodies from
+2 KiB through 32 MiB when the encoded body is smaller. Already encoded or
+integrity-protected bodies, multipart uploads and active request captures are
+left unchanged. A local encoding failure sends the original body. Single-submission
+requests, including regionally metered requests and controlled experiments, use
+the original body from the start. A bare HTTP 415 or an explicit rejection
+that permits identity starts a ten-minute plain-body cooldown for the most
+recently rejected endpoint per origin and coding on the current gateway instance.
+The upstream transport returns the original 415 response, including its headers
+and body, to normal service error handling without a resend. The cooldown applies
+only to later independent requests, which still pass normal admission, RPM,
+authorization and upload-phase checks. Each rejected send remains visible in
+per-account HTTP response statistics.
+The gateway logs `upstream.request_compression_rejected`.
+
+## CDN Proxy Setup
+
 For a CDN deployment, first firewall the origin so only current CDN egress
 CIDRs can connect. Then configure those exact ranges as Caddy trusted proxies
 and derive upstream headers from Caddy's parsed `{client_ip}`. For example:

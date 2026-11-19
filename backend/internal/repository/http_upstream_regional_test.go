@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"compress/gzip"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -52,6 +53,40 @@ func TestRegionalHTTPPreservesPayloadAndExplicitProxy(t *testing.T) {
 	}
 	require.EqualValues(t, 1, us.Load())
 	require.EqualValues(t, 1, explicit.Load())
+}
+
+func TestRegionalHTTPCompressesConfiguredUpstream(t *testing.T) {
+	const origin = "http://api.vendor.test"
+	payload := `{"input":"` + strings.Repeat("regional prompt ", 512) + `"}`
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Content-Encoding") != "gzip" || r.ContentLength >= int64(len(payload)) {
+			t.Error("regional egress did not receive the compressed request")
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		decoder, err := gzip.NewReader(r.Body)
+		if err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		defer func() { require.NoError(t, decoder.Close()) }()
+		got, err := io.ReadAll(decoder)
+		if err != nil || string(got) != payload {
+			t.Errorf("decoded regional request differs from the original: %v", err)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(proxy.Close)
+	cfg := regionalHTTPConfig(t, proxy.URL, "api.vendor.test")
+	cfg.Gateway.UpstreamRequestCompression = []config.UpstreamRequestCompressionRule{{Origin: origin, Encoding: "gzip"}}
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, origin+"/v1/responses", strings.NewReader(payload))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := NewHTTPUpstream(cfg).Do(req, "", 11, 2)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, http.StatusNoContent, resp.StatusCode)
 }
 
 func TestRegionalHTTPAccountScope(t *testing.T) {
