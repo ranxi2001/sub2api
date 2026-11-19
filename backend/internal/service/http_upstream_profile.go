@@ -62,6 +62,14 @@ func IsOpenAICodexHTTPRequest(ctx context.Context) bool {
 	return marked
 }
 
+// Keep single-submission and send-evidence paths on their original wire body.
+func UpstreamCompressionRequiresPlainBody(ctx context.Context) bool {
+	profile := HTTPUpstreamProfileFromContext(ctx)
+	return profile == HTTPUpstreamProfileExcelBPS || profile == HTTPUpstreamProfileOpenAIHarvest ||
+		isControlledExperiment(ctx) || regionalMeterAttemptFrom(ctx) != nil || OpenAIAgentRecoveryNoReplay(ctx) ||
+		IsOpenAICodexStateProbeRequest(ctx) || IsAstraSourceAcquisition(ctx)
+}
+
 // WithHTTPUpstreamResponseHeaderTimeout asks for a longer response-header wait
 // than the transport profile. It never shortens or enables a timeout.
 func WithHTTPUpstreamResponseHeaderTimeout(ctx context.Context, timeout time.Duration) context.Context {

@@ -9,7 +9,9 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/requestcapture"
@@ -77,6 +79,99 @@ func assertWireRequest(t *testing.T, r *http.Request, body []byte, err error, co
 		return false
 	}
 	return true
+}
+
+func TestHTTPUpstreamRequestCompressionTransparentFallback(t *testing.T) {
+	payload := `{"input":"` + strings.Repeat("repeat ", 1024) + `"}`
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if calls.Add(1) == 1 {
+			require.Equal(t, "zstd", req.Header.Get("Content-Encoding"))
+			w.Header().Set("Accept-Encoding", "identity")
+			w.WriteHeader(http.StatusUnsupportedMediaType)
+			return
+		}
+		raw, err := io.ReadAll(req.Body)
+		require.NoError(t, err)
+		require.Equal(t, payload, string(raw))
+		require.EqualValues(t, len(payload), req.ContentLength)
+		require.Empty(t, req.Header.Get("Content-Encoding"))
+		w.WriteHeader(http.StatusCreated)
+	}))
+	t.Cleanup(server.Close)
+	upstream := NewHTTPUpstream(&config.Config{Gateway: config.GatewayConfig{
+		UpstreamRequestCompression: []config.UpstreamRequestCompressionRule{{Origin: server.URL, Encoding: "zstd"}},
+	}})
+	for range 2 {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/v1/responses", strings.NewReader(payload))
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := upstream.Do(req, "", 1, 1)
+		require.NoError(t, err)
+		require.NoError(t, resp.Body.Close())
+		require.Equal(t, http.StatusCreated, resp.StatusCode)
+	}
+	require.EqualValues(t, 3, calls.Load())
+}
+
+func TestUpstreamRequestCompressionNegotiation(t *testing.T) {
+	for _, tc := range []struct {
+		values []string
+		want   bool
+	}{
+		{nil, false}, {[]string{""}, true}, {[]string{"identity"}, true},
+		{[]string{"gzip, zstd;q=0"}, true}, {[]string{"identity;q=0"}, false},
+		{[]string{"*", "identity"}, false}, {[]string{"*;q=0"}, false},
+		{[]string{"*;q=0", "identity;q=0.5"}, true}, {[]string{"zstd;q=1"}, false},
+		{[]string{"zstd;q=0.01"}, false}, {[]string{"gzip;q=bogus"}, false},
+		{[]string{"identity;q=0", "IDENTITY"}, false},
+	} {
+		require.Equal(t, tc.want, acceptsPlainInstead(tc.values, "zstd"), "%q", tc.values)
+	}
+}
+
+func TestUpstreamRequestCompressionCooldown(t *testing.T) {
+	const origin = "https://example.test"
+	payload := strings.Repeat("prompt ", 1024)
+	for _, tc := range []struct {
+		name           string
+		preferences    []string
+		secondEncoding string
+	}{
+		{"bare 415", nil, ""},
+		{"identity forbidden", []string{"identity;q=0"}, "gzip"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := httpUpstreamService{cfg: &config.Config{Gateway: config.GatewayConfig{
+				UpstreamRequestCompression: []config.UpstreamRequestCompressionRule{{Origin: origin, Encoding: "gzip"}},
+			}}}
+			var sent []string
+			send := func(path string) {
+				req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, origin+path, strings.NewReader(payload))
+				require.NoError(t, err)
+				req.Header.Set("Content-Type", "application/json")
+				tr := s.wrapUpstreamRequestCompression(compressionTestTransport(func(r *http.Request) (*http.Response, error) {
+					defer r.Body.Close()
+					sent = append(sent, r.Header.Get("Content-Encoding"))
+					response := &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}
+					if len(sent) == 1 {
+						response.StatusCode = http.StatusUnsupportedMediaType
+						response.Header = http.Header{"Accept-Encoding": tc.preferences}
+					}
+					return response, nil
+				}))
+				resp, err := tr.RoundTrip(req)
+				require.NoError(t, err)
+				require.NoError(t, resp.Body.Close())
+			}
+			send("/responses")
+			send("/responses")
+			send("/other")
+			s.compressionCooldowns.Store(origin+" gzip", compressionRejection{"/responses", time.Now().Add(-time.Second)})
+			send("/responses")
+			require.Equal(t, []string{"gzip", tc.secondEncoding, "gzip", "gzip"}, sent)
+		})
+	}
 }
 
 func TestHTTPUpstreamRequestCompressionReevaluatesRedirect(t *testing.T) {
@@ -178,6 +273,10 @@ func TestUpstreamRequestCompressionSkipsIneligibleBodies(t *testing.T) {
 		{name: "multipart", mutate: func(r *http.Request) { r.Header.Set("Content-Type", "multipart/form-data; boundary=test") }},
 		{name: "already encoded", mutate: func(r *http.Request) { r.Header["content-encoding"] = []string{"gzip"} }},
 		{name: "integrity protected", mutate: func(r *http.Request) { r.Header.Set("Content-Digest", "test") }},
+		{name: "signed authorization", mutate: func(r *http.Request) { r.Header.Set("Authorization", "AWS4-HMAC-SHA256 fixture") }},
+		{name: "send evidence", mutate: func(r *http.Request) {
+			*r = *r.WithContext(service.WithHTTPUpstreamProfile(r.Context(), service.HTTPUpstreamProfileExcelBPS))
+		}},
 		{name: "not replayable", mutate: func(r *http.Request) { r.GetBody = nil }},
 		{name: "local compression failure", mutate: func(r *http.Request) {
 			r.GetBody = func() (io.ReadCloser, error) { return nil, io.ErrUnexpectedEOF }
