@@ -6,6 +6,8 @@ import TrafficPanel from '@/components/usage/TrafficPanel.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import UsageTable from '@/components/admin/usage/UsageTable.vue'
+import ExportProgressDialog from '@/components/common/ExportProgressDialog.vue'
+import { EXPORT_PAGE_SIZE } from '@/utils/pagedExport'
 
 const {
   query,
@@ -449,7 +451,7 @@ describe('user UsageView', () => {
 
     expect(exportedBlob).not.toBeNull()
     expect(query).toHaveBeenCalledWith(expect.objectContaining({
-      page_size: 100,
+      page_size: EXPORT_PAGE_SIZE,
       sort_by: 'created_at',
       sort_order: 'desc',
       native_compaction_v2: true,
@@ -575,7 +577,12 @@ describe('user UsageView', () => {
   })
 
   it('keeps the initial filters, sort, and filename while exporting multiple pages', async () => {
-    const pageResponse = { items: [usageLog], total: 101, pages: 2 }
+    const pageResponse = { items: [usageLog], total: EXPORT_PAGE_SIZE + 1, pages: 2 }
+    const fullFirstPage = {
+      items: Array.from({ length: EXPORT_PAGE_SIZE }, (_, index) => ({ ...usageLog, id: index + 1 })),
+      total: EXPORT_PAGE_SIZE + 1,
+      pages: 2,
+    }
     query.mockResolvedValue(pageResponse)
     const wrapper = mountUsageView()
     await flushPromises()
@@ -603,7 +610,7 @@ describe('user UsageView', () => {
       await wrapper.findAll('button').find((button) => button.text() === 'Export CSV')!.trigger('click')
       const initialParams = { ...query.mock.calls[0][0] }
       expect(initialParams).toMatchObject({
-        page: 1, page_size: 100, start_date: '2026-03-01', end_date: '2026-03-08',
+        page: 1, page_size: EXPORT_PAGE_SIZE, start_date: '2026-03-01', end_date: '2026-03-08',
         sort_by: 'created_at', sort_order: 'desc',
       })
 
@@ -620,7 +627,7 @@ describe('user UsageView', () => {
         sort_by: 'actual_cost', sort_order: 'asc',
       }), expect.anything())
 
-      resolveFirstPage(pageResponse)
+      resolveFirstPage(fullFirstPage)
       await flushPromises()
 
       const exportCalls = query.mock.calls.filter((call) => call.length === 1)
@@ -631,6 +638,103 @@ describe('user UsageView', () => {
     } finally {
       window.URL.createObjectURL = originalCreateObjectURL
       window.URL.revokeObjectURL = originalRevokeObjectURL
+      clickSpy.mockRestore()
+      wrapper.unmount()
+    }
+  })
+
+  it('waits out a panel rate limit and finishes the export instead of failing', async () => {
+    const wrapper = mountUsageView()
+    await flushPromises()
+
+    const fullFirstPage = {
+      items: Array.from({ length: EXPORT_PAGE_SIZE }, (_, index) => ({ ...usageLog, id: index + 1 })),
+      total: EXPORT_PAGE_SIZE + 1,
+      pages: 2,
+    }
+    let secondPageAttempts = 0
+    query.mockClear()
+    query.mockImplementation((params, options) => {
+      if (options) return Promise.resolve({ items: [usageLog], total: EXPORT_PAGE_SIZE + 1, pages: 2 })
+      if (params.page === 1) return Promise.resolve(fullFirstPage)
+      secondPageAttempts++
+      return secondPageAttempts === 1
+        ? Promise.reject({ status: 429, code: 'RATE_LIMITED', retry_after_seconds: 2 })
+        : Promise.resolve({ items: [{ ...usageLog, id: EXPORT_PAGE_SIZE + 1 }], total: EXPORT_PAGE_SIZE + 1, pages: 2 })
+    })
+    let csvContent = ''
+    const OriginalBlob = globalThis.Blob
+    vi.stubGlobal('Blob', vi.fn((parts: BlobPart[], options?: BlobPropertyBag) => {
+      csvContent = parts.map((part) => String(part)).join('')
+      return new OriginalBlob(parts, options)
+    }))
+    const originalCreateObjectURL = window.URL.createObjectURL
+    const originalRevokeObjectURL = window.URL.revokeObjectURL
+    window.URL.createObjectURL = vi.fn(() => 'blob:usage-export') as typeof window.URL.createObjectURL
+    window.URL.revokeObjectURL = vi.fn(() => {}) as typeof window.URL.revokeObjectURL
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    vi.useFakeTimers()
+
+    try {
+      const exporting = (wrapper.vm as any).exportToCSV()
+      await vi.advanceTimersByTimeAsync(0)
+      expect((wrapper.vm as any).exportProgress).toMatchObject({
+        show: true,
+        current: EXPORT_PAGE_SIZE,
+        total: EXPORT_PAGE_SIZE + 1,
+        notice: 'usage.exportRateLimitedWait',
+      })
+      expect(wrapper.findComponent(ExportProgressDialog).props('notice')).toBe('usage.exportRateLimitedWait')
+      expect(clickSpy).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(2_000)
+      await exporting
+
+      const exportPages = query.mock.calls.filter((call) => call.length === 1).map(([params]) => params.page)
+      expect(exportPages).toEqual([1, 2, 2])
+      expect(csvContent.split('\n')).toHaveLength(EXPORT_PAGE_SIZE + 2)
+      expect(clickSpy).toHaveBeenCalledTimes(1)
+      expect(showSuccess).toHaveBeenCalledWith('Export success')
+      expect(showError).not.toHaveBeenCalled()
+      expect((wrapper.vm as any).exportProgress.show).toBe(false)
+    } finally {
+      vi.useRealTimers()
+      vi.unstubAllGlobals()
+      window.URL.createObjectURL = originalCreateObjectURL
+      window.URL.revokeObjectURL = originalRevokeObjectURL
+      clickSpy.mockRestore()
+      wrapper.unmount()
+    }
+  })
+
+  it('cancels an export from the progress dialog without downloading or reporting a failure', async () => {
+    const wrapper = mountUsageView()
+    await flushPromises()
+
+    query.mockClear()
+    query.mockImplementation((_params, options) => options
+      ? Promise.resolve({ items: [usageLog], total: 1, pages: 1 })
+      : Promise.reject({ status: 429, code: 'RATE_LIMITED', retry_after_seconds: 30 }))
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    vi.useFakeTimers()
+
+    try {
+      const exporting = (wrapper.vm as any).exportToCSV()
+      await vi.advanceTimersByTimeAsync(0)
+      expect((wrapper.vm as any).exportProgress.notice).toBe('usage.exportRateLimitedWait')
+
+      wrapper.findComponent(ExportProgressDialog).vm.$emit('cancel')
+      await vi.advanceTimersByTimeAsync(0)
+      await exporting
+
+      expect(query.mock.calls.filter((call) => call.length === 1)).toHaveLength(1)
+      expect(clickSpy).not.toHaveBeenCalled()
+      expect(showError).not.toHaveBeenCalled()
+      expect(showInfo).toHaveBeenCalledWith('usage.exportCancelled')
+      expect((wrapper.vm as any).exporting).toBe(false)
+      expect((wrapper.vm as any).exportProgress.show).toBe(false)
+    } finally {
+      vi.useRealTimers()
       clickSpy.mockRestore()
       wrapper.unmount()
     }

@@ -27,6 +27,22 @@ export const apiClient: AxiosInstance = axios.create({
   }
 })
 
+/**
+ * Reads a delay-seconds Retry-After header (the panel rate limiter sends one with
+ * every 429). HTTP-date values and malformed input yield undefined.
+ */
+export const parseRetryAfterSeconds = (headers: unknown): number | undefined => {
+  if (!headers || typeof headers !== 'object') return undefined
+  const getter = (headers as { get?: unknown }).get
+  const raw = typeof getter === 'function'
+    ? getter.call(headers, 'retry-after')
+    : (headers as Record<string, unknown>)['retry-after'] ?? (headers as Record<string, unknown>)['Retry-After']
+  const value = Array.isArray(raw) ? raw[0] : raw
+  if (typeof value === 'number') return Number.isFinite(value) && value >= 0 ? value : undefined
+  if (typeof value !== 'string' || !/^\s*\d+\s*$/.test(value)) return undefined
+  return Number(value.trim())
+}
+
 // ==================== Request Interceptor ====================
 
 // Get user's timezone
@@ -266,6 +282,7 @@ apiClient.interceptors.response.use(
         error: apiData.error,
         message: apiData.message || apiData.detail || error.message,
         metadata: apiData.metadata,
+        retry_after_seconds: parseRetryAfterSeconds(error.response.headers),
       })
     }
 

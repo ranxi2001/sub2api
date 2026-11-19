@@ -22,6 +22,9 @@
       <div v-if="estimatedTime" class="text-xs text-gray-500 dark:text-gray-400" aria-live="polite" aria-atomic="true">
         {{ t('usage.estimatedTime', { time: estimatedTime }) }}
       </div>
+      <div v-if="notice" data-testid="export-progress-notice" class="text-xs text-amber-600 dark:text-amber-400" aria-live="polite" aria-atomic="true">
+        {{ notice }}
+      </div>
     </div>
 
     <template #footer>
@@ -47,6 +50,8 @@ interface Props {
   current: number
   total: number
   estimatedTime: string
+  /** Optional status line, e.g. while an export waits out a rate limit. */
+  notice?: string
 }
 
 interface Emits {

@@ -423,6 +423,7 @@ export default {
     estimatedTime: 'Estimated time remaining: {time}',
     cancelExport: 'Cancel Export',
     exportCancelled: 'Export cancelled',
+    exportRateLimitedWait: 'Query limit reached. Resuming automatically in {seconds}s...',
     exporting: 'Exporting...',
     preparingExport: 'Preparing export...',
     model: 'Model',

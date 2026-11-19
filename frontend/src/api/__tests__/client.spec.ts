@@ -577,6 +577,33 @@ describe('API Client', () => {
   // --- 网络错误 ---
 
   describe('网络错误', () => {
+    it('429 结构化错误携带 Retry-After 秒数，缺失或非秒数时为 undefined', async () => {
+      const rateLimited = (headers: Record<string, string>) => vi.fn().mockRejectedValue({
+        response: {
+          status: 429,
+          headers,
+          data: { code: 'RATE_LIMITED', message: 'Too many requests, please slow down and try again later' },
+        },
+        config: { url: '/usage' },
+        code: 'ERR_BAD_REQUEST',
+      })
+
+      apiClient.defaults.adapter = rateLimited({ 'retry-after': '37' })
+      await expect(apiClient.get('/usage')).rejects.toEqual(
+        expect.objectContaining({ status: 429, code: 'RATE_LIMITED', retry_after_seconds: 37 })
+      )
+
+      apiClient.defaults.adapter = rateLimited({})
+      await expect(apiClient.get('/usage')).rejects.toEqual(
+        expect.objectContaining({ status: 429, retry_after_seconds: undefined })
+      )
+
+      apiClient.defaults.adapter = rateLimited({ 'retry-after': 'Wed, 21 Oct 2026 07:28:00 GMT' })
+      await expect(apiClient.get('/usage')).rejects.toEqual(
+        expect.objectContaining({ status: 429, retry_after_seconds: undefined })
+      )
+    })
+
     it.each(['ERR_NETWORK', 'ECONNABORTED', 'ETIMEDOUT', undefined])('网络错误保留错误码 %s', async (code) => {
       const adapter = vi.fn().mockRejectedValue({
         code,
