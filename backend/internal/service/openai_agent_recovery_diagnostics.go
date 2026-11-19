@@ -107,6 +107,7 @@ type openAIRecoveryDiagnostics struct {
 	owners    openAIRecoveryOwnerCounts
 	tools     openAIRecoveryToolCounts
 	shadow    openAIRecoveryShadowState
+	controls  *OpsRecoveryControls
 }
 
 func openAIRecoveryDiagnosticError(reason, detail string, r *openAIAgentRecoveryRequest) error {
@@ -193,4 +194,14 @@ func LogOpenAIAgentRecoveryRefusal(ctx context.Context, recovery *OpenAIAgentRec
 		zap.Int("tool_unpaired", d.tools.unpaired), zap.Int("tool_duplicate", d.tools.duplicate), zap.Int("tool_incomplete", d.tools.incomplete), zap.Int("tool_invalid", d.tools.invalid),
 		zap.String("shadow_lookup", safeOpenAIRecoveryShadowState(d.shadow.lookup)), zap.String("shadow_epoch", safeOpenAIRecoveryShadowState(d.shadow.epoch)),
 	)
+}
+
+// RecoveryControlsDiagnostic returns only fixed comparison categories and
+// presence flags. Field contents and fingerprints are never exposed.
+func (e *OpenAIAgentRecoveryError) RecoveryControlsDiagnostic() *OpsRecoveryControls {
+	if e == nil || e.diagnostic == nil || e.diagnostic.controls == nil {
+		return nil
+	}
+	copy := *e.diagnostic.controls
+	return &copy
 }

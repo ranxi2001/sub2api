@@ -291,6 +291,7 @@ func (s *OpenAIGatewayService) RebuildOpenAIWSUnsentTurn(ctx context.Context, c 
 		next = WithOpenAIEncryptedReasoningAffinity(next, clean)
 		r.omittedHistory, r.omittedSource = true, nil
 		r.inputDigest, r.replayControlsDigest = openAIAgentRecoveryInputDigest(clean), openAI409ControlsDigest(clean)
+		r.controlFingerprints = openAI409FingerprintControls(clean)
 		return next, clean, true, nil
 	}
 	next, clean, changed, err := s.TryRebuildOpenAI409History(next, c, body, session, model, openAIAgentRecoveryError("owner_unavailable"))

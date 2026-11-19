@@ -327,6 +327,7 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 			}
 			snapshot := *r.readable
 			snapshot.apiInputDigest, snapshot.apiControlsDigest = openAIAgentRecoveryInputDigest(projected), openAI409ControlsDigest(projected)
+			snapshot.apiFingerprints = openAI409FingerprintControls(projected)
 			ctx = context.WithValue(ctx, openAIAgentRecoveryContextKey{}, &snapshot)
 		}
 	}
@@ -1329,6 +1330,7 @@ func (s *OpenAIGatewayService) restartOpenAIWSClientReadableHistory(ctx context.
 	r.omittedSource = nil
 	r.inputDigest = openAIAgentRecoveryInputDigest(clean)
 	r.replayControlsDigest = openAI409ControlsDigest(clean)
+	r.controlFingerprints = openAI409FingerprintControls(clean)
 	return next, clean, true
 }
 

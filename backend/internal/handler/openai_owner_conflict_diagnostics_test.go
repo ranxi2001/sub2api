@@ -23,7 +23,8 @@ func TestOwnerConflictPersistenceKeepsTurnAndSafeSubreason(t *testing.T) {
 			service.SetOpenAIClientTransport(c, service.OpenAIClientTransportWS)
 			service.BeginOpsStreamTurn(c, 53)
 			written := false
-			failure := &service.OpsRecoveryFailure{Protocol: "websocket", Phase: "before_dispatch", RequestWritten: &written}
+			failure := &service.OpsRecoveryFailure{Protocol: "websocket", Phase: "before_dispatch", RequestWritten: &written,
+				Controls: &service.OpsRecoveryControls{Observation: "complete", Snapshot: "oauth_replay", Tools: "changed", ToolChoice: "match", ParallelToolCalls: "match", Instructions: "match", DigestChanged: true}}
 			// Baseline RED compiles this independent fixture but does not run it;
 			// old production ignores the new diagnostic field during decoding.
 			encoded, err := json.Marshal(map[string]string{"Subreason": tc.detail})
@@ -41,6 +42,10 @@ func TestOwnerConflictPersistenceKeepsTurnAndSafeSubreason(t *testing.T) {
 			require.EqualValues(t, 53, gjson.Get(body, "error.turn").Int())
 			require.EqualValues(t, 101, gjson.Get(body, "error.wire_status").Int())
 			require.Equal(t, gjson.False, gjson.Get(body, "error.request_written").Type)
+			if tc.detail == "tool_unpaired" {
+				require.Equal(t, "changed", gjson.Get(body, "error.controls.tools").String())
+				require.Equal(t, "oauth_replay", gjson.Get(body, "error.controls.snapshot").String())
+			}
 			require.NotContains(t, body, "credential-and-body-canary")
 		})
 	}
