@@ -428,6 +428,7 @@ export default {
     estimatedTime: '预计剩余时间：{time}',
     cancelExport: '取消导出',
     exportCancelled: '导出已取消',
+    exportRateLimitedWait: '查询太频繁，{seconds} 秒后自动继续...',
     exporting: '导出中...',
     preparingExport: '正在准备导出...',
     model: '模型',
