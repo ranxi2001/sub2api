@@ -14,6 +14,9 @@ backend/internal/handler/openai_codex_page_context_test.go
 backend/internal/handler/openai_gateway_messages_pre_content_failover_test.go
 backend/internal/handler/openai_native_anthropic_endpoint_test.go
 backend/internal/handler/openai_page_context_test.go
+backend/internal/handler/openai_videos_test.go
+backend/internal/server/routes/openai_videos_test.go
+backend/internal/service/openai_videos_test.go
 backend/internal/payment/provider/alipay_test.go
 backend/internal/pkg/antigravity/carbon_thinking_test.go
 backend/internal/pkg/antigravity/claude_types_test.go
