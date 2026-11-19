@@ -63,6 +63,8 @@ jobs:
             test "$(git hash-object "$target")" = "$expected"
             echo "$target compatibility=$source blob=$expected" >> "$RUNNER_TEMP/dispatch-compatibility.txt"
           done
+          # These candidate-only diagnostic tests require APIs absent from the pinned RED source.
+          git show "$baseline:backend/internal/service/openai_409_omit_history_test.go" > backend/internal/service/openai_409_omit_history_test.go
           bash "$GITHUB_WORKSPACE/.github/scripts/prepare-ws-owner-red-fixtures.sh" "$baseline" . HEAD | tee "$RUNNER_TEMP/dispatch-ws-owner-red-blobs.txt"
       - name: Same network and tool-loop regressions
         env:
