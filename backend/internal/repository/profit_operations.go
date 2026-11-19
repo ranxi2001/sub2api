@@ -208,7 +208,25 @@ const profitOperationsBase = `WITH ` + profitOperationsCohort + `, event_rows AS
  u.total_cost AS cost_base
  FROM usage_logs u LEFT JOIN accounts_config c ON c.id=u.account_id
  LEFT JOIN provider_profit_charges e ON e.usage_log_id=u.id AND e.account_id=u.account_id AND e.local_created_at=u.created_at
- LEFT JOIN LATERAL provider_profit_account_at(u.account_id,u.created_at) h ON true
+ -- Resolve only channel and assignment here. Joining the timelines directly
+ -- allows PostgreSQL to hash them once for the report window. A manual unlink
+ -- suppresses imported history but can still fall back to the current URL below.
+ -- Preserve the ownership lookup's multiplicity: manual rows retain all source
+ -- and channel matches; imported rows retain only matching source/channel pairs.
+ LEFT JOIN provider_profit_manual_history manual ON manual.account_id=u.account_id
+  AND manual.effective_from<=u.created_at AND (manual.effective_until IS NULL OR u.created_at<manual.effective_until)
+ LEFT JOIN provider_profit_account_source_history manual_src ON manual.account_id IS NOT NULL AND manual_src.account_id=u.account_id
+  AND manual_src.effective_from<=u.created_at AND (manual_src.effective_until IS NULL OR u.created_at<manual_src.effective_until)
+ LEFT JOIN provider_profit_channel_history manual_owner ON manual.account_id IS NOT NULL AND manual_owner.channel_id=manual.channel_id
+  AND manual_owner.effective_from<=u.created_at AND (manual_owner.effective_until IS NULL OR u.created_at<manual_owner.effective_until)
+ LEFT JOIN (provider_profit_account_source_history imported_src
+  JOIN provider_profit_channel_history imported ON imported.provider_id=imported_src.provider_id AND imported.identity_from=imported_src.identity_from)
+  ON manual.account_id IS NULL AND imported_src.account_id=u.account_id
+  AND imported_src.effective_from<=u.created_at AND (imported_src.effective_until IS NULL OR u.created_at<imported_src.effective_until)
+  AND imported.effective_from<=u.created_at AND (imported.effective_until IS NULL OR u.created_at<imported.effective_until)
+ CROSS JOIN LATERAL (SELECT COALESCE(manual.channel_id,imported.channel_id) AS channel_id,
+  CASE WHEN manual.channel_id IS NOT NULL THEN 'explicit' WHEN manual.account_id IS NOT NULL THEN 'manual_unlinked'
+       WHEN imported.channel_id IS NOT NULL THEN 'provider_import' END AS assignment) h
  LEFT JOIN provider_profit_manual_history legacy ON legacy.account_id=u.account_id AND legacy.legacy_at_migration AND u.created_at<legacy.effective_from
  LEFT JOIN provider_profit_account_source_history src ON c.url_channel_id IS NOT NULL AND src.account_id=u.account_id AND src.effective_from<=u.created_at AND (src.effective_until IS NULL OR src.effective_until>u.created_at)
  CROSS JOIN LATERAL (SELECT COALESCE(e.channel_id,h.channel_id,legacy.channel_id,

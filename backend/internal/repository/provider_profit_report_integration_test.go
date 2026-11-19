@@ -442,6 +442,161 @@ func TestProviderProfitUniqueSiteClaimsAfterUnlinkAndOAuthUsesBinding(t *testing
 	require.Contains(t, rows, site+"/v1", "two providers sharing a site key must not auto-merge the unlinked URL")
 }
 
+func TestProviderProfitReportHistoricalOwnerAtManualBoundaries(t *testing.T) {
+	f := newProfitChargeFixture(t)
+	override := f.id(`INSERT INTO upstream_channels(name,code) VALUES('Manual override','manual-boundary') RETURNING id`)
+	start := f.now()
+	end := start.Add(time.Second)
+	f.exec(`INSERT INTO provider_profit_manual_history(account_id,channel_id,revision,effective_from,effective_until)
+		VALUES($1,$2,1,$3,$4)`, f.account, override, start, end)
+	before := start.Add(-time.Microsecond)
+	f.usageWithIncome(f.account, nil, before, 1)
+	f.usageWithIncome(f.account, nil, start, 2)
+	f.usageWithIncome(f.account, nil, end, 4)
+
+	w := service.ProviderProfitWindow{From: before, Until: end.Add(time.Microsecond)}
+	imported := f.report(f.channel, w)
+	require.Equal(t, "2", string(imported["requests"]))
+	require.JSONEq(t, "5", string(imported["request_income"]))
+	manual := f.report(override, w)
+	require.Equal(t, "1", string(manual["requests"]))
+	require.JSONEq(t, "2", string(manual["request_income"]))
+}
+
+func TestProviderProfitReportPreservesHistoricalJoinMultiplicity(t *testing.T) {
+	// These are schema-permitted closed histories, not a reproduction through
+	// normal APIs. In particular, two identityless sources must not duplicate an
+	// unowned tenant-URL request. Other cases retain the old query's multiplicity.
+	for _, tc := range []struct {
+		name          string
+		siteURL       bool
+		sources       string
+		manual        string
+		extraChannel  bool
+		ownershipRows int64
+		requests      int64
+		assignment    string
+	}{
+		{"identityless_tenant", false, "identityless", "", false, 0, 1, "unbound_url"},
+		{"identityless_site", true, "identityless", "", false, 0, 2, "provider_url"},
+		{"mixed_tenant", false, "mixed", "", false, 1, 1, "provider_import"},
+		{"verified_site", true, "verified", "", false, 2, 4, "provider_import"},
+		{"verified_channel_overlap", false, "verified", "", true, 4, 4, "provider_import"},
+		{"explicit_tenant", false, "identityless", "explicit", false, 2, 2, "explicit"},
+		{"explicit_site_channel_overlap", true, "identityless", "explicit", true, 4, 8, "explicit"},
+		{"unlink_tenant", false, "identityless", "unlink", false, 2, 2, "manual_unlinked"},
+		{"unlink_site", true, "identityless", "unlink", false, 2, 4, "provider_url"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newProfitChargeFixture(t)
+			base := profitChargeBase + "/tenant/v1"
+			if tc.siteURL {
+				base = profitChargeBase + "/v1"
+			}
+			account := f.id(`INSERT INTO accounts(name,type,platform,credentials,extra)
+				VALUES('historical join fixture','apikey','openai',jsonb_build_object('base_url',$1::text,'api_key','fixture-only'),'{"cost_multiplier":0.5}') RETURNING id`, base)
+			until := f.now()
+			at := until.Add(-time.Microsecond)
+			for i := range 2 {
+				var identity any
+				if tc.sources == "verified" || (tc.sources == "mixed" && i == 0) {
+					identity = f.epoch
+				} else if tc.sources == "mixed" {
+					identity = f.epoch.Add(-time.Hour) // A non-NULL, unmatched epoch is also filtered.
+				}
+				f.exec(`INSERT INTO provider_profit_account_source_history(account_id,provider_id,key_id,origin_hash,identity_from,effective_from,effective_until)
+					VALUES($1,$2,'11',provider_profit_origin($3),$4,$5,$6)`, account, f.pid, profitChargeBase, identity, at, until)
+			}
+			if tc.manual != "" {
+				var channel any
+				if tc.manual == "explicit" {
+					channel = f.channel
+				}
+				f.exec(`INSERT INTO provider_profit_manual_history(account_id,channel_id,revision,effective_from,effective_until)
+					VALUES($1,$2,1,$3,$4)`, account, channel, at, until)
+			}
+			if tc.extraChannel {
+				f.exec(`INSERT INTO provider_profit_channel_history(provider_id,channel_id,revision,identity_from,effective_from,effective_until)
+					VALUES($1,$2,1000,$3,$4,$5)`, f.pid, f.channel, f.epoch, at, until)
+			}
+			f.usageWithIncome(account, nil, at, 7)
+			require.Equal(t, tc.ownershipRows, f.id(`SELECT count(*) FROM provider_profit_account_at($1,$2)`, account, at))
+			// The unchanged ownership function plus its independent URL-source
+			// join is the pre-PR reference. Explicit counts keep the oracle honest.
+			require.Equal(t, tc.requests, f.id(`SELECT count(*) FROM (SELECT 1) anchor
+				LEFT JOIN LATERAL provider_profit_account_at($1,$2) own ON true
+				LEFT JOIN provider_profit_account_source_history src ON $3::boolean AND src.account_id=$1
+				 AND src.effective_from<=$2 AND (src.effective_until IS NULL OR $2<src.effective_until)`, account, at, tc.siteURL))
+			snap, err := f.r.ReadProfitOperations(context.Background(), service.UpstreamOperationsFilter{
+				From: at, Until: until, Model: "fixture-model", ModelScope: "public", Dimension: "upstream", Sort: "name", Direction: "asc", Page: 1, PageSize: 20,
+			})
+			require.NoError(t, err)
+			var report struct {
+				Summary map[string]json.RawMessage
+				Rows    []map[string]json.RawMessage
+			}
+			require.NoError(t, json.Unmarshal(snap.Usage, &report))
+			require.Len(t, report.Rows, 1)
+			row := report.Rows[0]
+			key := base
+			supplierRequests := int64(0)
+			cost, profit := fmt.Sprint(6*tc.requests), fmt.Sprint(tc.requests)
+			if tc.assignment == "provider_import" || tc.assignment == "provider_url" || tc.assignment == "explicit" {
+				key = fmt.Sprintf("channel:%d", f.channel)
+				supplierRequests = tc.requests
+				cost, profit = "null", "null"
+			}
+			require.JSONEq(t, fmt.Sprintf("%q", key), string(row["key"]))
+			require.JSONEq(t, fmt.Sprintf("%q", tc.assignment), string(row["assignment"]))
+			for field, want := range map[string]string{
+				"requests": fmt.Sprint(tc.requests), "request_income": fmt.Sprint(7 * tc.requests),
+				"standard_charge": fmt.Sprint(12 * tc.requests), "estimated_cost": fmt.Sprint(6 * tc.requests),
+				"supplier_requests": fmt.Sprint(supplierRequests), "upstream_cost": cost, "gross_profit": profit,
+			} {
+				require.JSONEq(t, want, string(report.Summary[field]), field)
+				require.JSONEq(t, want, string(row[field]), field)
+			}
+		})
+	}
+}
+
+func TestProviderProfitReportSourceHistoryHalfOpenBoundaries(t *testing.T) {
+	f := newProfitChargeFixture(t)
+	const site = "https://source-boundary.invalid"
+	pid := f.id(`INSERT INTO mature_providers(name,site_type,base_url) VALUES('Source boundary','sub2api',$1) RETURNING id`, site)
+	channel := f.id(`SELECT channel_id FROM provider_profit_links WHERE provider_id=$1`, pid)
+	// Exercise the normal source trigger: a new provenance claim closes the old
+	// interval and opens the new one at the same instant.
+	f.exec(`UPDATE accounts SET credentials=jsonb_set(credentials,'{base_url}',to_jsonb($2::text)),
+		extra=jsonb_set(extra,'{provider_binding}',jsonb_build_object('provider_id',$3::bigint,'key_id','22','provider_revision',1)) WHERE id=$1`, f.account, site, pid)
+	var start, end time.Time
+	require.NoError(t, f.db.QueryRow(`SELECT effective_from FROM provider_profit_account_source_history WHERE account_id=$1 AND effective_until IS NULL`, f.account).Scan(&start))
+	// Editing the destination under an unchanged claim closes the source without
+	// reopening it. The tenant URL cannot take the current-site fallback.
+	f.exec(`UPDATE accounts SET credentials=jsonb_set(credentials,'{base_url}',to_jsonb($2::text)) WHERE id=$1`, f.account, site+"/tenant/v1")
+	require.NoError(t, f.db.QueryRow(`SELECT effective_until FROM provider_profit_account_source_history WHERE account_id=$1 AND effective_from=$2`, f.account, start).Scan(&end))
+	require.True(t, end.After(start))
+	require.Zero(t, f.id(`SELECT count(*) FROM provider_profit_account_source_history a
+		JOIN provider_profit_account_source_history b ON a.account_id=b.account_id AND a.effective_from<b.effective_from
+		 AND (a.effective_until IS NULL OR b.effective_from<a.effective_until) WHERE a.account_id=$1`, f.account))
+	before := start.Add(-time.Microsecond)
+	f.usageWithIncome(f.account, nil, before, 1)
+	f.usageWithIncome(f.account, nil, start, 2)
+	f.usageWithIncome(f.account, nil, end.Add(-time.Microsecond), 4)
+	f.usageWithIncome(f.account, nil, end, 8)
+	w := service.ProviderProfitWindow{From: before, Until: end.Add(time.Microsecond)}
+	old := f.report(f.channel, w)
+	require.JSONEq(t, "1", string(old["requests"]))
+	require.JSONEq(t, "1", string(old["request_income"]))
+	current := f.report(channel, w)
+	require.JSONEq(t, "2", string(current["requests"]))
+	require.JSONEq(t, "6", string(current["request_income"]))
+	require.Zero(t, f.id(`SELECT count(*) FROM provider_profit_account_at($1,$2)`, f.account, end))
+	unowned := f.report(0, service.ProviderProfitWindow{From: end, Until: end.Add(time.Microsecond)})
+	require.JSONEq(t, "1", string(unowned["requests"]))
+	require.JSONEq(t, "8", string(unowned["request_income"]))
+}
+
 func TestProviderProfitLegacyIncomeUnchangedByFirstLink(t *testing.T) {
 	f := newProfitChargeFixture(t)
 	channel := f.id(`INSERT INTO upstream_channels(name,code) VALUES('Legacy channel','legacy-fixture') RETURNING id`)
