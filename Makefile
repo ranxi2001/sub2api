@@ -122,6 +122,7 @@ FRONTEND_CRITICAL_VITEST := \
 	src/composables/__tests__/useModelWhitelist.spec.ts \
 	src/components/account/__tests__/ModelWhitelistSelector.spec.ts \
 	src/components/account/__tests__/UpstreamBillingRateCell.spec.ts \
+	src/components/account/__tests__/NewAPIUpstreamConfigDialog.spec.ts \
 	src/components/account/__tests__/OpenAIReferralCell.spec.ts \
 	src/components/account/__tests__/OpenAIReferralCell.transport.spec.ts \
 	src/components/account/__tests__/OpenAIQuotaResetCell.spark_shadow.spec.ts \

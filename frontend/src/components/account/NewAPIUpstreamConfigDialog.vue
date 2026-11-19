@@ -48,7 +48,7 @@
           </fieldset>
         </form>
         <div v-if="result" class="space-y-3 rounded-lg bg-gray-50 p-4 dark:bg-dark-800" aria-live="polite">
-          <p class="text-sm font-medium text-gray-800 dark:text-gray-100" data-testid="new-api-wallet">{{ t('admin.accounts.upstreamBilling.newAPI.wallet', { amount: formatWallet(result.wallet.amount) }) }}</p>
+          <p class="text-sm font-medium text-gray-800 dark:text-gray-100" data-testid="new-api-wallet">{{ t('admin.accounts.upstreamBilling.newAPI.wallet', { amount: formatWallet(result.wallet.amount, result.wallet.unit) }) }}</p>
           <p class="text-xs text-gray-500">{{ t('admin.accounts.upstreamBilling.newAPI.groupRatioHint') }}</p>
           <div v-for="row in result.accounts" :key="row.account_id" class="space-y-2 border-t border-gray-200 pt-3 text-sm dark:border-dark-600" :data-testid="`new-api-result-${row.account_id}`">
             <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -239,7 +239,10 @@ const convertedCost = (row: NewAPIUpstreamPreview['accounts'][number]): string |
   return Number.isFinite(cost) && cost <= 1000000 ? Number(cost.toFixed(6)).toString() : null
 }
 const isFixedRate = (value?: number) => typeof value === 'number' && Number.isFinite(value) && value >= 0
-const formatWallet = (amount: number) => Number.isFinite(amount) ? `$${amount.toFixed(2)} USD` : '-'
+const formatWallet = (amount: number, unit = 'USD') => {
+  if (!Number.isFinite(amount)) return '-'
+  return unit === 'USD' ? `$${amount.toFixed(2)} USD` : `${amount.toFixed(2)} ${unit}`
+}
 const rowError = (value: string) => {
   switch (value) {
     case 'ambiguous_token':

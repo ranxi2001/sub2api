@@ -246,6 +246,7 @@ func (s *UpstreamBillingProbeService) verifyNewAPIConfig(ctx context.Context, id
 			return nil, nil, nil, e
 		}
 		out.Wallet.Amount = data.wallet
+		out.Wallet.Unit = data.walletUnit
 		applyUSDRate := NewAPIApplyUSDRate(a)
 		if value, ok := req.ApplyUSDRate[strconv.FormatInt(accountID, 10)]; ok {
 			applyUSDRate = value

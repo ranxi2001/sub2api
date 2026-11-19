@@ -54,6 +54,16 @@ beforeEach(() => {
 afterEach(() => { wrappers.forEach(wrapper => wrapper.unmount()); wrappers = [] })
 
 describe('New API shared authorization dialog', () => {
+  it.each([['CNY', 90.082, '90.08 CNY'], ['EUR', 11.106, '11.11 EUR'], ['USD', 12.34, '$12.34 USD']])(
+    'renders the preview wallet in its declared %s unit', async (unit, amount, expected) => {
+      api.preview.mockResolvedValue({ ...preview, wallet: { unit, amount } })
+      const wrapper = await open()
+      await wrapper.get('[data-testid="new-api-preview"]').trigger('click')
+      await flushPromises()
+      expect(wrapper.get('[data-testid="new-api-wallet"]').text()).toContain(expected)
+    }
+  )
+
   it('loads full same-site candidates without reading a secret or selecting another user', async () => {
     const wrapper = await open()
     expect(wrapper.text()).toContain(config.site_url)
