@@ -11,7 +11,7 @@
         :platform="platform"
         :subscription-type="subscriptionType"
         :show-rate="false"
-        class="groupOptionItemBadge"
+        class="groupOptionItemBadge max-w-full"
       />
       <!-- Row 2: description with top spacing -->
       <span
