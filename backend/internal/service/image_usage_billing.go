@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"math"
@@ -88,4 +89,12 @@ func resolveImageCountForBillingMode(c *gin.Context, model string, reported, req
 		}
 	}
 	return resolveBillableImageCount(reported, requested, imageCountBillingEnabled(key))
+}
+
+type imageBillingReceiptKey struct{}
+
+// WithImageBillingReceipt requests a receipt from synchronous durable recording.
+// It is an observation sink only and cannot override pricing or an actual debit.
+func WithImageBillingReceipt(ctx context.Context, receipt *ImageBillingReceipt) context.Context {
+	return context.WithValue(ctx, imageBillingReceiptKey{}, receipt)
 }

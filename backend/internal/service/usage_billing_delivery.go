@@ -119,6 +119,20 @@ func applyDurableUsageBilling(ctx context.Context, repo DurableUsageBillingRepos
 		go notifyBalanceLow(p, deps, &recovered.Result)
 		go notifyAccountQuota(p, deps, &recovered.Result)
 	}
+	if recovered != nil && recovered.Result.Applied && !p.SimpleModeKeyRateLimitOnly {
+		if receipt, _ := ctx.Value(imageBillingReceiptKey{}).(*ImageBillingReceipt); receipt != nil {
+			canonical := recovered.Event.Usage
+			mode := ""
+			if canonical.BillingMode != nil {
+				mode = *canonical.BillingMode
+			}
+			*receipt = ImageBillingReceipt{Settled: true, ActualCost: canonical.ActualCost, BillingMode: mode, ImageCount: canonical.ImageCount}
+			if d := canonical.CustomerCostDetails; d != nil {
+				receipt.MinimumCharge = d.ImageMinimumCharge
+				receipt.MinimumChargeAdjustment = d.ImageMinimumChargeAdjustment
+			}
+		}
+	}
 	return recovered != nil && recovered.Result.Applied, nil
 }
 

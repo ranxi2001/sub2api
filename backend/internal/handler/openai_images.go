@@ -496,9 +496,8 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		if billingResponse != nil {
 			stopJSONKeepalive()
 			receipt := &service.ImageBillingReceipt{}
-			usageInput.ImageReceipt = receipt
 			ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), 60*time.Second)
-			billingErr := h.gatewayService.RecordUsage(ctx, usageInput)
+			billingErr := h.gatewayService.RecordUsage(service.WithImageBillingReceipt(ctx, receipt), usageInput)
 			cancel()
 			if billingErr != nil || !receipt.Settled {
 				billingResponse.errorResponse("image_billing_unavailable", "Image settlement could not be confirmed; do not automatically retry")

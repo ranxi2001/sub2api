@@ -21,9 +21,6 @@ import (
 
 // OpenAIRecordUsageInput input for recording usage
 type OpenAIRecordUsageInput struct {
-	// Optional, synchronous receipt. Never populated by an estimate or failed debit.
-	ImageReceipt *ImageBillingReceipt
-
 	Result             *OpenAIForwardResult
 	APIKey             *APIKey
 	User               *User
@@ -584,7 +581,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		quotaPlatform = PlatformFromAPIKey(apiKey)
 	}
 
-	applied, billingErr := applyUsageBilling(ctx, requestID, usageLog, &postUsageBillingParams{
+	_, billingErr := applyUsageBilling(ctx, requestID, usageLog, &postUsageBillingParams{
 		Cost:                       cost,
 		User:                       user,
 		APIKey:                     apiKey,
@@ -600,13 +597,6 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 
 	if billingErr != nil {
 		return billingErr
-	}
-	if input.ImageReceipt != nil && applied && s.DurableUsageBillingEnabled() {
-		*input.ImageReceipt = ImageBillingReceipt{Settled: true, ActualCost: usageLog.ActualCost, BillingMode: *usageLog.BillingMode, ImageCount: result.ImageCount}
-		if d := usageLog.CustomerCostDetails; d != nil {
-			input.ImageReceipt.MinimumCharge = d.ImageMinimumCharge
-			input.ImageReceipt.MinimumChargeAdjustment = d.ImageMinimumChargeAdjustment
-		}
 	}
 	if !s.DurableUsageBillingEnabled() {
 		writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")

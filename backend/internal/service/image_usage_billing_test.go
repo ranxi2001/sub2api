@@ -77,3 +77,31 @@ func TestRecordImageUsageFloorChargesWalletOnceAndPreservesTokens(t *testing.T) 
 		require.InDelta(t, .02, usageRepo.lastLog.CustomerCostDetails.ImageMinimumCharge, 1e-12)
 	}
 }
+
+type imageReceiptRepo struct {
+	DurableUsageBillingRepository
+	recovery *UsageBillingRecovery
+}
+
+func (r *imageReceiptRepo) StageUsageBilling(context.Context, *UsageBillingCommand, *UsageLog) error {
+	return nil
+}
+func (r *imageReceiptRepo) ApplyStagedUsageBilling(context.Context, UsageBillingEventKey) (*UsageBillingRecovery, error) {
+	return r.recovery, nil
+}
+
+func TestImageReceiptComesFromDurableEventNotCurrentQuote(t *testing.T) {
+	mode := "image"
+	repo := &imageReceiptRepo{recovery: &UsageBillingRecovery{Event: UsageBillingEvent{Usage: UsageLog{ActualCost: .0201, BillingMode: &mode, ImageCount: 2}}, Result: UsageBillingApplyResult{Applied: true}}}
+	receipt := &ImageBillingReceipt{}
+	_, err := applyDurableUsageBilling(WithImageBillingReceipt(context.Background(), receipt), repo, &UsageBillingCommand{RequestID: "receipt", APIKeyID: 1}, &UsageLog{ActualCost: 99}, &postUsageBillingParams{}, &billingDeps{})
+	require.NoError(t, err)
+	require.True(t, receipt.Settled)
+	require.Equal(t, .0201, receipt.ActualCost)
+	require.Equal(t, 2, receipt.ImageCount)
+	receipt = &ImageBillingReceipt{}
+	repo.recovery.Result.Applied = false
+	_, err = applyDurableUsageBilling(WithImageBillingReceipt(context.Background(), receipt), repo, &UsageBillingCommand{RequestID: "receipt", APIKeyID: 1}, &UsageLog{ActualCost: 99}, &postUsageBillingParams{}, &billingDeps{})
+	require.NoError(t, err)
+	require.False(t, receipt.Settled)
+}
