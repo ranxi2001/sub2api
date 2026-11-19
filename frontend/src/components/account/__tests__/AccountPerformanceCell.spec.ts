@@ -114,3 +114,24 @@ describe('average request cache rate', () => {
   third.unmount(); future.unmount(); localStorage.clear()
  })
 })
+
+describe('cached performance snapshots', () => {
+ it('keeps local upstream evidence visible while database statistics warm up', async () => {
+  const metrics = { statistics_status: 'pending', upstream_error: { source: 'process_local_http_responses', total: 10, failures: 1, percent: 10 } }
+  const w = render(metrics)
+  expect(w.get('[data-metric="tps"]').text()).toContain('Preparing statistics')
+  expect(w.get('[data-metric="upstream"]').text()).toContain('10.0%')
+  await w.setProps({ metrics: { ...metrics, statistics_status: 'unavailable' } })
+  expect(w.get('[data-metric="tps"]').text()).toContain('Unavailable')
+  expect(w.get('[data-metric="upstream"]').text()).toContain('10.0%')
+  w.unmount()
+ })
+ it('labels stale snapshots without inventing new samples or timestamps', () => {
+  const w = render({ statistics_status: 'stale', statistics_updated_at: '2026-11-19T07:00:00Z', avg_tps: 20, quality_samples: 0, degradation_percent: null })
+  expect(w.get('[data-metric="tps"]').text()).toContain('20.0 t/s')
+  expect(w.get('[data-metric="degradation"]').text()).toContain('Not collected')
+  expect(w.get('[data-testid="performance-snapshot"]').text()).toContain('Refreshing')
+  expect(w.get('[data-testid="performance-snapshot"]').attributes('title')).toBe('2026-11-19T07:00:00Z')
+  w.unmount()
+ })
+})
