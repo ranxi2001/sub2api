@@ -25,6 +25,8 @@ export interface UpstreamHTTPErrorEvidence {
  window_complete: boolean
 }
 export interface AccountPerformance {
+ statistics_status?: 'ready' | 'stale' | 'pending' | 'unavailable'
+ statistics_updated_at?: string
  upstream_error?: UpstreamHTTPErrorEvidence
  account_id: number
  avg_cache_percent?: number | null

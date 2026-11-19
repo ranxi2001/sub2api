@@ -16,8 +16,11 @@
           </HelpTooltip>
         </template>
       </span>
-      <span class="font-mono tabular-nums" :class="unavailable ? uncollectedClass : line.color">{{ unavailable ? t('accountPerformance.unavailable') : line.value }}</span>
+      <span class="font-mono tabular-nums" :class="unavailable ? uncollectedClass : line.color">{{ metricValue(line.key, line.value) }}</span>
     </div>
+    <span v-if="!unavailable && metrics?.statistics_updated_at" data-testid="performance-snapshot" class="block text-gray-500" :title="metrics.statistics_updated_at">
+      {{ t(metrics.statistics_status === 'stale' ? 'accountPerformance.snapshotRefreshing' : 'accountPerformance.snapshotTime', { time: snapshotTime }) }}
+    </span>
     <button v-if="canConfigure" type="button" data-testid="performance-configure" class="mt-1 text-primary-600 hover:underline dark:text-primary-400" @click="emit('configure')">
       {{ metrics?.paused ? t('accountPerformance.paused') : t('accountPerformance.configure') }}
     </button>
@@ -37,6 +40,18 @@ const props = withDefaults(defineProps<{ metrics?: Partial<AccountPerformance>; 
 const emit = defineEmits<{configure: []}>()
 const {t}=useI18n()
 const windowMinutes = computed(() => performanceWindowMinutes(props.metrics))
+const snapshotTime = computed(() => {
+ const at = new Date(props.metrics?.statistics_updated_at ?? '')
+ return Number.isNaN(at.getTime()) ? '—' : at.toLocaleTimeString()
+})
+const metricValue = (key: string, value: string) => {
+ if (props.unavailable) return t('accountPerformance.unavailable')
+ if (key !== 'upstream') {
+  if (props.metrics?.statistics_status === 'pending') return t('accountPerformance.preparing')
+  if (props.metrics?.statistics_status === 'unavailable') return t('accountPerformance.unavailable')
+ }
+ return value
+}
 const uncollectedClass = 'text-gray-500 dark:text-gray-400'
 const metricColor = (value: number | null | undefined, classify: (value: number) => LatencySeverity) =>
  value == null || !Number.isFinite(value) || value < 0 ? uncollectedClass : LATENCY_TEXT_CLASSES[classify(value)]
