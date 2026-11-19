@@ -34,6 +34,9 @@ func newImageBillingResponse(writer gin.ResponseWriter, stream bool) (*imageBill
 	if err != nil {
 		return nil, err
 	}
+	// Unlink on Unix while retaining the open descriptor: a process crash cannot
+	// leave generated images behind. Other platforms still remove it on close.
+	_ = os.Remove(file.Name())
 	return &imageBillingResponse{ResponseWriter: writer, file: file, header: writer.Header().Clone(), status: 200, size: -1, stream: stream}, nil
 }
 func (w *imageBillingResponse) Header() http.Header { return w.header }

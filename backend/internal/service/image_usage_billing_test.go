@@ -68,7 +68,7 @@ func TestRecordImageUsageFloorChargesWalletOnceAndPreservesTokens(t *testing.T) 
 		svc.billingService = resolver.billingService
 		group := &Group{ID: gid, Platform: PlatformOpenAI, RateMultiplier: .1, ModelPricing: []ChannelModelPricing{{Models: []string{model}, Platform: PlatformOpenAI, BillingMode: BillingModeToken, OutputPrice: f64p(.00001), ImageOutputPrice: f64p(.00001), ImageMinimumCharge: f64p(.01)}}}
 		result := &OpenAIForwardResult{RequestID: "image-floor", Model: model, ImageEndpoint: true, ImageCount: 2, Usage: OpenAIUsage{OutputTokens: tokens, ImageOutputTokens: tokens}}
-		require.NoError(t, svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{Result: result, APIKey: &APIKey{ID: 2, GroupID: &gid, Group: group}, User: &User{ID: 1}, Account: &Account{ID: 3, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, OriginalModel: model}))
+		require.NoError(t, svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{Result: result, APIKey: &APIKey{ID: 2, GroupID: &gid, Group: group}, User: &User{ID: 1}, Account: &Account{ID: 3, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, ChannelUsageFields: ChannelUsageFields{OriginalModel: model}}))
 		require.Equal(t, 1, billingRepo.calls)
 		require.InDelta(t, .02, billingRepo.lastCmd.BalanceCost, 1e-12)
 		require.Equal(t, tokens, usageRepo.lastLog.OutputTokens)
@@ -94,14 +94,14 @@ func TestImageReceiptComesFromDurableEventNotCurrentQuote(t *testing.T) {
 	mode := "image"
 	repo := &imageReceiptRepo{recovery: &UsageBillingRecovery{Event: UsageBillingEvent{Usage: UsageLog{ActualCost: .0201, BillingMode: &mode, ImageCount: 2}}, Result: UsageBillingApplyResult{Applied: true}}}
 	receipt := &ImageBillingReceipt{}
-	_, err := applyDurableUsageBilling(WithImageBillingReceipt(context.Background(), receipt), repo, &UsageBillingCommand{RequestID: "receipt", APIKeyID: 1}, &UsageLog{ActualCost: 99}, &postUsageBillingParams{}, &billingDeps{})
+	_, err := applyDurableUsageBilling(WithImageBillingReceipt(context.Background(), receipt), repo, &UsageBillingCommand{RequestID: "receipt", APIKeyID: 1}, &UsageLog{ActualCost: 99}, &postUsageBillingParams{Cost: &CostBreakdown{}}, &billingDeps{})
 	require.NoError(t, err)
 	require.True(t, receipt.Settled)
 	require.Equal(t, .0201, receipt.ActualCost)
 	require.Equal(t, 2, receipt.ImageCount)
 	receipt = &ImageBillingReceipt{}
 	repo.recovery.Result.Applied = false
-	_, err = applyDurableUsageBilling(WithImageBillingReceipt(context.Background(), receipt), repo, &UsageBillingCommand{RequestID: "receipt", APIKeyID: 1}, &UsageLog{ActualCost: 99}, &postUsageBillingParams{}, &billingDeps{})
+	_, err = applyDurableUsageBilling(WithImageBillingReceipt(context.Background(), receipt), repo, &UsageBillingCommand{RequestID: "receipt", APIKeyID: 1}, &UsageLog{ActualCost: 99}, &postUsageBillingParams{Cost: &CostBreakdown{}}, &billingDeps{})
 	require.NoError(t, err)
 	require.False(t, receipt.Settled)
 }

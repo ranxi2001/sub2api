@@ -73,3 +73,17 @@ func TestImageBillingEarlyReturnCannotLeakUnsettledSuccess(t *testing.T) {
 	require.Equal(t, 503, rec.Code)
 	require.NotContains(t, rec.Body.String(), "unsettled-image")
 }
+
+func TestImageBillingMultilineSSEReplacesUsageOnce(t *testing.T) {
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	w, err := newImageBillingResponse(c.Writer, true)
+	require.NoError(t, err)
+	defer w.close()
+	_, err = w.WriteString("event: image_generation.completed\ndata: {\"type\":\"image_generation.completed\",\n" + "data: \"b64_json\":\"image\",\"usage\":{\"output_tokens\":100},\"billing\":{\"actual_cost\":999}}\n\n")
+	require.NoError(t, err)
+	require.NoError(t, w.settle(service.ImageBillingReceipt{Settled: true, ActualCost: .01, BillingMode: "token", ImageCount: 1}))
+	require.Equal(t, 1, strings.Count(rec.Body.String(), `"usage":`))
+	require.Contains(t, rec.Body.String(), `"output_tokens":1000000`)
+	require.NotContains(t, rec.Body.String(), "999")
+}
