@@ -27,7 +27,7 @@ func (s *httpUpstreamService) doRegionalEgress(req *http.Request, accountID int6
 	}
 	client := &http.Client{Transport: &regionalUpstreamTransport{s, accountID, concurrency, profile, fingerprint}, CheckRedirect: s.redirectChecker}
 	client = s.httpClientForUpstreamRequest(client, req)
-	client = httpClientWithGrokAccessDeniedFallback(client)
+	client = httpClientWithUpstreamPolicies(client, nil)
 	// Regional routing adds no replay/failover or transparent direct fallback.
 	return doUpstreamRequest(client, req)
 }
@@ -64,7 +64,8 @@ func (t *regionalUpstreamTransport) RoundTrip(req *http.Request) (*http.Response
 		atomic.StoreInt64(&entry.lastUsed, time.Now().UnixNano())
 	}
 	start := time.Now()
-	resp, err := entry.client.Transport.RoundTrip(req)
+	// Compress after binding the egress timezone, which may rewrite the JSON body.
+	resp, err := t.service.wrapUpstreamRequestCompression(entry.client.Transport).RoundTrip(req)
 	if region != "" {
 		status := 0
 		if resp != nil {

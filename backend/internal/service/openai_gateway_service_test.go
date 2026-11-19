@@ -3215,6 +3215,28 @@ func TestOpenAIBuildUpstreamRequestOpenAIPassthroughPreservesCompactPath(t *test
 	require.Equal(t, HTTPUpstreamProfileOpenAI, HTTPUpstreamProfileFromContext(req.Context()))
 }
 
+func TestOpenAIBuildersMarkCodexHTTPRequests(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc := &OpenAIGatewayService{cfg: &config.Config{}}
+	for _, typ := range []string{AccountTypeOAuth, AccountTypeSetupToken, AccountTypeAPIKey} {
+		t.Run(typ, func(t *testing.T) {
+			const token = "fixture"
+			body := []byte(`{"model":"gpt-5"}`)
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+			account := &Account{Platform: PlatformOpenAI, Type: typ, Credentials: map[string]any{"chatgpt_account_id": "fixture"}}
+			native, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, body, token, true, "", true)
+			require.NoError(t, err)
+			passthrough, err := svc.buildUpstreamRequestOpenAIPassthrough(c.Request.Context(), c, account, body, token)
+			require.NoError(t, err)
+			for _, req := range []*http.Request{native, passthrough} {
+				require.Equal(t, typ != AccountTypeAPIKey, IsOpenAICodexHTTPRequest(req.Context()))
+				require.Equal(t, typ != AccountTypeAPIKey, req.URL.String() == chatgptCodexURL)
+			}
+		})
+	}
+}
+
 func TestOpenAIBuildUpstreamRequestOpenAIPassthroughPreservesExplicitAPIKeyBetaHeader(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
