@@ -85,7 +85,7 @@ func TestProviderProfitReportPartialThenSettledWithSharedWallet(t *testing.T) {
 	check("40", "40", "60", 2)
 	mainMetrics("2", "45", "null", "null", "null")
 	newChannel := f.id(`INSERT INTO upstream_channels(name,code) VALUES('New location','new-location') RETURNING id`)
-	_, err := f.r.SetProviderProfitLink(context.Background(), f.pid, service.ProviderProfitLinkMutation{Revision: 1, ChannelID: newChannel, Confirm: true})
+	_, err := f.r.SetProviderProfitLink(context.Background(), f.pid, service.ProviderProfitLinkMutation{Revision: f.id(`SELECT revision FROM provider_profit_links WHERE provider_id=$1`, f.pid), ChannelID: newChannel, Confirm: true})
 	require.NoError(t, err)
 	f.counts(w, 2, 0, a, b, external)
 	check("40", "40", "60", 2)
@@ -458,8 +458,8 @@ func TestProviderProfitLegacyIncomeUnchangedByFirstLink(t *testing.T) {
 		require.JSONEq(t, "null", string(s["reconciled_cost"]))
 	}
 	check()
-	for rev, dest := range []int64{channel, f.channel} {
-		_, err := f.r.SetProviderProfitLink(context.Background(), f.pid, service.ProviderProfitLinkMutation{Revision: int64(rev + 1), ChannelID: dest, Confirm: true})
+	for _, dest := range []int64{channel, f.channel} {
+		_, err := f.r.SetProviderProfitLink(context.Background(), f.pid, service.ProviderProfitLinkMutation{Revision: f.id(`SELECT revision FROM provider_profit_links WHERE provider_id=$1`, f.pid), ChannelID: dest, Confirm: true})
 		require.NoError(t, err)
 		check()
 	}

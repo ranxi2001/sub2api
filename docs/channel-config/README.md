@@ -11,3 +11,5 @@
 验证由 PR CI 执行：`TestProfitOperationsCachePagesSortAndInvalidation` 对同一窗口首次、翻页、倒序、缺失金额排序进行对照，前三次读取只调用聚合一次；这是合成聚合调用次数证据，不是生产延迟基准。`TestProviderProfitNamingPreservesEstimateUntilWalletOptIn` 在非空 PostgreSQL 用量窗口验证命名不改变请求数/收入/成本来源，选择钱包且没有读数时成本为 null。浏览器截图使用实际 Vue 组件与合成 API 数据，不访问生产或发送收费请求。
 
 `TestProfitOperationsCachedWindowTiming` 在隔离 PostgreSQL 中生成 10,000 条合成用量，记录不复用时的首次/分页/排序和复用时的首次/分页/排序/重复耗时，核对窗口、汇总及查询时间。记录在 PR CI 日志；不设置不稳定的绝对耗时断言，不将其外推为生产百万行性能。
+
+2026-11-19，CI head `97cec13fe29667eef5b842baa6ea2fe80e3f79fb` 的隔离 PostgreSQL 实测：UTC 窗口 `[2026-11-19T09:25:31Z,2026-11-19T10:25:31Z)`，10,000 条合成记录。不复用的首次/分页/排序为 198.37 / 183.95 / 186.45 ms；复用的首次/分页/排序/重复读取为 189.22 / 0.312 / 0.245 / 0.301 ms。窗口汇总一致。来源：[CI 日志](https://github.com/ranxi2001/sub2api/actions/runs/44504393963/job/135492082737)。该 job 的两个旧修订号断言失败，性能及新成本模式用例自身通过；修订号修正仍以最终 head CI 为准。此为单次合成环境观测。
