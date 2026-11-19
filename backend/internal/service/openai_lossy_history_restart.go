@@ -52,6 +52,7 @@ func (s *OpenAIGatewayService) PrepareOpenAILossyHistoryRestart(ctx context.Cont
 	r := openAIAgentRecoveryFromContext(next)
 	r.omittedHistory, r.omittedSource = true, nil
 	r.inputDigest, r.replayControlsDigest = openAIAgentRecoveryInputDigest(clean), openAI409ControlsDigest(clean)
+	r.controlFingerprints = openAI409FingerprintControls(clean)
 	return next, clean, true
 }
 

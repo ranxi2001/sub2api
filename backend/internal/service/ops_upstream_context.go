@@ -187,6 +187,21 @@ type OpsRecoveryFailure struct {
 	Protocol       string
 	Phase          string
 	RequestWritten *bool // nil means no proof of whether the generation was sent
+	Controls       *OpsRecoveryControls
+}
+
+// OpsRecoveryControls contains value-free comparison outcomes for the final
+// encrypted-history wire check. It must never contain field values or hashes.
+type OpsRecoveryControls struct {
+	Observation               string `json:"observation"`
+	Snapshot                  string `json:"snapshot"`
+	Tools                     string `json:"tools"`
+	ToolChoice                string `json:"tool_choice"`
+	ParallelToolCalls         string `json:"parallel_tool_calls"`
+	Instructions              string `json:"instructions"`
+	DigestChanged             bool   `json:"digest_changed"`
+	PreviousResponseIDPresent bool   `json:"previous_response_id_present"`
+	ConversationPresent       bool   `json:"conversation_present"`
 }
 
 // OpsUpstreamWSFailure is set at the native upstream socket boundary, never

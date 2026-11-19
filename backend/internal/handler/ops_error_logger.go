@@ -1561,6 +1561,9 @@ func logOpsStreamErrorValue(c *gin.Context, ops *service.OpsService, wireStatus 
 		if failure.RequestWritten != nil {
 			fields["request_written"] = *failure.RequestWritten
 		}
+		if failure.Controls != nil {
+			fields["controls"] = failure.Controls
+		}
 		if payload, err := json.Marshal(gin.H{"error": fields}); err == nil {
 			errorBody = string(payload)
 		}

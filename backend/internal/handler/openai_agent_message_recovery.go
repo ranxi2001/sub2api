@@ -91,6 +91,6 @@ func markOpenAIRecoveryFailure(c *gin.Context, recovery *service.OpenAIAgentReco
 	service.MarkOpsStreamErrorValue(c, service.OpsStreamError{
 		ErrType: recovery.ClientType(), Code: recovery.ClientCode(), Message: recovery.ClientMessage(),
 		IntendedStatus: recovery.HTTPStatus(), CountTowardsSLA: true, NonStream: protocol == "http",
-		RecoveryFailure: &service.OpsRecoveryFailure{Protocol: protocol, Phase: phase, RequestWritten: written, Subreason: recovery.InternalSubreason()},
+		RecoveryFailure: &service.OpsRecoveryFailure{Protocol: protocol, Phase: phase, RequestWritten: written, Subreason: recovery.InternalSubreason(), Controls: recovery.RecoveryControlsDiagnostic()},
 	})
 }

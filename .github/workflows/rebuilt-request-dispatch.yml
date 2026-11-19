@@ -63,6 +63,8 @@ jobs:
             test "$(git hash-object "$target")" = "$expected"
             echo "$target compatibility=$source blob=$expected" >> "$RUNNER_TEMP/dispatch-compatibility.txt"
           done
+          # These candidate-only diagnostic tests require APIs absent from the pinned RED source.
+          rm backend/internal/service/openai_409_controls_diagnostics_test.go
           bash "$GITHUB_WORKSPACE/.github/scripts/prepare-ws-owner-red-fixtures.sh" "$baseline" . HEAD | tee "$RUNNER_TEMP/dispatch-ws-owner-red-blobs.txt"
       - name: Same network and tool-loop regressions
         env:
@@ -87,6 +89,7 @@ jobs:
           terminals={e['Test']:e['Action'] for e in events if 'Test' in e and e.get('Action') in ('pass','fail','skip')}
           assert terminals and 'skip' not in terminals.values(), terminals
           expected=[
+              'TestOpenAI409NamespaceProjectionPreservesNumbers',
               'TestOpenAI409HTTPProjectionAndPassthrough/oauth/stream=false/internal_metadata',
               'TestOpenAI409HTTPProjectionAndPassthrough/oauth/stream=true/message_namespace',
               'TestOpenAI409HTTPProjectionAndPassthrough/apikey/stream=true/passthrough',
