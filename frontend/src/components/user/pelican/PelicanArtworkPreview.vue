@@ -16,7 +16,7 @@
           class="absolute left-0 top-0 block border-0"
           :style="frameStyle"
           :tabindex="interactive ? undefined : -1"
-          sandbox="allow-scripts"
+          :sandbox="interactive ? 'allow-scripts allow-pointer-lock' : 'allow-scripts'"
           referrerpolicy="no-referrer"
           scrolling="no"
         />
