@@ -21,6 +21,9 @@ import (
 
 // OpenAIRecordUsageInput input for recording usage
 type OpenAIRecordUsageInput struct {
+	// Optional, synchronous receipt. Never populated by an estimate or failed debit.
+	ImageReceipt *ImageBillingReceipt
+
 	Result             *OpenAIForwardResult
 	APIKey             *APIKey
 	User               *User
@@ -168,7 +171,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	if s.regionalMetering != nil {
 		return errors.New("legacy billing disabled for metered request")
 	}
-	if result.UsageUnavailable {
+	if result.UsageUnavailable && !(result.ImageEndpoint && result.ImageCount > 0 && input.APIKey != nil && imageMinimumCharge(input.APIKey.Group, input.OriginalModel, result.Model) > 0) {
 		return errors.New("upstream usage unavailable; token usage was not recorded and request was not billed")
 	}
 	if s.rateLimitService != nil && input.Account != nil && input.Account.Platform == PlatformOpenAI {
@@ -484,6 +487,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 			customerCostDetails.ActualCost *= factor
 		}
 	}
+	if details := applyImageMinimumCharge(cost, result.ImageCount, result.HeaderTimeoutRetries, imageMinimumCharge(apiKey.Group, requestedBillingModel, billingModel)); details != nil {
+		usageLog.CustomerCostDetails = details
+	}
 	if cost != nil {
 		usageLog.InputCost = cost.InputCost
 		usageLog.ImageInputCost = cost.ImageInputCost
@@ -578,7 +584,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		quotaPlatform = PlatformFromAPIKey(apiKey)
 	}
 
-	_, billingErr := applyUsageBilling(ctx, requestID, usageLog, &postUsageBillingParams{
+	applied, billingErr := applyUsageBilling(ctx, requestID, usageLog, &postUsageBillingParams{
 		Cost:                       cost,
 		User:                       user,
 		APIKey:                     apiKey,
@@ -594,6 +600,13 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 
 	if billingErr != nil {
 		return billingErr
+	}
+	if input.ImageReceipt != nil && applied && s.DurableUsageBillingEnabled() {
+		*input.ImageReceipt = ImageBillingReceipt{Settled: true, ActualCost: usageLog.ActualCost, BillingMode: *usageLog.BillingMode, ImageCount: result.ImageCount}
+		if d := usageLog.CustomerCostDetails; d != nil {
+			input.ImageReceipt.MinimumCharge = d.ImageMinimumCharge
+			input.ImageReceipt.MinimumChargeAdjustment = d.ImageMinimumChargeAdjustment
+		}
 	}
 	if !s.DurableUsageBillingEnabled() {
 		writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
@@ -686,6 +699,12 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 		// their token path; the switch cannot replace text usage with image fees.
 		if resolved := s.resolveOpenAIChannelPricing(ctx, billingModel, apiKey); resolved == nil || resolved.Mode != BillingModeToken {
 			return s.calculateOpenAIImageCost(ctx, billingModel, apiKey, result, imageMultiplier), nil
+		}
+	}
+
+	if result != nil && result.ImageCount <= 0 {
+		if p := s.resolveOpenAIChannelPricing(ctx, billingModel, apiKey); p != nil && p.Mode == BillingModeImage {
+			return &CostBreakdown{BillingMode: string(BillingModeImage)}, nil
 		}
 	}
 

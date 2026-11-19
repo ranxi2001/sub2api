@@ -66,6 +66,11 @@
           <td class="border-r border-gray-100 py-2.5 pl-5 pr-4 align-middle dark:border-dark-700/60">
             <div class="flex flex-wrap items-center gap-1.5">
               <span class="font-medium text-gray-900 dark:text-white">{{ m.name }}</span>
+              <span v-if="billingMode(m) === BILLING_MODE_TOKEN && (m.pricing?.image_minimum_charge ?? 0) > 0"
+                class="rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-700 dark:bg-amber-900/20 dark:text-amber-300"
+                data-image-minimum-charge :title="t('imageUsage.minimumHelp')">
+                {{ t('imageUsage.minimumBadge', { amount: m.pricing?.image_minimum_charge }) }}
+              </span>
               <!-- 时段徽章紧跟模型名,其余徽章排在后面,空间不足时先换行的是它们 -->
               <span
                 v-if="period"

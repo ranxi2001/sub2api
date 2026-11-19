@@ -40,6 +40,8 @@ export interface UserPricingInterval {
 }
 
 export interface UserSupportedModelPricing {
+  /** Final per-image minimum after every customer multiplier. Group pricing only. */
+  image_minimum_charge?: number | null
   billing_mode: BillingMode
   input_price: number | null
   output_price: number | null

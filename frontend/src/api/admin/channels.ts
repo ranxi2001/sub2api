@@ -40,6 +40,8 @@ export interface ChannelTimePricing {
 }
 
 export interface ChannelModelPricing {
+  /** Final per-image minimum after every customer multiplier. Group pricing only. */
+  image_minimum_charge?: number | null
   id?: number
   platform: string
   models: string[]

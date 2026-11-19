@@ -1,3 +1,4 @@
+import imageUsage from './imageUsage'
 import coupon from './coupon'
 import qqbot from './qqbot'
 import matureProviders from './matureProviders'
@@ -43,6 +44,7 @@ import latencyObservability from './latencyObservability'
 import autoConfig from './autoConfig'
 
 export default {
+  imageUsage,
   coupon,
   ...qqbot,
   matureProviders,
