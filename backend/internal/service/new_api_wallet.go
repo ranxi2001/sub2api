@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"math"
 	"strings"
 	"unicode"
@@ -17,6 +18,27 @@ type newAPIWalletSettings struct {
 	USDExchangeRate            *float64 `json:"usd_exchange_rate"`
 	CustomCurrencySymbol       string   `json:"custom_currency_symbol"`
 	CustomCurrencyExchangeRate *float64 `json:"custom_currency_exchange_rate"`
+}
+
+// A malformed optional display setting must not invalidate a verified wallet.
+// QuotaPerUnit remains strict because it defines the underlying ledger unit.
+func (s *newAPIWalletSettings) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		QuotaPerUnit               *float64        `json:"quota_per_unit"`
+		QuotaDisplayType           json.RawMessage `json:"quota_display_type"`
+		USDExchangeRate            json.RawMessage `json:"usd_exchange_rate"`
+		CustomCurrencySymbol       json.RawMessage `json:"custom_currency_symbol"`
+		CustomCurrencyExchangeRate json.RawMessage `json:"custom_currency_exchange_rate"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*s = newAPIWalletSettings{QuotaPerUnit: raw.QuotaPerUnit}
+	_ = json.Unmarshal(raw.QuotaDisplayType, &s.QuotaDisplayType)
+	_ = json.Unmarshal(raw.USDExchangeRate, &s.USDExchangeRate)
+	_ = json.Unmarshal(raw.CustomCurrencySymbol, &s.CustomCurrencySymbol)
+	_ = json.Unmarshal(raw.CustomCurrencyExchangeRate, &s.CustomCurrencyExchangeRate)
+	return nil
 }
 
 func (s newAPIWalletSettings) displayWallet(raw float64) (amount float64, unit string, rate float64) {

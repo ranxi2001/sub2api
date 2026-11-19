@@ -22,6 +22,8 @@ func TestNewAPIWalletDisplayCurrency(t *testing.T) {
 		{"token mode", `{"quota_display_type":"TOKENS","usd_exchange_rate":7.3}`, "USD", 12.34, 1},
 		{"unknown", `{"quota_display_type":"OTHER","usd_exchange_rate":7.3}`, "USD", 12.34, 1},
 		{"missing rate", `{"quota_display_type":"CNY"}`, "USD", 12.34, 1},
+		{"malformed rate", `{"quota_display_type":"CNY","usd_exchange_rate":"invalid"}`, "USD", 12.34, 1},
+		{"malformed display", `{"quota_display_type":[],"usd_exchange_rate":7.3}`, "USD", 12.34, 1},
 		{"zero rate", `{"quota_display_type":"CNY","usd_exchange_rate":0}`, "USD", 12.34, 1},
 		{"negative rate", `{"quota_display_type":"CNY","usd_exchange_rate":-7.3}`, "USD", 12.34, 1},
 		{"excessive rate", `{"quota_display_type":"CNY","usd_exchange_rate":1e7}`, "USD", 12.34, 1},
@@ -101,6 +103,12 @@ func TestNewAPIWalletCurrencyPreviewAndPeriodicSnapshot(t *testing.T) {
 	require.Equal(t, "unsupported", snap.Status)
 	require.Equal(t, "ok", snap.Balance.Status)
 	require.Equal(t, 90.082, snap.Balance.Data["remaining"])
+	h.bodies["GET /api/status"] = `{"success":true,"data":{"quota_per_unit":500000,"quota_display_type":"CNY","usd_exchange_rate":"invalid"}}`
+	snap, err = s.probeNewAPIAccount(context.Background(), a, repo.bindings[1], 30)
+	require.NoError(t, err)
+	require.Equal(t, "ok", snap.Balance.Status)
+	require.Equal(t, "USD", snap.Balance.Data["unit"])
+	require.Equal(t, 12.34, snap.Balance.Data["remaining"])
 }
 
 func TestNewAPIWalletCurrencyPreservesThresholdUnits(t *testing.T) {
