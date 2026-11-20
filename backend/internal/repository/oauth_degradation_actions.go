@@ -137,7 +137,10 @@ func (r *accountRepository) evaluateOAuthDegradation(ctx context.Context, id int
 	if !found {
 		return nil
 	}
-	reason := c.DegradationAction.TriggerReason(m)
+	// HTTP pressure requires a dedicated account/model review. It is never
+	// evidence of a wrong answer and must not enter this account-wide action.
+	// Only the existing probe/candy branch may authorize this legacy action.
+	reason := ""
 	if reason == "" && review != nil && c.DegradationAction.NeedsCandyRetest(m) &&
 		!review.StartedAt.Before(m.WindowStart) && now.Before(review.LeaseUntil) {
 		if review.Incorrect == 0 {

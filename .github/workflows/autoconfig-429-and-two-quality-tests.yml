@@ -1,0 +1,88 @@
+name: Auto config 429 fresh tests
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/internal/**/*oauth*'
+      - 'backend/internal/pkg/upstreamstats/**'
+      - '.github/workflows/autoconfig-429-and-two-quality-tests.yml'
+      - '.github/scripts/assert-test-log-clean.sh'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: autoconfig-429-fresh-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# This first increment verifies the no-direct-action guard. Dedicated worker,
+# handler and loopback-provider acceptance must be added before this draft is ready.
+jobs:
+  no-direct-action:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CI: 'true'
+      GOMAXPROCS: '2'
+      GOFLAGS: '-p=2'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: candidate
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          ref: 8678e88f4dfb6bfb718993db8a2a15b4a6af8282
+          path: baseline
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: candidate/backend/go.mod
+          cache-dependency-path: candidate/backend/go.sum
+      - name: Baseline must fail the unchanged behavior oracle
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          test "$(git -C candidate rev-parse HEAD)" = '${{ github.event.pull_request.head.sha || github.sha }}'
+          git -C candidate rev-parse HEAD > evidence/candidate-head.txt
+          git -C baseline rev-parse HEAD > evidence/baseline-head.txt
+          oracle=backend/internal/repository/oauth_degradation_429_fresh_integration_test.go
+          cp "candidate/$oracle" "baseline/$oracle"
+          cmp "candidate/$oracle" "baseline/$oracle"
+          sha256sum "candidate/$oracle" "baseline/$oracle" > evidence/oracle-sha256.txt
+          set +e
+          (cd baseline/backend && go test -tags=integration ./internal/repository -run '^TestOAuth429RequiresFreshIndependentTestsBeforeAction$' -count=1 -v -timeout=15m) > evidence/red.log 2>&1
+          result=$?
+          set -e
+          cat evidence/red.log
+          printf '%s\n' "$result" > evidence/red-exit.txt
+          test "$result" -ne 0
+          bash candidate/.github/scripts/assert-test-log-clean.sh red evidence/red.log
+          grep -F '429 pressure and historical wrong answers must not authorize degradation before two fresh independent tests' evidence/red.log
+          grep -F -- '--- FAIL: TestOAuth429RequiresFreshIndependentTestsBeforeAction/no_quality_plan' evidence/red.log
+          grep -F -- '--- FAIL: TestOAuth429RequiresFreshIndependentTestsBeforeAction/historical_wrong_results' evidence/red.log
+      - name: Candidate behavior and existing ordinary probe review
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd candidate/backend && go test -race -tags=integration ./internal/repository -run '^TestOAuth429RequiresFreshIndependentTestsBeforeAction$|^TestOAuthDegradationCandyReviewUsesCurrentRule$' -count=1 -v -timeout=15m) 2>&1 | tee evidence/green.log
+          bash candidate/.github/scripts/assert-test-log-clean.sh green evidence/green.log
+          grep -F -- '--- PASS: TestOAuth429RequiresFreshIndependentTestsBeforeAction/no_quality_plan' evidence/green.log
+          grep -F -- '--- PASS: TestOAuth429RequiresFreshIndependentTestsBeforeAction/historical_wrong_results' evidence/green.log
+          grep -F -- '--- PASS: TestOAuthDegradationCandyReviewUsesCurrentRule ' evidence/green.log
+      - name: Production build without test tags
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd candidate/backend && go build -o "$RUNNER_TEMP/sub2api-429-candidate" ./cmd/server) 2>&1 | tee evidence/build.log
+          sha256sum "$RUNNER_TEMP/sub2api-429-candidate" > evidence/build-sha256.txt
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: autoconfig-429-fresh-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
+          path: evidence/
+          if-no-files-found: error
