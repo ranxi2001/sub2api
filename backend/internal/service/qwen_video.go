@@ -62,7 +62,7 @@ func ParseWanVideoRequest(contentType string, body []byte) (GrokMediaRequestInfo
 	var info GrokMediaRequestInfo
 	mt, _, err := mime.ParseMediaType(contentType)
 	if err != nil || mt != "application/json" {
-		return info, errors.New("Wan video requires application/json")
+		return info, errors.New("wan video requires application/json")
 	}
 	_, info, err = parseWanCreate(body)
 	return info, err
@@ -104,7 +104,7 @@ func parseWanCreate(body []byte) (wanCreate, GrokMediaRequestInfo, error) {
 	}
 	sec, err := seconds.Int64()
 	if err != nil || sec < 2 || sec > 30 || (in.Duration != "" && in.Duration != seconds) {
-		return out, info, errors.New("Wan duration must be 2 to 30 seconds")
+		return out, info, errors.New("wan duration must be 2 to 30 seconds")
 	}
 	resolution := strings.ToLower(in.Resolution)
 	if in.Size != "" {
@@ -212,7 +212,7 @@ func (s *OpenAIGatewayService) forwardWanVideo(ctx context.Context, c *gin.Conte
 		}
 		result.Model, result.BillingModel, result.UpstreamModel = info.Model, info.Model, account.GetMappedModel(info.Model)
 		if result.UpstreamModel != wanVideoModel {
-			return nil, nil, errors.New("Wan video requires the wan3.0-video model mapping")
+			return nil, nil, errors.New("wan video requires the wan3.0-video model mapping")
 		}
 		result.VideoResolution, result.VideoDurationSeconds = info.Resolution, info.DurationSeconds
 		if native {
@@ -255,7 +255,7 @@ func (s *OpenAIGatewayService) forwardWanVideo(ctx context.Context, c *gin.Conte
 	start := time.Now()
 	resp, err := s.httpUpstream.Do(req, proxy, account.ID, account.Concurrency)
 	if err != nil {
-		return nil, nil, errors.New("Wan upstream transport failed")
+		return nil, nil, errors.New("wan upstream transport failed")
 	}
 	defer func() { _ = resp.Body.Close() }()
 	result.Duration = time.Since(start)
@@ -266,7 +266,7 @@ func (s *OpenAIGatewayService) forwardWanVideo(ctx context.Context, c *gin.Conte
 	}
 	if resp.StatusCode >= 400 {
 		c.JSON(resp.StatusCode, gin.H{"error": gin.H{"type": "upstream_error", "message": "Wan upstream rejected the request"}})
-		return nil, nil, fmt.Errorf("Wan upstream HTTP %d", resp.StatusCode)
+		return nil, nil, fmt.Errorf("wan upstream HTTP %d", resp.StatusCode)
 	}
 	if resp.StatusCode >= 300 || !gjson.ValidBytes(raw) {
 		return nil, nil, errors.New("invalid Wan response")
@@ -292,7 +292,7 @@ func (s *OpenAIGatewayService) forwardWanVideo(ctx context.Context, c *gin.Conte
 		return result, &OpenAIVideoCreation{UpstreamTaskID: view.upstreamID, WriteResponse: func() { c.JSON(http.StatusOK, view) }}, nil
 	}
 	if view.upstreamID != upstreamID {
-		return nil, nil, errors.New("Wan returned a different task")
+		return nil, nil, errors.New("wan returned a different task")
 	}
 	view.ID = taskID
 	if view.Status == "completed" {
