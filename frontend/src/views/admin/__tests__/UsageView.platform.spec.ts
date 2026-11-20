@@ -13,7 +13,7 @@ import { CONCRETE_PLATFORM_OPTIONS } from '@/constants/platforms'
 import zh from '@/i18n/locales/zh'
 import en from '@/i18n/locales/en'
 
-const api = vi.hoisted(() => ({ list: vi.fn(), stats: vi.fn(), export: vi.fn(), models: vi.fn(), snapshot: vi.fn(), breakdown: vi.fn() }))
+const api = vi.hoisted(() => ({ errors: vi.fn(), list: vi.fn(), stats: vi.fn(), export: vi.fn(), models: vi.fn(), snapshot: vi.fn(), breakdown: vi.fn() }))
 vi.mock('vue-chartjs', () => ({ Doughnut: { template: '<div />' } }))
 vi.mock('@/api/admin/dashboard', () => ({ getUserBreakdown: api.breakdown }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ user: { id: 41 } }) }))
@@ -24,7 +24,7 @@ vi.mock('@/api/admin', () => ({ adminAPI: {
   dashboard: { getModelStats: api.models, getSnapshotV2: api.snapshot },
   groups: { list: vi.fn().mockResolvedValue({ items: [{ id: 7, name: 'Synthetic group' }] }) },
 } }))
-vi.mock('@/api/admin/ops', () => ({ listErrorLogs: vi.fn().mockResolvedValue({ items: [], total: 0 }) }))
+vi.mock('@/api/admin/ops', () => ({ listErrorLogs: api.errors }))
 vi.mock('@/api/admin/usage', () => ({ adminUsageAPI: { list: api.export } }))
 vi.mock('xlsx', () => ({ utils: { aoa_to_sheet: vi.fn(() => ({})), sheet_add_aoa: vi.fn(), book_new: vi.fn(() => ({})), book_append_sheet: vi.fn() }, write: vi.fn(() => new Uint8Array()) }))
 vi.mock('file-saver', () => ({ saveAs: vi.fn() }))
@@ -57,6 +57,7 @@ describe('admin usage platform behavior with real filters', () => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
     api.list.mockResolvedValue({ items: [], total: 220, pages: 11 })
+    api.errors.mockResolvedValue({ items: [], total: 0 })
     api.stats.mockResolvedValue({ total_requests: 220 })
     api.models.mockResolvedValue({ models: [] })
     api.snapshot.mockResolvedValue({ trend: [], models: [], groups: [] })
@@ -218,7 +219,7 @@ describe('admin usage platform behavior with real filters', () => {
     expect(chart.text()).toContain('b@example.invalid')
   })
 
-  it('clears the detail-only platform when switching tabs and disables unsupported cleanup', async () => {
+  it('shares platform between usage and errors, and clears it on unsupported tabs', async () => {
     render()
     await flushPromises()
     await choose(wrapper.get('[data-testid="usage-platform-filter"]'), 'OpenAI')
@@ -226,6 +227,14 @@ describe('admin usage platform behavior with real filters', () => {
     expect(cleanup.attributes('disabled')).toBeDefined()
     const tabs = wrapper.findAll('[data-testid="usage-detail-tab"]')
     await tabs[1].trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="usage-platform-filter"] .select-trigger').text()).toBe('OpenAI')
+    expect(api.errors.mock.lastCall?.[0]).toMatchObject({ platform: 'openai', page: 1 })
+    await choose(wrapper.get('[data-testid="usage-platform-filter"]'), 'Unknown (legacy)')
+    expect(api.errors.mock.lastCall?.[0]).toMatchObject({ platform: 'unknown', page: 1 })
+    await tabs[0].trigger('click')
+    expect(wrapper.get('[data-testid="usage-platform-filter"] .select-trigger').text()).toBe('Unknown (legacy)')
+    await tabs[2].trigger('click')
     await flushPromises()
     expect(wrapper.find('[data-testid="usage-platform-filter"]').exists()).toBe(false)
     expect(api.stats.mock.lastCall?.[0].platform).toBeFalsy()
