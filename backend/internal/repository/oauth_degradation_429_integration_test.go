@@ -49,6 +49,7 @@ func TestOAuthDegradation429PostgresWithoutProbeVerdicts(t *testing.T) {
 	repo, c := degradationPolicyFixture(t)
 	ctx := t.Context()
 	off := false
+	c.DegradationAction.Upstream429Enabled = nil
 	c.DegradationAction.ProbeEnabled = &off
 	c.DegradationAction.ThresholdPercent = nil
 	save := func() {
@@ -99,21 +100,14 @@ func TestOAuthDegradation429PostgresWithoutProbeVerdicts(t *testing.T) {
 		require.NoError(t, repo.EvaluateOAuthDegradation(ctx, a.ID, now))
 		got, err = repo.GetByID(ctx, a.ID)
 		require.NoError(t, err)
-		require.True(t, got.HasOAuthDegradationAction())
-		require.Equal(t, 10, got.Concurrency)
-		var state service.OAuthDegradationState
-		raw, err := json.Marshal(got.Extra[service.OAuthDegradationActionExtraKey])
-		require.NoError(t, err)
-		require.NoError(t, json.Unmarshal(raw, &state))
-		require.Equal(t, "upstream_429", state.TriggerReason)
-		require.NotNil(t, state.UpstreamError)
-		require.Equal(t, int64(19), state.UpstreamError.RateLimited)
-		require.Equal(t, int64(20), state.UpstreamError.Total)
-		require.Equal(t, 80.0, state.Upstream429ShareThresholdPercent)
-		require.Zero(t, state.DegradationPercent)
+		require.False(t, got.HasOAuthDegradationAction(), "HTTP evidence cannot authorize an account action")
+		require.Equal(t, 20, got.Concurrency)
+		evidence := upstreamstats.Default.Snapshot([]int64{a.ID}, now.Add(-time.Hour), now)[a.ID]
+		require.EqualValues(t, 19, evidence.RateLimited)
+		require.EqualValues(t, 20, evidence.Total)
 		require.NoError(t, repo.EvaluateOAuthDegradation(ctx, a.ID, now.Add(2*time.Hour)))
 		var n int
 		require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM account_auto_config_events WHERE account_id=$1 AND kind='degradation_applied'", a.ID).Scan(&n))
-		require.Equal(t, 1, n, "action must remain one-time after evidence expires")
+		require.Zero(t, n, "expired pressure must never become authorization")
 	}
 }

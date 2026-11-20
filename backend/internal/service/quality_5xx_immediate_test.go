@@ -55,7 +55,7 @@ func TestQuality5xxWorkerProviderHasQueue(t *testing.T) {
 	// Exercise provider wiring without starting singleton cron jobs with nil
 	// repositories. Such jobs can outlive this test and panic on a later tick.
 	cfg := &config.Config{Runtime: config.RuntimeConfig{Role: config.RuntimeRoleGateway}}
-	svc := ProvideScheduledTestRunnerService(nil, nil, &AccountTestService{}, &RateLimitService{}, cfg, &QualityJudgeService{}, rdb, nil, &ChannelMonitorV2Service{})
+	svc := ProvideScheduledTestRunnerService(nil, nil, &AccountTestService{}, &RateLimitService{}, cfg, &QualityJudgeService{}, rdb, nil, &ChannelMonitorV2Service{}, nil)
 	t.Cleanup(svc.Stop)
 	require.NotNil(t, svc.qualityTrigger, "worker provider must connect the cross-instance queue")
 	require.Nil(t, svc.cron)

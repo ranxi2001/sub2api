@@ -1,4 +1,5 @@
 export interface OAuthDegradationConfig {
+ independent_429?: { enabled: boolean; min_samples: number }
  probe_enabled?: boolean | null
  candy_retest_enabled?: boolean | null
  upstream_429_enabled?: boolean | null
@@ -14,9 +15,11 @@ export interface OAuthDegradationConfig {
  group_ids?: number[]
 }
 export function defaultOAuthDegradationConfig(): OAuthDegradationConfig {
- return { probe_enabled: true, upstream_429_enabled: true, upstream_error_threshold_percent: 80, upstream_429_share_threshold_percent: 80, enabled: false, threshold_percent: null, limit_concurrency: true, limit_models: true, limit_groups: false, target_concurrency: 10, models: ['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-6-luna', 'gpt-6.1-terra'], group_ids: [] }
+ return { independent_429: { enabled: false, min_samples: 20 }, probe_enabled: true, upstream_429_enabled: true, upstream_error_threshold_percent: 80, upstream_429_share_threshold_percent: 80, enabled: false, threshold_percent: null, limit_concurrency: true, limit_models: true, limit_groups: false, target_concurrency: 10, models: ['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-6-luna', 'gpt-6.1-terra'], group_ids: [] }
 }
 export function oauthDegradationError(c: OAuthDegradationConfig): boolean {
+ const active = c.independent_429
+ if (active?.enabled && (!Number.isInteger(active.min_samples) || active.min_samples < 20 || active.min_samples > 200)) return true
  const limitConcurrency = c.limit_concurrency !== false, limitModels = c.limit_models !== false
  if (c.enabled && ((c.probe_enabled !== false && c.threshold_percent == null) || missingDegradationConfirmation(c) || !limitConcurrency && !limitModels && !c.limit_groups)) return true
  if (c.threshold_percent != null && (!Number.isFinite(c.threshold_percent) || c.threshold_percent < 0 || c.threshold_percent > 100)) return true
@@ -31,7 +34,7 @@ export function oauthDegradationError(c: OAuthDegradationConfig): boolean {
 
 export function oauthDegradationPayload(c?: OAuthDegradationConfig | null): OAuthDegradationConfig {
  const cfg=c ?? defaultOAuthDegradationConfig()
- return { ...cfg, probe_enabled: cfg.probe_enabled ?? true, upstream_429_enabled: cfg.upstream_429_enabled ?? true, upstream_error_threshold_percent: cfg.upstream_error_threshold_percent ?? 80, upstream_429_share_threshold_percent: cfg.upstream_429_share_threshold_percent ?? 80, limit_concurrency: cfg.limit_concurrency ?? true, limit_models: cfg.limit_models ?? true, limit_groups: cfg.limit_groups ?? false, models: cfg.models ?? [], group_ids: cfg.group_ids ?? [] }
+ return { ...cfg, independent_429: cfg.independent_429 ?? { enabled: false, min_samples: 20 }, probe_enabled: cfg.probe_enabled ?? true, upstream_429_enabled: cfg.upstream_429_enabled ?? true, upstream_error_threshold_percent: cfg.upstream_error_threshold_percent ?? 80, upstream_429_share_threshold_percent: cfg.upstream_429_share_threshold_percent ?? 80, limit_concurrency: cfg.limit_concurrency ?? true, limit_models: cfg.limit_models ?? true, limit_groups: cfg.limit_groups ?? false, models: cfg.models ?? [], group_ids: cfg.group_ids ?? [] }
 }
 
 export function missingDegradationConfirmation(c: OAuthDegradationConfig): boolean {

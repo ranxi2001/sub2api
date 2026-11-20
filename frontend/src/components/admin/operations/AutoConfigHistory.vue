@@ -2,7 +2,7 @@
   <section class="min-w-0 rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-900" aria-labelledby="auto-config-history-title" data-testid="auto-config-history">
     <header class="flex flex-wrap items-start justify-between gap-4 p-5">
       <div class="min-w-0">
-        <h2 id="auto-config-history-title" class="text-lg font-semibold">{{ t('autoConfig.logs.title') }}</h2>
+        <h2 id="auto-config-history-title" class="flex items-center gap-2 text-lg font-semibold">{{ t('autoConfig.logs.title') }}<NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.oauth429IndependentTests" :user-id="auth.user?.id" /></h2>
         <p class="mt-1 text-sm leading-6 text-gray-500 dark:text-gray-400">{{ t('autoConfig.logs.description') }}</p>
       </div>
       <div class="flex w-full items-center gap-3 sm:w-auto">
@@ -72,13 +72,15 @@ import { onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import Icon from '@/components/icons/Icon.vue'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import { formatDateTime } from '@/utils/format'
 import { getAutoConfigEvents, type AutoConfigEvent, type AutoConfigEventKind } from '@/api/admin/autoConfig'
 
 const props = defineProps<{ refreshKey: number }>()
 const { t } = useI18n()
 const auth = useAuthStore()
-const kinds: AutoConfigEventKind[] = ['config_saved', 'initial_applied', 'concurrency_upgraded', 'failure_cooldown', 'degradation_applied']
+const kinds: AutoConfigEventKind[] = ['config_saved', 'initial_applied', 'concurrency_upgraded', 'failure_cooldown', 'degradation_applied', 'oauth429_review_completed']
 const kind = ref<AutoConfigEventKind | ''>('')
 const events = ref<AutoConfigEvent[]>([])
 const hasMore = ref(false), loading = ref(false), error = ref(''), retryMore = ref(false)
@@ -120,6 +122,13 @@ function badgeClass(value: AutoConfigEventKind) {
 }
 function details(event: AutoConfigEvent) {
   const d = event.details
+  if (event.kind === 'oauth429_review_completed' && d.oauth429) {
+    const review = d.oauth429
+    const verdicts = review.runs.map(run => t('autoConfig.logs.oauth429Verdicts.' + run.verdict)).join(' / ')
+    const summary = t('autoConfig.logs.oauth429Detail', { model: review.model, verdicts })
+    const reason = review.reason ? t('autoConfig.logs.oauth429Reasons.' + review.reason) : ''
+    return [summary, reason, review.model_blocked ? t('autoConfig.logs.oauth429ModelBlocked') : ''].filter(Boolean).join(' · ')
+  }
   if (event.kind === 'degradation_applied' && d.degradation) {
     const e = d.degradation
     const actions = []

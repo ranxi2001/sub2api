@@ -37,7 +37,8 @@ func TestOAuthDegradationNativePauseSurvivesAdmissionPass(t *testing.T) {
  VALUES($1,'failed',NOW()-INTERVAL '1 minute',NOW()-INTERVAL '50 seconds',NOW()-INTERVAL '50 seconds',
  '{"parallel_count":1}','native-pause-fixture','evaluated','{"verdict":"incorrect"}','state_degraded')`, f.plan.ID)
 			require.NoError(t, err)
-			require.NoError(t, repo.EvaluateOAuthDegradation(ctx, f.account.ID, time.Now()))
+			review := prepareConfirmedProbeFixture(t, f.account.ID)
+			require.NoError(t, evaluateConfirmedProbe(ctx, repo, f.account.ID, time.Now()))
 			got, err := repo.GetByID(ctx, f.account.ID)
 			require.NoError(t, err)
 			require.False(t, got.Schedulable)
@@ -48,6 +49,8 @@ func TestOAuthDegradationNativePauseSurvivesAdmissionPass(t *testing.T) {
 			require.True(t, degradation.NativeControls)
 			require.True(t, degradation.NativeSchedulingPaused)
 			require.Empty(t, degradation.Models)
+			// Release the completed review before claiming a different plan on this account.
+			require.NoError(t, f.plans.FinishPelican(ctx, review.PlanID, review.LeaseUntil, time.Now()))
 			for range 5 {
 				require.Equal(t, "observed", f.round("passed"))
 			}

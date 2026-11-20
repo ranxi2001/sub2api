@@ -42,7 +42,7 @@ func degradationChainFixture(t *testing.T, current int, empty bool) (*service.Ac
 	var policy map[string]any
 	require.NoError(t, json.Unmarshal(raw, &policy))
 	policy["revision"] = fmt.Sprintf("chain-%d", time.Now().UnixNano())
-	policy["degradation_action"] = map[string]any{"enabled": true, "threshold_percent": 50, "target_concurrency": 10, "models": []string{"gpt-6-luna"}}
+	policy["degradation_action"] = map[string]any{"enabled": true, "threshold_percent": 50, "upstream_429_enabled": false, "target_concurrency": 10, "models": []string{"gpt-6-luna"}}
 	raw, err = json.Marshal(policy)
 	require.NoError(t, err)
 	_, err = integrationDB.ExecContext(ctx, "INSERT INTO settings(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value", service.SettingKeyOAuthAutoConfig, string(raw))
@@ -76,7 +76,7 @@ func degradationChainFixture(t *testing.T, current int, empty bool) (*service.Ac
 		_, err = integrationDB.ExecContext(ctx, `INSERT INTO scheduled_test_results(plan_id,status,started_at,finished_at,created_at,pelican_config,quality_round_id,quality_action,quality_judgment,error_message) VALUES($1,$2,NOW()-INTERVAL '1 minute',NOW()-INTERVAL '50 seconds',NOW()-INTERVAL '50 seconds','{"parallel_count":1}',$3,'evaluated',jsonb_build_object('verdict',$4::text),$5)`, plan, status, fmt.Sprintf("chain-%d-%d", a.ID, i), verdict, message)
 		require.NoError(t, err)
 	}
-	recordDegradationHTTPPressure(a.ID)
+	prepareConfirmedProbeFixture(t, a.ID)
 	return a, group
 }
 
@@ -267,7 +267,7 @@ func TestOAuthDegradationOutboxSchedulerChain(t *testing.T) {
 			setWrites(false)
 			startOps := func() *service.AccountOpsService {
 				s := service.NewAccountOpsService(NewSettingRepository(integrationEntClient), NewAccountOpsRepository(integrationDB), nil)
-				s.SetNotificationDependencies(repo, nil, false, "UTC")
+				s.SetNotificationDependencies(confirmedProbeAccounts{repo}, nil, false, "UTC")
 				s.Start()
 				return s
 			}
