@@ -71,7 +71,9 @@ func oauth429Fixture(t *testing.T, history []string) (*accountRepository, *servi
 func oauth429Observe(t *testing.T, repo *accountRepository, id int64, model string, index int) bool {
 	t.Helper()
 	d := sha256.Sum256([]byte(fmt.Sprintf("business-%d-%s-%d", id, model, index)))
-	queued, err := repo.ObserveOAuth429(t.Context(), id, model, hex.EncodeToString(d[:]), 429)
+	var revision string
+	require.NoError(t, integrationDB.QueryRowContext(t.Context(), `SELECT value::jsonb->>'revision' FROM settings WHERE key=$1`, service.SettingKeyOAuthAutoConfig).Scan(&revision))
+	queued, err := repo.ObserveOAuth429(t.Context(), service.OAuth429Observation{AccountID: id, Model: model, Revision: revision, OAuth429Sample: service.OAuth429Sample{Request: hex.EncodeToString(d[:]), Status: 429, At: time.Now().UTC()}})
 	require.NoError(t, err)
 	return queued
 }
@@ -166,6 +168,17 @@ func TestOAuth429WorkerIndependentPair(t *testing.T) {
 			require.True(t, after.IsModelSupported("gpt-6-luna"))
 			require.Equal(t, 50, after.Concurrency)
 			require.True(t, after.Schedulable)
+			require.Equal(t, service.StatusActive, after.Status)
+			if tc.blocked {
+				candidate := buildSchedulerMetadataAccount(*after)
+				require.False(t, candidate.IsModelSupported("gpt-6-astra"))
+				require.True(t, candidate.IsModelSupported("gpt-6-luna"))
+				// Save a form loaded before the worker committed its block.
+				require.NoError(t, repo.Update(t.Context(), before))
+				reloaded, err := repo.GetByID(t.Context(), a.ID)
+				require.NoError(t, err)
+				require.True(t, reloaded.IsOAuth429ModelBlocked("gpt-6-astra"))
+			}
 			require.Equal(t, before.Credentials, after.Credentials)
 			var data []byte
 			var state string
@@ -380,4 +393,33 @@ func TestOAuth429AliasAndLiveCancellation(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, got.IsOAuth429ModelBlocked("gpt-6-astra"))
 	})
+}
+
+func TestOAuth429WorkerRollingWindowAndCapacity(t *testing.T) {
+	repo, a, cfg := oauth429Fixture(t, nil)
+	ctx := t.Context()
+	// The cap includes live observations. Reclaim an expired tracker while a
+	// recent tracker and active jobs remain protected.
+	_, err := integrationDB.ExecContext(ctx, `INSERT INTO oauth_429_tasks(account_id,model,state,data,updated_at)
+ SELECT $1,'capacity-fixture-'||i,'observing','{}',clock_timestamp()-interval '2 hours'
+ FROM generate_series(1,$2::integer) i`, a.ID, oauth429QueueLimit)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = integrationDB.Exec(`DELETE FROM oauth_429_tasks WHERE account_id=$1 AND model LIKE 'capacity-fixture-%'`, a.ID)
+	})
+	for i := 0; i < 360; i++ {
+		status := 200
+		if i >= 200 {
+			status = 429
+		}
+		digest := sha256.Sum256([]byte(fmt.Sprintf("rolling-%d", i)))
+		queued, err := repo.ObserveOAuth429(ctx, service.OAuth429Observation{AccountID: a.ID, Model: "gpt-6-astra", Revision: cfg.Revision, OAuth429Sample: service.OAuth429Sample{Request: hex.EncodeToString(digest[:]), Status: status, At: time.Now().UTC()}})
+		require.NoError(t, err)
+		require.Equal(t, i == 359, queued, "observation %d", i)
+	}
+	var samples, fixtures int
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT jsonb_array_length(data->'samples') FROM oauth_429_tasks WHERE account_id=$1 AND model='gpt-6-astra'`, a.ID).Scan(&samples))
+	require.Equal(t, 200, samples)
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT count(*) FROM oauth_429_tasks WHERE account_id=$1 AND model LIKE 'capacity-fixture-%'`, a.ID).Scan(&fixtures))
+	require.Equal(t, oauth429QueueLimit-1, fixtures)
 }

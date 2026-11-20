@@ -733,10 +733,8 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 		errMsg := fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body))
 
 		// 403 表示账号被上游封禁，标记为 error 状态
-		if resp.StatusCode == http.StatusForbidden {
-			if !isOAuth429Execution(ctx) {
-				_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
-			}
+		if resp.StatusCode == http.StatusForbidden && !isOAuth429Execution(ctx) {
+			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
 		}
 
 		return s.sendErrorAndEnd(c, errMsg)
@@ -808,10 +806,8 @@ func (s *AccountTestService) testClaudeVertexServiceAccountConnection(c *gin.Con
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		errMsg := fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body))
-		if resp.StatusCode == http.StatusForbidden {
-			if !isOAuth429Execution(ctx) {
-				_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
-			}
+		if resp.StatusCode == http.StatusForbidden && !isOAuth429Execution(ctx) {
+			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
 		}
 		return s.sendErrorAndEnd(c, errMsg)
 	}
@@ -1141,7 +1137,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	if isOAuth && s.accountRepo != nil && !IsAstraSourceAcquisition(ctx) && !isCialloRequest(ctx) {
+	if isOAuth && s.accountRepo != nil && !IsAstraSourceAcquisition(ctx) && !isCialloRequest(ctx) && !isOAuth429Execution(ctx) {
 		if updates, err := extractOpenAICodexProbeUpdates(resp); err == nil && len(updates) > 0 {
 			_ = s.accountRepo.UpdateExtra(ctx, account.ID, updates)
 			mergeAccountExtra(account, updates)
@@ -1149,7 +1145,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		if isCialloRequest(ctx) {
+		if isCialloRequest(ctx) || isOAuth429Execution(ctx) {
 			return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d:", resp.StatusCode))
 		}
 		body, _ := io.ReadAll(resp.Body)
@@ -1449,7 +1445,7 @@ func (s *AccountTestService) applyGrokTestRequestHeaders(req *http.Request, acco
 }
 
 func (s *AccountTestService) observeGrokTestResponse(ctx context.Context, account *Account, resp *http.Response) {
-	if resp == nil {
+	if resp == nil || isOAuth429Execution(ctx) {
 		return
 	}
 	if recovery, ok := ctx.Value(grokTestRecoveryContextKey{}).(*grokTestRecovery); ok && account.IsGrokOAuth() {
@@ -2702,7 +2698,7 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 
 func (s *AccountTestService) reconcileOpenAI429State(ctx context.Context, account *Account, headers http.Header, body []byte) {
 	// Route collection is observational, including upstream authentication and quota failures.
-	if IsAstraSourceAcquisition(ctx) {
+	if IsAstraSourceAcquisition(ctx) || isOAuth429Execution(ctx) {
 		return
 	}
 	if s == nil || s.accountRepo == nil || account == nil {

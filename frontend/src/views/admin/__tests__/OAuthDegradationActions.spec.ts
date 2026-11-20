@@ -230,7 +230,11 @@ it('announces 429 conditions independently of the original dismissed feature', a
 it('requires explicit authorization and a bounded budget for independent 429 calls', async () => {
  const w = mount(AutoConfigView); await flushPromises()
  expect(w.get<HTMLInputElement>('[data-testid="independent-429-enabled"]').element.checked).toBe(false)
- expect(w.get<HTMLInputElement>('[data-testid="independent-429-budget"]').element.value).toBe('0')
+ const budget = w.get<HTMLInputElement>('[data-testid="independent-429-budget"]').element
+ const samples = w.get<HTMLInputElement>('[data-testid="independent-429-samples"]').element
+ expect(budget.value).toBe('0')
+ expect(budget.willValidate).toBe(false)
+ expect(samples.willValidate).toBe(false)
  await w.get('[data-testid="degradation-probe-enabled"]').setValue(false)
  await w.get('[data-testid="degradation-enabled"]').setValue(true)
  await w.get('[data-testid="independent-429-enabled"]').setValue(true)

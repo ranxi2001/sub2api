@@ -16,7 +16,6 @@ const scheduledTestDefaultMaxWorkers = 10
 type ScheduledTestRunnerService struct {
 	oauth429Repo   OAuth429Repository
 	oauth429Slots  qualityJudgeSlots
-	oauth429Wake   chan struct{}
 	oauth429Cancel context.CancelFunc
 	oauth429WG     sync.WaitGroup
 	oauth429Start  sync.Once

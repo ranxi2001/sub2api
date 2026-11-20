@@ -25,7 +25,7 @@
     <p class="text-xs leading-5 text-gray-500">{{ t('autoConfig.degradation.independentHint') }}</p>
     <div class="grid gap-3 sm:grid-cols-2">
      <label class="block text-sm">{{ t('autoConfig.degradation.independentBudget') }}<input v-model.number="independent.daily_test_budget" data-testid="independent-429-budget" :disabled="!independent.enabled" type="number" min="2" max="1000" step="1" :required="independent.enabled" class="input mt-2 w-full" /></label>
-     <label class="block text-sm">{{ t('autoConfig.degradation.independentSamples') }}<input v-model.number="independent.min_samples" data-testid="independent-429-samples" type="number" min="20" max="200" step="1" :required="independent.enabled" class="input mt-2 w-full" /></label>
+     <label class="block text-sm">{{ t('autoConfig.degradation.independentSamples') }}<input v-model.number="independent.min_samples" data-testid="independent-429-samples" :disabled="!independent.enabled" type="number" min="20" max="200" step="1" :required="independent.enabled" class="input mt-2 w-full" /></label>
     </div>
     <p class="text-xs leading-5 text-gray-500">{{ t('autoConfig.degradation.independentScope') }}</p>
    </div>

@@ -100,7 +100,9 @@ func (r *accountRepository) oauth429DB() (*sql.DB, error) {
 	return db, nil
 }
 
-func (r *accountRepository) ObserveOAuth429(ctx context.Context, id int64, model, request string, status int) (bool, error) {
+func (r *accountRepository) ObserveOAuth429(ctx context.Context, observation service.OAuth429Observation) (bool, error) {
+	id, model := observation.AccountID, observation.Model
+	request, status := observation.Request, observation.Status
 	if id <= 0 || strings.TrimSpace(model) == "" || len(model) > 256 || len(request) != 64 || status < 200 || status > 599 {
 		return false, nil
 	}
@@ -120,25 +122,51 @@ func (r *accountRepository) ObserveOAuth429(ctx context.Context, id int64, model
 	if err != nil {
 		return false, err
 	}
-	if !oauth429Eligible(cfg, a, model) {
+	if cfg.Revision != observation.Revision || !oauth429Eligible(cfg, a, model) {
 		return false, nil
 	}
-	// Serializes only the bounded global capacity/budget reservation. No network
-	// or test execution occurs under this lock.
-	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(4299281)`); err != nil {
-		return false, err
-	}
 	now := time.Now().UTC()
+	if observation.At.Before(now.Add(-time.Hour)) {
+		return false, nil
+	}
 	task, err := oauth429Load(ctx, tx, id, model)
 	if errors.Is(err, sql.ErrNoRows) {
+		// Only new account/model pairs compete for capacity. Existing windows
+		// serialize on their account row; the UTC budget has its own row lock.
+		if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(4299281)`); err != nil {
+			return false, err
+		}
 		var count int
 		if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM oauth_429_tasks`).Scan(&count); err != nil {
 			return false, err
 		}
 		if count >= oauth429QueueLimit {
-			return false, nil
+			var freed int
+			err = tx.QueryRowContext(ctx, `WITH victim AS MATERIALIZED (
+ SELECT account_id, model FROM oauth_429_tasks
+ WHERE state NOT IN ('pending','running') AND updated_at < clock_timestamp()-interval '1 hour'
+ ORDER BY updated_at LIMIT 1 FOR UPDATE SKIP LOCKED)
+ DELETE FROM oauth_429_tasks t USING victim v WHERE t.account_id=v.account_id AND t.model=v.model RETURNING 1`).Scan(&freed)
+			if errors.Is(err, sql.ErrNoRows) {
+				return false, nil
+			}
+			if err != nil {
+				return false, err
+			}
 		}
 		task = &service.OAuth429Task{AccountID: id, Model: model, Revision: cfg.Revision, Armed: true, State: "observing"}
+		// A cold completed episode can be evicted after its samples expire.
+		// Keep it latched until a new non-pressure window is observed.
+		var previous int64
+		err = tx.QueryRowContext(ctx, `SELECT (details->'oauth429'->>'generation')::bigint FROM account_auto_config_events
+ WHERE account_id=$1 AND kind='oauth429_review_completed' AND details->'oauth429'->>'model'=$2
+ AND details->'oauth429'->>'revision'=$3 ORDER BY id DESC LIMIT 1`, id, model, cfg.Revision).Scan(&previous)
+		if err == nil {
+			task.Generation = previous
+			task.Armed = false
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return false, err
+		}
 		if _, err = tx.ExecContext(ctx, `INSERT INTO oauth_429_tasks(account_id,model,state,data) VALUES($1,$2,'observing','{}')`, id, model); err != nil {
 			return false, err
 		}
@@ -166,8 +194,13 @@ func (r *accountRepository) ObserveOAuth429(ctx context.Context, id int64, model
 			duplicate = true
 		}
 	}
-	if !duplicate && len(samples) < 200 {
-		samples = append(samples, service.OAuth429Sample{Request: request, Status: status, At: now})
+	if !duplicate {
+		samples = append(samples, observation.OAuth429Sample)
+		// Replicas can persist observations out of arrival order.
+		sort.SliceStable(samples, func(i, j int) bool { return samples[i].At.Before(samples[j].At) })
+		if len(samples) > 200 {
+			samples = samples[len(samples)-200:]
+		}
 	}
 	task.Samples = samples
 	failures, limited := 0, 0

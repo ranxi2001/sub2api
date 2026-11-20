@@ -67,7 +67,7 @@ type OAuth429Task struct {
 // The repository owns all transitions and live fences. No scheduled plan,
 // quality history or quality action owner participates in this lifecycle.
 type OAuth429Repository interface {
-	ObserveOAuth429(context.Context, int64, string, string, int) (bool, error)
+	ObserveOAuth429(context.Context, OAuth429Observation) (bool, error)
 	ClaimOAuth429(context.Context) (*OAuth429Task, error)
 	OAuth429Current(context.Context, *OAuth429Task) (bool, error)
 	StartOAuth429Run(context.Context, *OAuth429Task) (*OAuth429Run, error)
@@ -113,19 +113,57 @@ func ValidateOAuth429Upstream(req *http.Request, accountID int64) error {
 	return nil
 }
 
-type oauth429Observer struct {
-	repo OAuth429Repository
-	wake chan struct{}
+// Keep only routing metadata in the bounded queues. Each account has a single
+// FIFO consumer per gateway, including retried physical responses.
+type OAuth429Observation struct {
+	AccountID int64
+	Model     string
+	Revision  string
+	OAuth429Sample
 }
 
-var oauth429HTTPObserver atomic.Pointer[oauth429Observer]
+var oauth429HTTPObserver atomic.Pointer[AccountOpsService]
+var oauth429Wake = make(chan struct{}, 1)
 
-// ObserveOAuth429HTTP accepts only business requests carrying the server's
-// correlation identity. Background tests never carry that identity. Retries
-// retain it; the durable per-account/model window counts its first response.
+func (s *AccountOpsService) startOAuth429Observations(ctx context.Context, repo OAuth429Repository) {
+	for i := range s.oauth429Samples {
+		queue := make(chan OAuth429Observation, 256)
+		s.oauth429Samples[i] = queue
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case sample := <-queue:
+					query, cancel := context.WithTimeout(ctx, 2*time.Second)
+					queued, err := repo.ObserveOAuth429(query, sample)
+					cancel()
+					if err != nil {
+						s.failures.Add(1)
+					}
+					if queued {
+						select {
+						case oauth429Wake <- struct{}{}:
+						default:
+						}
+					}
+				}
+			}
+		}()
+	}
+	oauth429HTTPObserver.Store(s)
+}
+
 func ObserveOAuth429HTTP(req *http.Request, accountID int64, status int) {
 	observer := oauth429HTTPObserver.Load()
-	if observer == nil || req == nil || req.GetBody == nil || status < 200 || status > 599 || req.Context().Value(qualityProbeContextKey{}) != nil {
+	if observer == nil || accountID <= 0 || req == nil || req.GetBody == nil || status < 200 || status > 599 || req.Context().Value(qualityProbeContextKey{}) != nil {
+		return
+	}
+	cfg := observer.autoConfig.Load().(OAuthAutoConfig)
+	policy := cfg.DegradationAction
+	if !policy.Enabled || !policy.UsesUpstream429() || !policy.Independent429.Enabled || cfg.Revision == "" {
 		return
 	}
 	requestID, _ := req.Context().Value(ctxkey.ClientRequestID).(string)
@@ -146,18 +184,13 @@ func ObserveOAuth429HTTP(req *http.Request, accountID int64, status int) {
 		return
 	}
 	digest := sha256.Sum256([]byte(requestID))
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(req.Context()), 500*time.Millisecond)
-	defer cancel()
-	queued, err := observer.repo.ObserveOAuth429(ctx, accountID, model, hex.EncodeToString(digest[:]), status)
-	if err != nil {
-		slog.Warn("oauth429 observation failed", "account_id", accountID)
-		return
-	}
-	if queued {
-		select {
-		case observer.wake <- struct{}{}:
-		default:
-		}
+	sample := OAuth429Observation{AccountID: accountID, Model: model, Revision: cfg.Revision, OAuth429Sample: OAuth429Sample{
+		Request: hex.EncodeToString(digest[:]), Status: status, At: time.Now().UTC(),
+	}}
+	select {
+	case observer.oauth429Samples[accountID%int64(len(observer.oauth429Samples))] <- sample:
+	default:
+		observer.dropped.Add(1)
 	}
 }
 
@@ -317,7 +350,7 @@ func (s *ScheduledTestRunnerService) startOAuth429() {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-			case <-s.oauth429Wake:
+			case <-oauth429Wake:
 			}
 		}
 	}()
