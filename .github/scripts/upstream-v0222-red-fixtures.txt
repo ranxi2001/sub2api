@@ -191,3 +191,7 @@ backend/internal/service/ciallo_test.go
 # Controls diagnostics require the newer recovery APIs, not historical RED sources.
 backend/internal/service/openai_409_controls_diagnostics_test.go
 backend/internal/handler/openai_owner_conflict_diagnostics_test.go
+
+# Probe penalty tests use receipt types absent from historical WS sources.
+backend/internal/handler/probe_penalty_response_test.go
+backend/internal/service/account_probe_penalty_test.go

@@ -942,7 +942,7 @@ func lockAndMergeAccountProbeExtra(
 
 	// Omitted cost means an unrelated edit. Keep the value under the row lock,
 	// including a probe update committed after the edit form was loaded.
-	for _, key := range []string{service.AccountCostMultiplierExtraKey, service.AccountCostAutoSyncExtraKey} {
+	for _, key := range []string{service.AccountCostMultiplierExtraKey, service.AccountCostAutoSyncExtraKey, service.AccountProbePenaltyExtraKey} {
 		if _, provided := extra[key]; !provided {
 			if value, exists := currentExtra[key]; exists {
 				if extra == nil {

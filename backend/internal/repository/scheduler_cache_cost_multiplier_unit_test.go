@@ -58,3 +58,31 @@ func TestSchedulerCachePreservesCostMultiplier(t *testing.T) {
 		})
 	}
 }
+
+func TestSchedulerCachePreservesProbePenalty(t *testing.T) {
+	ctx := context.Background()
+	cache := newSchedulerCacheUnit(t)
+	account := service.Account{ID: 9201, Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Extra: map[string]any{service.AccountProbePenaltyExtraKey: map[string]any{"enabled": true, "minimum_charge": .001}}}
+	bucket := service.SchedulerBucket{GroupID: 18, Platform: service.PlatformAnthropic, Mode: service.SchedulerModeSingle}
+	token, err := cache.CaptureBucketWriteToken(ctx, bucket)
+	require.NoError(t, err)
+	require.NoError(t, cache.SetSnapshot(ctx, bucket, token, []service.Account{account}))
+	for _, enabled := range []bool{true, false, true} {
+		account.Extra[service.AccountProbePenaltyExtraKey] = map[string]any{"enabled": enabled, "minimum_charge": .001}
+		require.True(t, shouldEnqueueSchedulerOutboxForExtraUpdates(account.Extra))
+		require.NoError(t, cache.SetAccount(ctx, &account))
+		candidates, hit, err := cache.GetSnapshot(ctx, bucket)
+		require.NoError(t, err)
+		require.True(t, hit)
+		require.Len(t, candidates, 1)
+		full, err := cache.GetAccount(ctx, account.ID)
+		require.NoError(t, err)
+		for _, cached := range []*service.Account{candidates[0], full} {
+			if enabled {
+				require.Equal(t, .001, cached.ProbePenaltyMinimum())
+			} else {
+				require.Zero(t, cached.ProbePenaltyMinimum())
+			}
+		}
+	}
+}

@@ -436,6 +436,10 @@
           <!-- Cost Breakdown -->
           <div class="mb-2 border-b border-gray-700 pb-1.5">
             <div class="text-xs font-semibold text-gray-300 mb-1">{{ t('usage.costDetails') }}</div>
+            <div v-if="tooltipData?.customer_cost_details?.probe_penalty" class="flex items-center justify-between gap-4" data-testid="probe-penalty-adjustment">
+              <span class="text-gray-400">{{ t('admin.accounts.probePenalty.adjustment') }}</span>
+              <span class="font-medium text-amber-300">${{ tooltipData.customer_cost_details.probe_penalty.adjustment.toFixed(8) }}</span>
+            </div>
             <div v-if="tooltipData && tooltipData.input_cost > 0" class="flex items-center justify-between gap-4">
               <span class="text-gray-400">{{ t('admin.usage.inputCost') }}</span>
               <span class="font-medium text-white">{{ customerAmount('input_cost') }}</span>
