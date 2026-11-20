@@ -122,7 +122,13 @@ function badgeClass(value: AutoConfigEventKind) {
 }
 function details(event: AutoConfigEvent) {
   const d = event.details
-  if (event.kind === 'oauth429_review_completed' && d.oauth429) return t('autoConfig.logs.oauth429Detail', { model: d.oauth429.model, verdicts: d.oauth429.runs.map(run => t('autoConfig.logs.oauth429Verdicts.' + run.verdict)).join(' / ') })
+  if (event.kind === 'oauth429_review_completed' && d.oauth429) {
+    const review = d.oauth429
+    const verdicts = review.runs.map(run => t('autoConfig.logs.oauth429Verdicts.' + run.verdict)).join(' / ')
+    const summary = t('autoConfig.logs.oauth429Detail', { model: review.model, verdicts })
+    const reason = review.reason ? t('autoConfig.logs.oauth429Reasons.' + review.reason) : ''
+    return [summary, reason, review.model_blocked ? t('autoConfig.logs.oauth429ModelBlocked') : ''].filter(Boolean).join(' · ')
+  }
   if (event.kind === 'degradation_applied' && d.degradation) {
     const e = d.degradation
     const actions = []

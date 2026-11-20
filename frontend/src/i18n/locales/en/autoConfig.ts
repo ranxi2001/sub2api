@@ -60,11 +60,10 @@ export default {
     errors: { accounts_unavailable: 'Could not read account state.', metric_unavailable: 'Could not read the monitored metric.', account_enable_failed: 'Some fallback accounts could not be enabled. Check their state.' }
   },
  degradation: {
-  "independentScope": "The rolling hour retains at most 200 samples per account/model. Each trigger reserves two calls; incomplete calls are not retried or replaced with history. A continuing 429 episode cannot repeatedly trigger tests. Editing configuration or stopping/deleting an account cancels pending evidence. Only the tested model may be blocked when model restriction is selected and that model is outside the retained model list; other models, account concurrency and groups stay unchanged. This is a call-count budget, not a currency limit. Budget 0 means no authorization.",
+  "independentScope": "Use up to 200 business samples per account and model in the last hour. Model restrictions apply only when enabled and the tested model is outside the retained list.",
   "independentSamples": "Minimum business request samples (20–200)",
-  "independentBudget": "Cluster-wide daily test-call budget (UTC, 2–1000)",
-  "independentHint": "Disabled until explicitly authorized. These model calls may cost money. Reaching the thresholds immediately starts two new complete tests on the same account and model, subject to execution admission and available concurrency. No extra cooldown, full-hour wait or quality operations schedule is required. Only two explicit wrong answers can restrict the tested model. Correct, rejected, empty, truncated or cancelled answers cannot authorize action.",
-  "independentEnable": "Authorize two independent tests when the 429 threshold is reached",
+  "independentHint": "Business HTTP 429 pressure can trigger tests on the original account and model. Two complete wrong answers or five consecutive upstream HTTP 429 test responses can restrict the model. Timeouts, empty or truncated answers, and the text 429 do not count toward the streak.",
+  "independentEnable": "Run independent tests at the 429 threshold",
   "title": "Degradation actions",
   "hint": "The probe branch retains its confirmation policy. HTTP 429 pressure only starts the independent tests below; it never proves a wrong answer or directly changes account concurrency.",
   "conditions": "Conditions",
@@ -239,8 +238,10 @@ export default {
   "history": "Auto-upgrade record",
   "cooling": "Cooling down until {time}",
   "logs": {
- oauth429Detail: 'Tested model {model}: {verdicts}; only two explicit wrong answers can restrict this model under the configured policy.',
- oauth429Verdicts: { correct: 'Correct', incorrect: 'Confirmed wrong', inconclusive: 'Inconclusive' },
+ oauth429Detail: 'Tested model {model}: {verdicts}',
+ oauth429Reasons: { five_consecutive_429: 'Five consecutive HTTP 429 test responses', two_wrong_answers: 'Two complete wrong answers' },
+ oauth429ModelBlocked: 'Model restricted',
+ oauth429Verdicts: { rate_limited: 'Upstream HTTP 429', correct: 'Correct', incorrect: 'Confirmed wrong', inconclusive: 'Inconclusive' },
     "title": "Recent logs",
     "description": "Configuration saves, initial OAuth setup and concurrency changes, newest first.",
     "filter": "Filter log type",

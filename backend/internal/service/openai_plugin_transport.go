@@ -208,7 +208,9 @@ func (s *AccountTestService) doOpenAIAccountTestUpstream(
 		// This restores the complete cookie/egress bundle, holds it until body close,
 		// observes replacements and enforces the configured strict response policy.
 		request = request.WithContext(context.WithValue(request.Context(), astraCandySkipObservationKey{}, true))
-		return gateway.doOpenAIUpstream(request, proxyURL, account)
+		resp, err := gateway.doOpenAIUpstream(request, proxyURL, account)
+		recordOAuth429TestStatus(request, account.ID, resp, err)
+		return resp, err
 	}
 	_, independent429 := request.Context().Value(oauth429ExecutionKey{}).(*oauth429Execution)
 	if s.pluginManager != nil && !account.OpenAIRequestProxyEnabled() && !independent429 {

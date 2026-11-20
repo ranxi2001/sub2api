@@ -50,7 +50,6 @@ if (process.env.OAUTH429_BASELINE_ONLY === '1') {
  assert.equal(await page.locator('[data-testid="degradation-429-enabled"]').isChecked(),true)
  assert.equal(await page.locator('[data-testid="degradation-429-threshold"]').inputValue(),'80')
  await page.locator('[data-testid="independent-429-enabled"]').check()
- await page.locator('[data-testid="independent-429-budget"]').fill('20')
  for (const [device,width] of [['desktop',1100],['mobile',390]]) {
   await page.setViewportSize({width,height:1100})
   await page.screenshot({path:path.join(output,`after-${device}.png`),fullPage:true})

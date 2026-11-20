@@ -227,28 +227,25 @@ it('announces 429 conditions independently of the original dismissed feature', a
  reload.unmount();future.unmount()
 })
 
-it('requires explicit authorization and a bounded budget for independent 429 calls', async () => {
+it('saves the sample threshold for independent 429 tests', async () => {
  const w = mount(AutoConfigView); await flushPromises()
  expect(w.get<HTMLInputElement>('[data-testid="independent-429-enabled"]').element.checked).toBe(false)
- const budget = w.get<HTMLInputElement>('[data-testid="independent-429-budget"]').element
+ expect(w.find('[data-testid="independent-429-budget"]').exists()).toBe(false)
  const samples = w.get<HTMLInputElement>('[data-testid="independent-429-samples"]').element
- expect(budget.value).toBe('0')
- expect(budget.willValidate).toBe(false)
  expect(samples.willValidate).toBe(false)
  await w.get('[data-testid="degradation-probe-enabled"]').setValue(false)
  await w.get('[data-testid="degradation-enabled"]').setValue(true)
  await w.get('[data-testid="independent-429-enabled"]').setValue(true)
+ await w.get('[data-testid="independent-429-samples"]').setValue('19')
  await w.get('form').trigger('submit'); await flushPromises()
  expect(saveAutoConfig).not.toHaveBeenCalled()
- await w.get('[data-testid="independent-429-budget"]').setValue('20')
  await w.get('[data-testid="independent-429-samples"]').setValue('25')
  await w.get('form').trigger('submit'); await flushPromises()
- expect(saveAutoConfig).toHaveBeenCalledWith(expect.objectContaining({ degradation_action: expect.objectContaining({ independent_429: { enabled: true, daily_test_budget: 20, min_samples: 25 } }) }))
+ expect(saveAutoConfig).toHaveBeenCalledWith(expect.objectContaining({ degradation_action: expect.objectContaining({ independent_429: { enabled: true, min_samples: 25 } }) }))
  const saved = vi.mocked(saveAutoConfig).mock.calls[0][0]
  w.unmount(); vi.mocked(getAutoConfig).mockResolvedValueOnce(saved)
  const reloaded = mount(AutoConfigView); await flushPromises()
  expect(reloaded.get<HTMLInputElement>('[data-testid="independent-429-enabled"]').element.checked).toBe(true)
- expect(reloaded.get<HTMLInputElement>('[data-testid="independent-429-budget"]').element.value).toBe('20')
  reloaded.unmount()
 })
 

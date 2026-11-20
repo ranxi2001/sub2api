@@ -55,14 +55,12 @@ func oauth429Fixture(t *testing.T, history []string) (*accountRepository, *servi
 	c.DegradationAction.Upstream429Enabled = nil
 	c.DegradationAction.ProbeEnabled = &off
 	c.DegradationAction.ThresholdPercent = nil
-	c.DegradationAction.Independent429 = service.OAuth429TestConfig{Enabled: true, DailyTestBudget: 1000, MinSamples: 20}
+	c.DegradationAction.Independent429 = service.OAuth429TestConfig{Enabled: true, MinSamples: 20}
 	svc := service.ProvideAccountOpsService(NewSettingRepository(integrationEntClient), NewAccountOpsRepository(integrationDB), nil, repo, NewGroupRepository(integrationEntClient, integrationDB), &config.Config{Runtime: config.RuntimeConfig{Role: config.RuntimeRoleGateway}}, nil, nil, nil, nil, nil)
 	t.Cleanup(svc.Stop)
 	c, err := svc.SaveOAuthAutoConfig(t.Context(), c)
 	require.NoError(t, err)
 
-	_, err = integrationDB.ExecContext(t.Context(), `DELETE FROM oauth_429_daily_budget`)
-	require.NoError(t, err)
 	a := degradationAccountFixture(t, 50, map[string]any{"gpt-6-astra": "gpt-6-astra", "gpt-6-luna": "gpt-6-luna"}, history, time.Minute)
 	_, err = integrationDB.ExecContext(t.Context(), `UPDATE accounts SET credentials=credentials||'{"access_token":"fixture-only"}'::jsonb WHERE id=$1`, a.ID)
 	require.NoError(t, err)
@@ -141,8 +139,11 @@ func TestOAuth429WorkerIndependentPair(t *testing.T) {
 		{"qualityops_off_two_wrong", []string{"23", "27"}, nil, true},
 		{"history_wrong_cannot_shortcut", []string{"23", "21"}, []string{"incorrect", "incorrect"}, false},
 		{"wrong_pass", []string{"23", "21"}, nil, false},
-		{"wrong_unknown_429", []string{"23", "429"}, nil, false},
-		{"two_rejections_terminate", []string{"429", "429"}, nil, false},
+		{"wrong_then_429_then_correct", []string{"23", "429", "21"}, nil, false},
+		{"five_consecutive_429", []string{"429", "429", "429", "429", "429"}, nil, true},
+		{"four_then_correct", []string{"429", "429", "429", "429", "21"}, nil, false},
+		{"four_then_unconfirmed", []string{"429", "429", "429", "429", "wrapped_rate_limit"}, nil, false},
+		{"five_after_wrong", []string{"23", "429", "429", "429", "429", "429"}, nil, true},
 		{"auth_is_inconclusive", []string{"401", "401"}, nil, false},
 		{"partial_integer_with_terminal_error", []string{"23", "incomplete_status"}, nil, false},
 		{"rate_limit_delivered_as_text", []string{"wrapped_rate_limit", "wrapped_rate_limit"}, nil, false},
@@ -171,7 +172,7 @@ func TestOAuth429WorkerIndependentPair(t *testing.T) {
 			}, 8*time.Second, 20*time.Millisecond, "actual background worker must complete immediately without a quality plan or cooldown")
 			runner.Stop()
 			second.Stop()
-			require.EqualValues(t, 2, calls.Load(), "qualityops off must still actively execute two complete independent calls")
+			require.EqualValues(t, len(tc.answers), calls.Load())
 			after, err := repo.GetByID(t.Context(), a.ID)
 			require.NoError(t, err)
 			require.Equal(t, tc.blocked, after.IsOAuth429ModelBlocked("gpt-6-astra"))
@@ -196,13 +197,29 @@ func TestOAuth429WorkerIndependentPair(t *testing.T) {
 			var saved service.OAuth429Task
 			require.NoError(t, json.Unmarshal(data, &saved))
 			require.Equal(t, "complete", state)
-			require.Len(t, saved.Runs, 2)
+			require.Len(t, saved.Runs, len(tc.answers))
+			var logged service.AutoConfigEventDetails
+			var event []byte
+			require.NoError(t, integrationDB.QueryRowContext(t.Context(), `SELECT details FROM account_auto_config_events WHERE account_id=$1 AND kind='oauth429_review_completed' ORDER BY id DESC LIMIT 1`, a.ID).Scan(&event))
+			require.NoError(t, json.Unmarshal(event, &logged))
+			require.NotNil(t, logged.OAuth429)
+			require.Equal(t, saved.Reason, logged.OAuth429.Reason)
+			require.Equal(t, tc.blocked, logged.OAuth429.ModelBlocked)
+			if tc.name == "five_consecutive_429" || tc.name == "five_after_wrong" {
+				require.Equal(t, "five_consecutive_429", saved.Reason)
+			}
+			for i, answer := range tc.answers {
+				if answer == "429" {
+					require.Equal(t, 429, saved.Runs[i].HTTPStatus)
+					require.Equal(t, "rate_limited", saved.Runs[i].Verdict)
+				}
+			}
 			switch tc.name {
-			case "auth_is_inconclusive", "two_rejections_terminate", "rate_limit_delivered_as_text":
+			case "auth_is_inconclusive", "rate_limit_delivered_as_text":
 				for _, run := range saved.Runs {
 					require.Equal(t, "inconclusive", run.Verdict)
 				}
-			case "partial_integer_with_terminal_error", "wrong_truncated", "wrong_empty", "wrong_unknown_429":
+			case "partial_integer_with_terminal_error", "wrong_truncated", "wrong_empty":
 				require.Equal(t, "inconclusive", saved.Runs[1].Verdict)
 			case "formatted_correct", "wrong_pass":
 				require.Equal(t, "correct", saved.Runs[1].Verdict)
@@ -216,7 +233,7 @@ func TestOAuth429WorkerIndependentPair(t *testing.T) {
 			pending, err := repo.ClaimOAuth429(t.Context())
 			require.NoError(t, err)
 			require.Nil(t, pending)
-			require.EqualValues(t, 2, calls.Load())
+			require.EqualValues(t, len(tc.answers), calls.Load())
 			upstream.accounts.Range(func(key, value any) bool { require.Equal(t, a.ID, key); return true })
 		})
 	}
@@ -307,23 +324,14 @@ func TestOAuth429PersistentClaimRestartAndFences(t *testing.T) {
 // Compile-time production repository contract.
 var _ service.OAuth429Repository = (*accountRepository)(nil)
 
-func TestOAuth429BudgetAndDuplicateAdmission(t *testing.T) {
-	repo, a, c := oauth429Fixture(t, nil)
-	c.DegradationAction.Independent429.DailyTestBudget = 2
-	raw, err := json.Marshal(c)
-	require.NoError(t, err)
-	_, err = integrationDB.ExecContext(t.Context(), `UPDATE settings SET value=$2 WHERE key=$1`, service.SettingKeyOAuthAutoConfig, string(raw))
-	require.NoError(t, err)
-	oauth429Prime(t, repo, a.ID, "gpt-6-astra")
-	for i := 0; i < 20; i++ {
-		require.False(t, oauth429Observe(t, repo, a.ID, "gpt-6-luna", i), "the first pair reserved the entire global budget")
+func TestOAuth429WorkerAdmitsEachModelIndependently(t *testing.T) {
+	repo, a, _ := oauth429Fixture(t, nil)
+	for _, model := range []string{"gpt-6-astra", "gpt-6-luna"} {
+		oauth429Prime(t, repo, a.ID, model)
 	}
-	var reserved int
-	require.NoError(t, integrationDB.QueryRowContext(t.Context(), `SELECT reserved FROM oauth_429_daily_budget WHERE day=(clock_timestamp() AT TIME ZONE 'UTC')::date`).Scan(&reserved))
-	require.Equal(t, 2, reserved)
 	var pending int
-	require.NoError(t, integrationDB.QueryRowContext(t.Context(), `SELECT count(*) FROM oauth_429_tasks WHERE state='pending'`).Scan(&pending))
-	require.Equal(t, 1, pending)
+	require.NoError(t, integrationDB.QueryRowContext(t.Context(), `SELECT count(*) FROM oauth_429_tasks WHERE state='pending' AND account_id=$1`, a.ID).Scan(&pending))
+	require.Equal(t, 2, pending)
 }
 
 // Business response ingress wakes the real durable observer without a quality plan.
@@ -378,6 +386,10 @@ func TestOAuth429AliasAndLiveCancellation(t *testing.T) {
 		repo, a, c := oauth429Fixture(t, nil)
 		started, aborted := make(chan struct{}), make(chan struct{})
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// HTTP/1 detects the peer closing after the request body reaches EOF.
+			if _, err := io.Copy(io.Discard, r.Body); err != nil {
+				return
+			}
 			close(started)
 			select {
 			case <-r.Context().Done():

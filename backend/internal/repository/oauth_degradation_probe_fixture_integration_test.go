@@ -26,17 +26,18 @@ var confirmedProbeFixtures sync.Map
 // Legacy action tests enter the existing probe/candy confirmation API. Reuse
 // the account's quality plan and live lease: a second quarantine plan violates
 // the production scope constraint and must not be fabricated by the fixture.
-func prepareConfirmedProbeFixture(t *testing.T, id int64) {
+func prepareConfirmedProbeFixture(t *testing.T, id int64) service.OAuthDegradationCandyReview {
 	t.Helper()
-	if _, ok := confirmedProbeFixtures.Load(id); ok {
-		return
+	if saved, ok := confirmedProbeFixtures.Load(id); ok {
+		return saved.(confirmedProbeFixture).review
 	}
 	ctx := t.Context()
 	var raw string
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=$1`, service.SettingKeyOAuthAutoConfig).Scan(&raw))
 	var cfg service.OAuthAutoConfig
 	require.NoError(t, json.Unmarshal([]byte(raw), &cfg))
-	now := time.Now().UTC().Truncate(time.Microsecond)
+	if !cfg.DegradationAction.UsesCandyRetest() {return service.OAuthDegradationCandyReview{}}
+ now := time.Now().UTC().Truncate(time.Microsecond)
 	f := confirmedProbeFixture{review: service.OAuthDegradationCandyReview{StartedAt: now, Incorrect: 2, Revision: cfg.Revision}}
 	err := integrationDB.QueryRowContext(ctx, `SELECT id,model_id,updated_at,running_until FROM scheduled_test_plans
  WHERE account_id=$1 AND pelican_config->'quality' IS NOT NULL
@@ -72,6 +73,7 @@ func prepareConfirmedProbeFixture(t *testing.T, id int64) {
 		}
 		require.NoError(t, err)
 	})
+ return f.review
 }
 func (f confirmedProbeFixture) restoreLease(ctx context.Context, db sqlExecutor) error {
 	_, err := db.ExecContext(ctx, `UPDATE scheduled_test_plans SET running_until=$2 WHERE id=$1 AND running_until=$3 AND updated_at=$4`, f.review.PlanID, f.previousLease, f.review.LeaseUntil, f.review.PlanUpdatedAt)
