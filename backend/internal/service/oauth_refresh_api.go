@@ -303,7 +303,7 @@ func (api *OAuthRefreshAPI) RefreshIfNeeded(
 		}
 		result := &OAuthRefreshResult{Refreshed: applied, Account: durableAccount}
 		if applied {
-			result.NewCredentials = newCredentials
+			result.NewCredentials = shallowCopyMap(durableAccount.Credentials)
 		}
 		return result, nil
 	}
