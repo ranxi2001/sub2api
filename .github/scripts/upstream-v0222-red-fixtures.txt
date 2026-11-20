@@ -191,3 +191,8 @@ backend/internal/service/ciallo_test.go
 # Controls diagnostics require the newer recovery APIs, not historical RED sources.
 backend/internal/service/openai_409_controls_diagnostics_test.go
 backend/internal/handler/openai_owner_conflict_diagnostics_test.go
+
+# v0.2.24 model listing and request-body diagnostics depend on newer handler APIs.
+backend/internal/handler/gateway_models_test.go
+backend/internal/handler/request_body_limit_test.go
+backend/internal/handler/request_body_read_log_test.go
