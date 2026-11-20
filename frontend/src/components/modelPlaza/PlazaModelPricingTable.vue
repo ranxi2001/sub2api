@@ -65,7 +65,18 @@
           <!-- 模型名 + 非 token 计费模式徽章;分时时段行额外标注时段 -->
           <td class="border-r border-gray-100 py-2.5 pl-5 pr-4 align-middle dark:border-dark-700/60">
             <div class="flex flex-wrap items-center gap-1.5">
-              <span class="font-medium text-gray-900 dark:text-white">{{ m.name }}</span>
+              <span class="inline-flex min-w-0 items-center gap-1">
+                <span class="min-w-0 break-words font-medium text-gray-900 dark:text-white">{{ m.name }}</span>
+                <button
+                  type="button"
+                  class="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:text-dark-300 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+                  :title="t('modelPlaza.table.copyModelId', { model: m.name })"
+                  :aria-label="t('modelPlaza.table.copyModelId', { model: m.name })"
+                  @click="copyToClipboard(m.name)"
+                >
+                  <Icon name="copy" size="sm" aria-hidden="true" />
+                </button>
+              </span>
               <span v-if="billingMode(m) === BILLING_MODE_TOKEN && (m.pricing?.image_minimum_charge ?? 0) > 0"
                 class="rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-700 dark:bg-amber-900/20 dark:text-amber-300"
                 data-image-minimum-charge :title="t('imageUsage.minimumHelp')">
@@ -325,6 +336,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import Icon from '@/components/icons/Icon.vue'
+import { useClipboard } from '@/composables/useClipboard'
 import { formatScaled, resolveIntervalPrices } from '@/utils/pricing'
 import { platformAccentColor, platformBadgeLightClass, platformLabel } from '@/utils/platformColors'
 import {
@@ -371,6 +384,7 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
+const { copyToClipboard } = useClipboard()
 
 /** 实付分区只从平台拿一个主色,浅底/标题/下划线全部由 scoped CSS 用 color-mix 派生。 */
 const accentStyle = computed(() => ({ '--plaza-accent': platformAccentColor(props.platform ?? '') }))
