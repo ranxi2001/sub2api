@@ -42,3 +42,15 @@ func TestWanVideoInputAndUsage(t *testing.T) {
 		require.Error(t, err)
 	}
 }
+
+func TestWanFixedDurationSupplierCompletion(t *testing.T) {
+	raw := []byte(`{"id":"task-123","status":"completed","video_url":"https://media.example.com/a.mp4"}`)
+	_, err := wanFixedDurationReceipt(raw, GrokMediaRequestInfo{})
+	require.Error(t, err)
+	receipt, err := wanFixedDurationReceipt(raw, GrokMediaRequestInfo{DurationSeconds: 2, Resolution: "480p"})
+	require.NoError(t, err)
+	task, err := parseWanTask(receipt, false)
+	require.NoError(t, err)
+	require.Equal(t, 2.0, task.BilledSeconds)
+	require.Equal(t, "480p", task.Resolution)
+}

@@ -274,6 +274,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 					return
 				}
 				requestInfo.Resolution = task.VideoResolution
+				requestInfo.DurationSeconds = task.VideoDurationSeconds
 			}
 			upstreamVideoTaskID = task.UpstreamTaskID
 		}

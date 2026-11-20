@@ -1,6 +1,6 @@
 # Qwen 万相视频
 
-原生 Qwen 分组可通过 `POST /v1/videos` 提交 `wan3.0-video` 异步任务。管理员在分组启用媒体生成，为该模型设置 480p、720p、1080p 每秒价，并在模型白名单中放行。Qwen API Key 账号使用 `credentials.qwen_video_protocol` 选择 `dashscope`（直连原生接口）或 `openai`（连接提供本接口的 Sub2API 上游）。使用对应服务地域、支持服务端调用的凭据和该上游已有的模型映射。
+原生 Qwen 分组可通过 `POST /v1/videos` 提交 `wan3.0-video` 异步任务。管理员在分组启用媒体生成，为该模型设置 480p、720p、1080p 每秒价，并在模型白名单中放行。Qwen API Key 账号使用 `credentials.qwen_video_protocol` 选择 `dashscope`（直连原生接口）或 `openai`（连接提供本接口的 Sub2API 上游）。对返回 OpenAI 风格状态但缺少计费用量的供应商，可以选择 `fixed_duration`，它仅接受固定输出时长且拒绝输入参考视频；查询成功后按提交时长结算。使用对应服务地域、支持服务端调用的凭据和该上游已有的模型映射。
 
 请求示例：
 

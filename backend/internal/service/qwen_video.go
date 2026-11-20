@@ -64,6 +64,15 @@ func parseWanCreate(body []byte) (wanCreate, GrokMediaRequestInfo, error) {
 		Audio      *bool       `json:"audio"`
 		Media      []wanMedia  `json:"media"`
 	}
+	object := gjson.ParseBytes(body)
+	if err := validateOpenAIVideoJSONFields(object, "model", "prompt", "seconds", "duration", "resolution", "size", "aspect_ratio", "audio", "media"); err != nil {
+		return out, info, err
+	}
+	for _, ref := range object.Get("media").Array() {
+		if err := validateOpenAIVideoJSONFields(ref, "type", "url"); err != nil {
+			return out, info, err
+		}
+	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
 	if !json.Valid(body) || decoder.Decode(&in) != nil || in.Model != wanVideoModel || strings.TrimSpace(in.Prompt) == "" {
@@ -142,7 +151,8 @@ func parseWanCreate(body []byte) (wanCreate, GrokMediaRequestInfo, error) {
 }
 
 func (s *OpenAIGatewayService) forwardWanVideo(ctx context.Context, c *gin.Context, account *Account, endpoint GrokMediaEndpoint, taskID, upstreamID string, body []byte, info GrokMediaRequestInfo) (*OpenAIForwardResult, *OpenAIVideoCreation, error) {
-	native := account.GetCredential("qwen_video_protocol") == "dashscope"
+	protocol := account.GetCredential("qwen_video_protocol")
+	native := protocol == "dashscope"
 	base, err := s.validateUpstreamBaseURL(account.GetCredential("base_url"))
 	if err != nil {
 		return nil, nil, err
@@ -165,6 +175,23 @@ func (s *OpenAIGatewayService) forwardWanVideo(ctx context.Context, c *gin.Conte
 		input, _, err := parseWanCreate(body)
 		if err != nil {
 			return nil, nil, err
+		}
+		if protocol == "fixed_duration" {
+			if input.Parameters.Audio != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"message": "This supplier does not support the audio switch"}})
+				return nil, nil, errors.New("unsupported audio switch")
+			}
+			for _, media := range input.Input.Media {
+				if media.Type == "reference_video" {
+					c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"message": "This video supplier does not report reference video usage"}})
+					return nil, nil, errors.New("unmetered reference video")
+				}
+			}
+			// The supplier omits metering on completion. Send the exact duration and tier from the admission quote.
+			body, err = json.Marshal(map[string]any{"model": input.Model, "prompt": input.Input.Prompt, "duration": input.Parameters.Duration, "resolution": input.Parameters.Resolution, "aspect_ratio": input.Parameters.Ratio, "media": input.Input.Media})
+			if err != nil {
+				return nil, nil, err
+			}
 		}
 		result.Model, result.BillingModel, result.UpstreamModel = info.Model, info.Model, account.GetMappedModel(info.Model)
 		if result.UpstreamModel != wanVideoModel {
@@ -227,6 +254,12 @@ func (s *OpenAIGatewayService) forwardWanVideo(ctx context.Context, c *gin.Conte
 	if resp.StatusCode >= 300 || !gjson.ValidBytes(raw) {
 		return nil, nil, errors.New("invalid Wan response")
 	}
+	if protocol == "fixed_duration" && endpoint != OpenAIVideoEndpointCreate {
+		raw, err = wanFixedDurationReceipt(raw, info)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
 	view, err := parseWanTask(raw, native)
 	if err != nil {
 		return nil, nil, err
@@ -265,6 +298,43 @@ func (s *OpenAIGatewayService) forwardWanVideo(ctx context.Context, c *gin.Conte
 		c.JSON(http.StatusOK, view)
 	}
 	return result, nil, nil
+}
+
+// A fixed-duration supplier does not return unit counts. Only jobs created
+// without input video can use their server-owned submission duration as the charge.
+func wanFixedDurationReceipt(raw []byte, info GrokMediaRequestInfo) ([]byte, error) {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return nil, err
+	}
+	if gjson.GetBytes(raw, "status").String() != "completed" {
+		return raw, nil
+	}
+	if info.DurationSeconds < 2 || info.DurationSeconds > 30 {
+		return nil, errors.New("missing fixed-duration task snapshot")
+	}
+	if _, ok := LookupVideoBillingResolution(info.Resolution); !ok {
+		return nil, errors.New("missing fixed-duration task resolution")
+	}
+	if _, ok := obj["billed_seconds"]; !ok {
+		obj["billed_seconds"] = json.RawMessage(strconv.Itoa(info.DurationSeconds))
+	}
+	if _, ok := obj["resolution"]; !ok {
+		b, err := json.Marshal(info.Resolution)
+		if err != nil {
+			return nil, err
+		}
+		obj["resolution"] = b
+	}
+	if _, ok := obj["url"]; !ok {
+		for _, name := range []string{"video_url", "result_url"} {
+			if v, ok := obj[name]; ok {
+				obj["url"] = v
+				break
+			}
+		}
+	}
+	return json.Marshal(obj)
 }
 
 type wanTask struct {
