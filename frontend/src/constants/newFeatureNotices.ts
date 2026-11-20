@@ -24,6 +24,7 @@ export const NEW_FEATURE_NOTICES = {
   accountOpsProviderBalance: 'account-ops-provider-wallet-balance',
   accountOpsOAuthLifecycle: 'account-ops-oauth-lifecycle',
   moderationUpstreamAccountScope: 'moderation-upstream-account-scope',
+  adminErrorPlatform: 'admin-error-platform-filter',
   adminUsagePlatform: 'admin-usage-platform-filter-initial-announcement',
   usageTrendRate: 'usage-trend-tooltip-rpm-tpm-initial-announcement',
   priorityCacheWeight: 'priority-cache-weight-initial-announcement',
