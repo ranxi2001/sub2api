@@ -45,12 +45,15 @@ type OAuth429Run struct {
 	StartedAt      time.Time `json:"started_at"`
 	FinishedAt     time.Time `json:"finished_at,omitempty"`
 	Verdict        string    `json:"verdict"`
+	HTTPStatus     int       `json:"http_status,omitempty"`
 	AnswerComplete bool      `json:"answer_complete,omitempty"`
 	Digest         string    `json:"digest,omitempty"`
 }
 type OAuth429Task struct {
 	AccountID    int64            `json:"account_id"`
 	Model        string           `json:"model"`
+	Reason       string           `json:"reason,omitempty"`
+	ModelBlocked bool             `json:"model_blocked,omitempty"`
 	RequestModel string           `json:"request_model"`
 	Revision     string           `json:"revision"`
 	TriggerID    string           `json:"trigger_id"`
@@ -85,6 +88,7 @@ type oauth429ExecutionKey struct{}
 type oauth429Execution struct {
 	AccountID      int64
 	Model          string
+	httpStatus     atomic.Int32
 	answerComplete atomic.Bool
 }
 
@@ -212,7 +216,72 @@ func (a *Account) IsOAuth429ModelBlocked(model string) bool {
 	return entries[model] != nil || entries[a.GetMappedModel(model)] != nil
 }
 
-// RunOAuth429Task runs exactly the two reserved calls. A crash after dispatch
+const OAuth429ConsecutiveLimit = 5
+
+func (task *OAuth429Task) consecutiveRateLimits() int {
+	count := 0
+	for i := len(task.Runs) - 1; i >= 0; i-- {
+		run := task.Runs[i]
+		if run.Verdict != "rate_limited" || run.HTTPStatus != http.StatusTooManyRequests {
+			break
+		}
+		count++
+	}
+	return count
+}
+
+func (task *OAuth429Task) NeedsAnotherRun() bool {
+	if task.Reason == "budget_exhausted" {
+		return false
+	}
+	if len(task.Runs) < 2 {
+		return true
+	}
+	streak := task.consecutiveRateLimits()
+	return streak > 0 && streak < OAuth429ConsecutiveLimit && len(task.Runs) < OAuth429ConsecutiveLimit+1
+}
+
+// A result may authorize action only while its original trigger and lease are
+// current. Require distinct, chronologically ordered run/result pairs.
+func (task *OAuth429Task) DecisionReason() string {
+	if len(task.Runs) < 2 || len(task.Runs) > OAuth429ConsecutiveLimit+1 {
+		return ""
+	}
+	ids := make(map[string]bool)
+	last := task.TriggeredAt
+	for _, run := range task.Runs {
+		if run.ID == "" || run.ResultID == "" || run.ID == run.ResultID || ids[run.ID] || ids[run.ResultID] ||
+			run.StartedAt.Before(last) || run.FinishedAt.Before(run.StartedAt) || run.FinishedAt.After(task.ExpiresAt) {
+			return ""
+		}
+		ids[run.ID], ids[run.ResultID] = true, true
+		last = run.FinishedAt
+	}
+	if task.consecutiveRateLimits() == OAuth429ConsecutiveLimit {
+		return "five_consecutive_429"
+	}
+	one, two := task.Runs[0], task.Runs[1]
+	if len(task.Runs) == 2 && one.AnswerComplete && two.AnswerComplete && one.Verdict == "incorrect" && two.Verdict == "incorrect" {
+		return "two_wrong_answers"
+	}
+	return ""
+}
+
+// Capture the final inference HTTP status under the target identity check.
+// A number in an answer, a transport error, or a local admission rejection
+// cannot supply this evidence.
+func recordOAuth429TestStatus(req *http.Request, accountID int64, resp *http.Response, err error) {
+	run, ok := req.Context().Value(oauth429ExecutionKey{}).(*oauth429Execution)
+	if !ok {
+		return
+	}
+	run.httpStatus.Store(0)
+	if err == nil && resp != nil && req.Context().Err() == nil && ValidateOAuth429Upstream(req, accountID) == nil {
+		run.httpStatus.Store(int32(resp.StatusCode))
+	}
+}
+
+// RunOAuth429Task starts with two reserved calls. A crash after dispatch
 // leaves an inconclusive slot, never permission to replay that billable call.
 func (s *ScheduledTestRunnerService) RunOAuth429Task(ctx context.Context, repo OAuth429Repository, task *OAuth429Task) error {
 	ctx, cancel := context.WithDeadline(ctx, task.ExpiresAt)
@@ -233,7 +302,7 @@ func (s *ScheduledTestRunnerService) RunOAuth429Task(ctx context.Context, repo O
 		}
 	}()
 	defer cancel()
-	for len(task.Runs) < 2 {
+	for task.NeedsAnotherRun() {
 		account, err := s.accountTestSvc.accountRepo.GetByID(ctx, task.AccountID)
 		if err != nil {
 			return err
@@ -264,7 +333,10 @@ func (s *ScheduledTestRunnerService) RunOAuth429Task(ctx context.Context, repo O
 			if slot.ReleaseFunc != nil {
 				slot.ReleaseFunc()
 			}
-			return err
+			if err != nil {
+				return err
+			}
+			return repo.CompleteOAuth429(ctx, task)
 		}
 		cfg := &PelicanTestConfig{QuestionKind: "candy", Prompt: CandyPrompt + "\n你可以凭手感选择每种形状取多少颗，不能选择口味。", ReasoningEffort: "high", ParallelCount: 1, ModelID: task.RequestModel, Quality: &QualityPolicy{Action: QualityActionObserveOnly}}
 		execution := &oauth429Execution{AccountID: task.AccountID, Model: task.Model}
@@ -274,6 +346,10 @@ func (s *ScheduledTestRunnerService) RunOAuth429Task(ctx context.Context, repo O
 		result, executeErr := s.runOAuth429Answer(testCtx, task, cfg)
 		run.AnswerComplete = execution.answerComplete.Load()
 		run.Verdict = oauth429Verdict(result, executeErr, testCtx.Err(), task.RequestModel, run.AnswerComplete)
+		run.HTTPStatus = int(execution.httpStatus.Load())
+		if run.HTTPStatus == http.StatusTooManyRequests && testCtx.Err() == nil {
+			run.Verdict = "rate_limited"
+		}
 		run.ResultID, run.FinishedAt = uuid.NewString(), time.Now().UTC()
 		if result != nil {
 			digest := sha256.Sum256([]byte(result.ResponseText))

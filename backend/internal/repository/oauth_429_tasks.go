@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -220,17 +221,17 @@ func (r *accountRepository) ObserveOAuth429(ctx context.Context, observation ser
 	}
 	queued := false
 	if pressure && task.Armed && !duplicate {
-		var reserved int
 		if _, err = tx.ExecContext(ctx, `DELETE FROM oauth_429_daily_budget WHERE day < (clock_timestamp() AT TIME ZONE 'UTC')::date-7`); err != nil {
 			return false, err
 		}
-		err = tx.QueryRowContext(ctx, `INSERT INTO oauth_429_daily_budget(day,reserved) VALUES((clock_timestamp() AT TIME ZONE 'UTC')::date,2)
- ON CONFLICT(day) DO UPDATE SET reserved=oauth_429_daily_budget.reserved+2 WHERE oauth_429_daily_budget.reserved+2<=$1 RETURNING reserved`, cfg.DegradationAction.Independent429.DailyTestBudget).Scan(&reserved)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		reserved, err := reserveOAuth429Budget(ctx, tx, 2, cfg.DegradationAction.Independent429.DailyTestBudget)
+		if err != nil {
 			return false, err
 		}
-		if err == nil {
+		if reserved {
 			task.RequestModel = oauth429RequestModel(a, model)
+			task.Reason = ""
+			task.ModelBlocked = false
 			task.TriggerID = uuid.NewString()
 			task.Generation++
 			task.TriggeredAt = now
@@ -247,6 +248,18 @@ func (r *accountRepository) ObserveOAuth429(ctx context.Context, observation ser
 		return false, err
 	}
 	return queued, tx.Commit()
+}
+
+func reserveOAuth429Budget(ctx context.Context, tx *sql.Tx, count, limit int) (bool, error) {
+	var reserved int
+	err := tx.QueryRowContext(ctx, `INSERT INTO oauth_429_daily_budget(day,reserved)
+ SELECT (clock_timestamp() AT TIME ZONE 'UTC')::date,$1::integer WHERE $1<=$2
+ ON CONFLICT(day) DO UPDATE SET reserved=oauth_429_daily_budget.reserved+EXCLUDED.reserved
+ WHERE oauth_429_daily_budget.reserved+EXCLUDED.reserved<=$2 RETURNING reserved`, count, limit).Scan(&reserved)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 func (r *accountRepository) ClaimOAuth429(ctx context.Context) (*service.OAuth429Task, error) {
@@ -386,8 +399,8 @@ func (r *accountRepository) mutateOAuth429(ctx context.Context, claimed *service
 }
 func (r *accountRepository) StartOAuth429Run(ctx context.Context, task *service.OAuth429Task) (*service.OAuth429Run, error) {
 	var started *service.OAuth429Run
-	err := r.mutateOAuth429(ctx, task, func(_ *sql.Tx, _ service.OAuthAutoConfig, _ *service.Account, current *service.OAuth429Task) error {
-		if len(current.Runs) >= 2 {
+	err := r.mutateOAuth429(ctx, task, func(tx *sql.Tx, cfg service.OAuthAutoConfig, _ *service.Account, current *service.OAuth429Task) error {
+		if !current.NeedsAnotherRun() {
 			return nil
 		}
 		for _, run := range current.Runs {
@@ -395,6 +408,17 @@ func (r *accountRepository) StartOAuth429Run(ctx context.Context, task *service.
 				return nil
 			}
 		}
+		if len(current.Runs) >= 2 {
+			reserved, err := reserveOAuth429Budget(ctx, tx, 1, cfg.DegradationAction.Independent429.DailyTestBudget)
+			if err != nil {
+				return err
+			}
+			if !reserved {
+				current.Reason = "budget_exhausted"
+				return nil
+			}
+		}
+		current.LeaseUntil = time.Now().UTC().Add(4 * time.Minute)
 		started = &service.OAuth429Run{ID: uuid.NewString(), StartedAt: time.Now().UTC(), Verdict: "started"}
 		current.Runs = append(current.Runs, *started)
 		return nil
@@ -406,7 +430,7 @@ func (r *accountRepository) FinishOAuth429Run(ctx context.Context, task *service
 		if result.ResultID == "" || result.FinishedAt.Before(current.TriggeredAt) || result.FinishedAt.After(current.ExpiresAt) {
 			return nil
 		}
-		if result.Verdict != "correct" && result.Verdict != "incorrect" && result.Verdict != "inconclusive" {
+		if result.Verdict != "correct" && result.Verdict != "incorrect" && result.Verdict != "inconclusive" && !(result.Verdict == "rate_limited" && result.HTTPStatus == 429) {
 			return nil
 		}
 		for i, run := range current.Runs {
@@ -420,7 +444,7 @@ func (r *accountRepository) FinishOAuth429Run(ctx context.Context, task *service
 func (r *accountRepository) CompleteOAuth429(ctx context.Context, task *service.OAuth429Task) error {
 	changed := false
 	err := r.mutateOAuth429(ctx, task, func(tx *sql.Tx, cfg service.OAuthAutoConfig, a *service.Account, current *service.OAuth429Task) error {
-		if len(current.Runs) != 2 {
+		if len(current.Runs) < 2 || current.NeedsAnotherRun() {
 			return nil
 		}
 		for _, run := range current.Runs {
@@ -429,6 +453,11 @@ func (r *accountRepository) CompleteOAuth429(ctx context.Context, task *service.
 			}
 		}
 		current.State = "complete"
+		reason := current.DecisionReason()
+		if reason != "" {
+			current.Reason = reason
+		}
+		current.ModelBlocked = reason != "" && cfg.DegradationAction.RestrictsModels() && !slices.Contains(cfg.DegradationAction.Models, current.Model)
 		audit := *current
 		audit.Samples = nil
 		audit.Lease = ""
@@ -436,26 +465,14 @@ func (r *accountRepository) CompleteOAuth429(ctx context.Context, task *service.
 		if err := insertAutoConfigEvent(ctx, tx, service.AutoConfigEvent{AccountID: a.ID, AccountName: a.Name, Platform: a.Platform, Kind: service.AutoConfigEventOAuth429, Details: service.AutoConfigEventDetails{OAuth429: &audit, Concurrency: a.Concurrency, PreviousConcurrency: a.Concurrency}}); err != nil {
 			return err
 		}
-		one, two := current.Runs[0], current.Runs[1]
-		if !one.AnswerComplete || !two.AnswerComplete || one.Verdict != "incorrect" || two.Verdict != "incorrect" || one.ID == two.ID || one.ResultID == "" || one.ResultID == two.ResultID || one.StartedAt.Before(current.TriggeredAt) || two.StartedAt.Before(one.FinishedAt) {
+		if !current.ModelBlocked {
 			return nil
-		}
-		// Reuse only the selected model-restriction action, never account-wide
-		// concurrency/group actions. Models intentionally retained by the old policy
-		// stay allowed. HTTP confirmation does not expand that action contract.
-		if !cfg.DegradationAction.RestrictsModels() {
-			return nil
-		}
-		for _, allowed := range cfg.DegradationAction.Models {
-			if allowed == current.Model {
-				return nil
-			}
 		}
 		blocks, _ := a.Extra[service.OAuth429ModelBlocksKey].(map[string]any)
 		if blocks == nil {
 			blocks = map[string]any{}
 		}
-		blocks[current.Model] = map[string]any{"trigger_id": current.TriggerID, "generation": current.Generation, "revision": current.Revision, "runs": current.Runs, "applied_at": time.Now().UTC()}
+		blocks[current.Model] = map[string]any{"trigger_id": current.TriggerID, "generation": current.Generation, "revision": current.Revision, "runs": current.Runs, "reason": current.Reason, "applied_at": time.Now().UTC()}
 		if a.Extra == nil {
 			a.Extra = map[string]any{}
 		}

@@ -141,8 +141,12 @@ func TestOAuth429WorkerIndependentPair(t *testing.T) {
 		{"qualityops_off_two_wrong", []string{"23", "27"}, nil, true},
 		{"history_wrong_cannot_shortcut", []string{"23", "21"}, []string{"incorrect", "incorrect"}, false},
 		{"wrong_pass", []string{"23", "21"}, nil, false},
-		{"wrong_unknown_429", []string{"23", "429"}, nil, false},
-		{"two_rejections_terminate", []string{"429", "429"}, nil, false},
+		{"wrong_then_429_then_correct", []string{"23", "429", "21"}, nil, false},
+		{"five_consecutive_429", []string{"429", "429", "429", "429", "429"}, nil, true},
+		{"four_then_correct", []string{"429", "429", "429", "429", "21"}, nil, false},
+		{"four_then_unconfirmed", []string{"429", "429", "429", "429", "wrapped_rate_limit"}, nil, false},
+		{"five_after_wrong", []string{"23", "429", "429", "429", "429", "429"}, nil, true},
+		{"four_budget_exhausted", []string{"429", "429", "429", "429"}, nil, false},
 		{"auth_is_inconclusive", []string{"401", "401"}, nil, false},
 		{"partial_integer_with_terminal_error", []string{"23", "incomplete_status"}, nil, false},
 		{"rate_limit_delivered_as_text", []string{"wrapped_rate_limit", "wrapped_rate_limit"}, nil, false},
@@ -154,6 +158,10 @@ func TestOAuth429WorkerIndependentPair(t *testing.T) {
 			repo, a, _ := oauth429Fixture(t, tc.history)
 			runner, calls, upstream := oauth429Runner(t, repo, tc.answers)
 			oauth429Prime(t, repo, a.ID, "gpt-6-astra")
+			if tc.name == "four_budget_exhausted" {
+				_, err := integrationDB.ExecContext(t.Context(), `UPDATE oauth_429_daily_budget SET reserved=998 WHERE day=(clock_timestamp() AT TIME ZONE 'UTC')::date`)
+				require.NoError(t, err)
+			}
 			before, err := repo.GetByID(t.Context(), a.ID)
 			require.NoError(t, err)
 			require.False(t, before.IsOAuth429ModelBlocked("gpt-6-astra"))
@@ -171,7 +179,7 @@ func TestOAuth429WorkerIndependentPair(t *testing.T) {
 			}, 8*time.Second, 20*time.Millisecond, "actual background worker must complete immediately without a quality plan or cooldown")
 			runner.Stop()
 			second.Stop()
-			require.EqualValues(t, 2, calls.Load(), "qualityops off must still actively execute two complete independent calls")
+			require.EqualValues(t, len(tc.answers), calls.Load())
 			after, err := repo.GetByID(t.Context(), a.ID)
 			require.NoError(t, err)
 			require.Equal(t, tc.blocked, after.IsOAuth429ModelBlocked("gpt-6-astra"))
@@ -196,13 +204,32 @@ func TestOAuth429WorkerIndependentPair(t *testing.T) {
 			var saved service.OAuth429Task
 			require.NoError(t, json.Unmarshal(data, &saved))
 			require.Equal(t, "complete", state)
-			require.Len(t, saved.Runs, 2)
+			require.Len(t, saved.Runs, len(tc.answers))
+			var logged service.AutoConfigEventDetails
+			var event []byte
+			require.NoError(t, integrationDB.QueryRowContext(t.Context(), `SELECT details FROM account_auto_config_events WHERE account_id=$1 AND kind='oauth429_review_completed' ORDER BY id DESC LIMIT 1`, a.ID).Scan(&event))
+			require.NoError(t, json.Unmarshal(event, &logged))
+			require.NotNil(t, logged.OAuth429)
+			require.Equal(t, saved.Reason, logged.OAuth429.Reason)
+			require.Equal(t, tc.blocked, logged.OAuth429.ModelBlocked)
+			if tc.name == "five_consecutive_429" || tc.name == "five_after_wrong" {
+				require.Equal(t, "five_consecutive_429", saved.Reason)
+			}
+			if tc.name == "four_budget_exhausted" {
+				require.Equal(t, "budget_exhausted", saved.Reason)
+			}
+			for i, answer := range tc.answers {
+				if answer == "429" {
+					require.Equal(t, 429, saved.Runs[i].HTTPStatus)
+					require.Equal(t, "rate_limited", saved.Runs[i].Verdict)
+				}
+			}
 			switch tc.name {
-			case "auth_is_inconclusive", "two_rejections_terminate", "rate_limit_delivered_as_text":
+			case "auth_is_inconclusive", "rate_limit_delivered_as_text":
 				for _, run := range saved.Runs {
 					require.Equal(t, "inconclusive", run.Verdict)
 				}
-			case "partial_integer_with_terminal_error", "wrong_truncated", "wrong_empty", "wrong_unknown_429":
+			case "partial_integer_with_terminal_error", "wrong_truncated", "wrong_empty":
 				require.Equal(t, "inconclusive", saved.Runs[1].Verdict)
 			case "formatted_correct", "wrong_pass":
 				require.Equal(t, "correct", saved.Runs[1].Verdict)
@@ -216,7 +243,7 @@ func TestOAuth429WorkerIndependentPair(t *testing.T) {
 			pending, err := repo.ClaimOAuth429(t.Context())
 			require.NoError(t, err)
 			require.Nil(t, pending)
-			require.EqualValues(t, 2, calls.Load())
+			require.EqualValues(t, len(tc.answers), calls.Load())
 			upstream.accounts.Range(func(key, value any) bool { require.Equal(t, a.ID, key); return true })
 		})
 	}
