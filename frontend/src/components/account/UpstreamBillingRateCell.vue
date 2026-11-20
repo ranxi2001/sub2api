@@ -46,7 +46,8 @@
                   : t('admin.accounts.upstreamBilling.noPeakRate')
               }}
             </p>
-            <p>{{ t('admin.accounts.upstreamBilling.effectiveRate', { value: currentEffectiveRate ?? '-' }) }}</p>
+            <p v-if="convertedRate != null">{{ t('admin.accounts.upstreamBilling.newAPI.convertedDeclaration', { rate: currentEffectiveRate, value: convertedRate }) }}</p>
+            <p v-else>{{ t('admin.accounts.upstreamBilling.effectiveRate', { value: currentEffectiveRate ?? '-' }) }}</p>
             <p v-if="isNewAPIGroup">{{ t('admin.accounts.upstreamBilling.newAPI.groupRatioHint') }}</p>
             <p>{{ t('admin.accounts.upstreamBilling.updatedAt', { value: formatDate(snapshot?.received_at) }) }}</p>
           </template>
@@ -187,6 +188,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { getPlatformSpec } from '@/constants/platformCatalog'
 import { formatMultiplier } from '@/utils/formatters'
 import type { UpstreamBillingData, Account, UpstreamBalanceData, UpstreamBalanceSnapshot, UpstreamBillingProbeSnapshot } from '@/types'
 
@@ -279,6 +281,12 @@ const effectiveMultiplier = (billing?: UpstreamBillingData) => {
   return Number.isFinite(value) ? value : null
 }
 const currentEffectiveRate = computed(() => effectiveMultiplier(data.value))
+const convertedRate = computed(() => {
+  const rate = currentEffectiveRate.value
+  if (rate == null || !isNewAPIGroup.value || props.account.extra?.new_api_apply_usd_rate === false) return null
+  if (getPlatformSpec(props.account.platform)?.cn_provider !== false) return null
+  return Number((rate * 7).toPrecision(15))
+})
 const formatGroupRate = (group: UpstreamBillingData): string => {
   const rate = effectiveMultiplier(group)
   return rate == null ? '-' : formatMultiplier(rate)
@@ -308,6 +316,8 @@ const elapsedSinceLastSuccess = computed(() => formatElapsedSince(receivedAt.val
 const effectiveRate = computed(() => {
   if (!validTimestamps.value || stale.value || !['ok', 'failed'].includes(snapshot.value?.status ?? '')) return '-'
   if (isMultiGroup.value) return multiGroupRange.value
+  const converted = convertedRate.value
+  if (converted != null) return `${converted >= 0.1 ? converted.toFixed(2) : formatMultiplier(converted)}x`
   const value = currentEffectiveRate.value
   return value == null ? '-' : `${formatMultiplier(value)}x`
 })
