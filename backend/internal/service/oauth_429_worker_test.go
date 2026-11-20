@@ -15,8 +15,11 @@ import (
 func TestOAuth429VerdictsRequireCompleteExactTarget(t *testing.T) {
 	for _, tc := range []struct {
 		name, answer, status, message, model, want string
-		cancel                                     bool
+		cancel, incomplete                         bool
 	}{
+		{name: "unfinished answer", answer: "23", incomplete: true, want: "inconclusive"},
+		{name: "formatted pass", answer: "答案是21颗糖果。", want: "correct"},
+		{name: "wrapped HTTP error", answer: "429", want: "inconclusive"},
 		{name: "wrong", answer: "23", want: "incorrect"},
 		{name: "pass", answer: "21", want: "correct"},
 		{name: "whitespace", answer: " 21\n", want: "correct"},
@@ -45,15 +48,15 @@ func TestOAuth429VerdictsRequireCompleteExactTarget(t *testing.T) {
 			if tc.cancel {
 				ctxErr = context.Canceled
 			}
-			require.Equal(t, tc.want, oauth429Verdict(result, nil, ctxErr, "gpt-6-astra"))
+			require.Equal(t, tc.want, oauth429Verdict(result, nil, ctxErr, "gpt-6-astra", !tc.incomplete))
 		})
 	}
-	require.Equal(t, "inconclusive", oauth429Verdict(nil, nil, nil, "gpt-6-astra"))
-	require.Equal(t, "inconclusive", oauth429Verdict(&ScheduledTestResult{}, errors.New("transport"), nil, "gpt-6-astra"))
+	require.Equal(t, "inconclusive", oauth429Verdict(nil, nil, nil, "gpt-6-astra", true))
+	require.Equal(t, "inconclusive", oauth429Verdict(&ScheduledTestResult{}, errors.New("transport"), nil, "gpt-6-astra", true))
 }
 
 func TestOAuth429ExecutionRejectsOtherAccountOrModel(t *testing.T) {
-	ctx := context.WithValue(t.Context(), oauth429ExecutionKey{}, oauth429Execution{AccountID: 7, Model: "gpt-6-astra"})
+	ctx := context.WithValue(t.Context(), oauth429ExecutionKey{}, &oauth429Execution{AccountID: 7, Model: "gpt-6-astra"})
 	for _, tc := range []struct {
 		id    int64
 		model string
@@ -74,5 +77,5 @@ func TestOAuth429RetainedNumericSummary(t *testing.T) {
 	// This checks classifier behavior on that retained answer, not LLM accuracy,
 	// and supplies no evidence to any new trigger.
 	result := &ScheduledTestResult{Status: "success", ResponseText: "29", StartedAt: time.Now(), FinishedAt: time.Now(), PelicanConfig: &PelicanTestConfig{ModelID: "gpt-6-astra"}}
-	require.Equal(t, "incorrect", oauth429Verdict(result, nil, nil, "gpt-6-astra"))
+	require.Equal(t, "incorrect", oauth429Verdict(result, nil, nil, "gpt-6-astra", true))
 }

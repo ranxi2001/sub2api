@@ -26,8 +26,8 @@ concurrency:
   group: autoconfig-429-fresh-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-# This first increment verifies the no-direct-action guard. Dedicated worker,
-# handler and loopback-provider acceptance must be added before this draft is ready.
+# Guard RED/GREEN at 7990f8da2 is retained historical evidence. This workflow
+# verifies current behavior and the newly repaired observation boundaries.
 jobs:
   no-direct-action:
     runs-on: ubuntu-latest
@@ -42,42 +42,17 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           path: candidate
           persist-credentials: false
-      - uses: actions/checkout@v6
-        with:
-          ref: 8678e88f4dfb6bfb718993db8a2a15b4a6af8282
-          path: baseline
-          persist-credentials: false
       - uses: actions/setup-go@v6
         with:
           go-version-file: candidate/backend/go.mod
           cache-dependency-path: candidate/backend/go.sum
-      - name: Baseline must fail the unchanged behavior oracle
+      - name: Candidate behavior and existing ordinary probe review
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p evidence
           test "$(git -C candidate rev-parse HEAD)" = '${{ github.event.pull_request.head.sha || github.sha }}'
           git -C candidate rev-parse HEAD > evidence/candidate-head.txt
-          git -C baseline rev-parse HEAD > evidence/baseline-head.txt
-          oracle=backend/internal/repository/oauth_degradation_429_fresh_integration_test.go
-          cp "candidate/$oracle" "baseline/$oracle"
-          cmp "candidate/$oracle" "baseline/$oracle"
-          sha256sum "candidate/$oracle" "baseline/$oracle" > evidence/oracle-sha256.txt
-          set +e
-          (cd baseline/backend && go test -tags=integration ./internal/repository -run '^TestOAuth429RequiresFreshIndependentTestsBeforeAction$' -count=1 -v -timeout=15m) > evidence/red.log 2>&1
-          result=$?
-          set -e
-          cat evidence/red.log
-          printf '%s\n' "$result" > evidence/red-exit.txt
-          test "$result" -ne 0
-          bash candidate/.github/scripts/assert-test-log-clean.sh red evidence/red.log
-          grep -F '429 pressure and historical wrong answers must not authorize degradation before two fresh independent tests' evidence/red.log
-          grep -F -- '--- FAIL: TestOAuth429RequiresFreshIndependentTestsBeforeAction/no_quality_plan' evidence/red.log
-          grep -F -- '--- FAIL: TestOAuth429RequiresFreshIndependentTestsBeforeAction/historical_wrong_results' evidence/red.log
-      - name: Candidate behavior and existing ordinary probe review
-        shell: bash
-        run: |
-          set -euo pipefail
           (cd candidate/backend && go test -race -tags=integration ./internal/repository -run '^TestOAuth429RequiresFreshIndependentTestsBeforeAction$|^TestOAuthDegradationCandyReviewUsesCurrentRule$' -count=1 -v -timeout=15m) 2>&1 | tee evidence/green.log
           bash candidate/.github/scripts/assert-test-log-clean.sh green evidence/green.log
           grep -F -- '--- PASS: TestOAuth429RequiresFreshIndependentTestsBeforeAction/no_quality_plan' evidence/green.log
@@ -111,6 +86,32 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
+      - uses: actions/checkout@v6
+        with:
+          ref: 5afe9675e1b60a4b3b4ff6f82ca976b618218210
+          path: repair-baseline
+          persist-credentials: false
+      - name: Pre-repair deduplication and account transition behavioral RED
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          oracle=backend/internal/repository/oauth_429_observation_fences_integration_test.go
+          cp "$oracle" "repair-baseline/$oracle"
+          cmp "$oracle" "repair-baseline/$oracle"
+          sha256sum "$oracle" "repair-baseline/$oracle" > evidence/repair-oracle-sha256.txt
+          git -C repair-baseline rev-parse HEAD > evidence/repair-baseline-head.txt
+          set +e
+          (cd repair-baseline/backend && go test -tags=integration ./internal/repository -run '^TestOAuth429DedupSurvivesStatisticalWindowEviction$|^TestOAuth429QueuedObservationCannotCrossAccountTransition$' -count=1 -v -timeout=10m) > evidence/repair-red.log 2>&1
+          result=$?
+          set -e
+          cat evidence/repair-red.log
+          test "$result" -ne 0
+          bash .github/scripts/assert-test-log-clean.sh red evidence/repair-red.log
+          grep -F 'evicted business retry must not become the 160th independent failing sample' evidence/repair-red.log
+          grep -F 'queued old-epoch sample must be rejected even after the account becomes schedulable again' evidence/repair-red.log
+          grep -F -- '--- FAIL: TestOAuth429DedupSurvivesStatisticalWindowEviction' evidence/repair-red.log
+          grep -F -- '--- FAIL: TestOAuth429QueuedObservationCannotCrossAccountTransition' evidence/repair-red.log
       - name: Negative control rejects disconnected production worker
         shell: bash
         run: |
@@ -142,10 +143,12 @@ jobs:
           set -euo pipefail
           mkdir -p evidence
           git rev-parse HEAD > evidence/worker-head.txt
-          (cd backend && go test -race -tags=integration ./internal/repository -run '^TestOAuth429Worker|^TestOAuth429Persistent|^TestOAuth429Budget|^TestOAuth429HTTP|^TestOAuth429Alias' -count=1 -v -timeout=20m) 2>&1 | tee evidence/worker.log
+          (cd backend && go test -race -tags=integration ./internal/repository -run '^TestOAuth429Worker|^TestOAuth429Persistent|^TestOAuth429Budget|^TestOAuth429HTTP|^TestOAuth429Alias|^TestOAuth429Dedup|^TestOAuth429Queued|^TestOAuth429AccountEpoch|^TestOAuth429Expiry' -count=1 -v -timeout=20m) 2>&1 | tee evidence/worker.log
           bash .github/scripts/assert-test-log-clean.sh green evidence/worker.log
           grep -F -- '--- PASS: TestOAuth429WorkerIndependentPair/qualityops_off_two_wrong' evidence/worker.log
           grep -F -- '--- PASS: TestOAuth429WorkerIndependentPair/history_wrong_cannot_shortcut' evidence/worker.log
+          grep -F -- '--- PASS: TestOAuth429DedupSurvivesStatisticalWindowEviction' evidence/worker.log
+          grep -F -- '--- PASS: TestOAuth429QueuedObservationCannotCrossAccountTransition' evidence/worker.log
       - name: Real settings handler validation
         shell: bash
         run: |

@@ -125,8 +125,16 @@ func (r *accountRepository) ObserveOAuth429(ctx context.Context, observation ser
 	if cfg.Revision != observation.Revision || !oauth429Eligible(cfg, a, model) {
 		return false, nil
 	}
+	epoch, validSince, err := oauth429AccountEpoch(ctx, tx, id)
+	if err != nil {
+		return false, err
+	}
 	now := time.Now().UTC()
-	if observation.At.Before(now.Add(-time.Hour)) {
+	started := observation.StartedAt
+	if started.IsZero() {
+		started = observation.At
+	}
+	if started.Before(validSince) || observation.At.Before(validSince) || started.After(observation.At) || observation.At.After(now) || observation.At.Before(now.Add(-time.Hour)) {
 		return false, nil
 	}
 	task, err := oauth429Load(ctx, tx, id, model)
@@ -145,6 +153,7 @@ func (r *accountRepository) ObserveOAuth429(ctx context.Context, observation ser
 			err = tx.QueryRowContext(ctx, `WITH victim AS MATERIALIZED (
  SELECT account_id, model FROM oauth_429_tasks
  WHERE state NOT IN ('pending','running') AND updated_at < clock_timestamp()-interval '1 hour'
+ AND NOT EXISTS(SELECT 1 FROM oauth_429_request_dedup d WHERE d.account_id=oauth_429_tasks.account_id AND d.model=oauth_429_tasks.model AND d.expires_at>clock_timestamp())
  ORDER BY updated_at LIMIT 1 FOR UPDATE SKIP LOCKED)
  DELETE FROM oauth_429_tasks t USING victim v WHERE t.account_id=v.account_id AND t.model=v.model RETURNING 1`).Scan(&freed)
 			if errors.Is(err, sql.ErrNoRows) {
@@ -154,7 +163,7 @@ func (r *accountRepository) ObserveOAuth429(ctx context.Context, observation ser
 				return false, err
 			}
 		}
-		task = &service.OAuth429Task{AccountID: id, Model: model, Revision: cfg.Revision, Armed: true, State: "observing"}
+		task = &service.OAuth429Task{AccountID: id, AccountEpoch: epoch, Model: model, Revision: cfg.Revision, Armed: true, State: "observing"}
 		// A cold completed episode can be evicted after its samples expire.
 		// Keep it latched until a new non-pressure window is observed.
 		var previous int64
@@ -173,34 +182,34 @@ func (r *accountRepository) ObserveOAuth429(ctx context.Context, observation ser
 	} else if err != nil {
 		return false, err
 	}
-	if task.Revision != cfg.Revision {
+	if task.Revision != cfg.Revision || task.AccountEpoch != epoch {
+		task.AccountEpoch = epoch
 		task.Revision = cfg.Revision
 		task.State = "observing"
 		task.Armed = true
 		task.Samples = nil
 		task.Runs = nil
 	}
+	fresh, err := oauth429RememberRequest(ctx, tx, id, model, request, observation.At)
+	if err != nil {
+		return false, err
+	}
+	if !fresh {
+		return false, tx.Commit()
+	}
 	if task.State == "pending" || task.State == "running" {
-		return false, nil
+		return false, tx.Commit()
 	}
 	samples := make([]service.OAuth429Sample, 0, 200)
-	duplicate := false
 	for _, v := range task.Samples {
-		if v.At.Before(now.Add(-time.Hour)) {
-			continue
-		}
-		samples = append(samples, v)
-		if v.Request == request {
-			duplicate = true
+		if !v.At.Before(now.Add(-time.Hour)) {
+			samples = append(samples, v)
 		}
 	}
-	if !duplicate {
-		samples = append(samples, observation.OAuth429Sample)
-		// Replicas can persist observations out of arrival order.
-		sort.SliceStable(samples, func(i, j int) bool { return samples[i].At.Before(samples[j].At) })
-		if len(samples) > 200 {
-			samples = samples[len(samples)-200:]
-		}
+	samples = append(samples, observation.OAuth429Sample)
+	sort.SliceStable(samples, func(i, j int) bool { return samples[i].At.Before(samples[j].At) })
+	if len(samples) > 200 {
+		samples = samples[len(samples)-200:]
 	}
 	task.Samples = samples
 	failures, limited := 0, 0
@@ -219,7 +228,7 @@ func (r *accountRepository) ObserveOAuth429(ctx context.Context, observation ser
 		task.Armed = true
 	}
 	queued := false
-	if pressure && task.Armed && !duplicate {
+	if pressure && task.Armed {
 		var reserved int
 		if _, err = tx.ExecContext(ctx, `DELETE FROM oauth_429_daily_budget WHERE day < (clock_timestamp() AT TIME ZONE 'UTC')::date-7`); err != nil {
 			return false, err
@@ -316,8 +325,12 @@ func (r *accountRepository) claimOAuth429(ctx context.Context, id int64, model s
 	if task.State != "pending" && task.State != "running" {
 		return nil, nil
 	}
+	epoch, _, err := oauth429AccountEpoch(ctx, tx, id)
+	if err != nil {
+		return nil, err
+	}
 	now := time.Now().UTC()
-	if !oauth429Eligible(cfg, a, model) || task.Revision != cfg.Revision || !now.Before(task.ExpiresAt) {
+	if task.AccountEpoch != epoch || !oauth429Eligible(cfg, a, model) || task.Revision != cfg.Revision || !now.Before(task.ExpiresAt) {
 		task.State = "cancelled"
 		if err = oauth429Save(ctx, tx, task); err != nil {
 			return nil, err
@@ -374,7 +387,11 @@ func (r *accountRepository) mutateOAuth429(ctx context.Context, claimed *service
 	if task.State != "running" || task.Lease != claimed.Lease || task.TriggerID != claimed.TriggerID || task.Generation != claimed.Generation || !now.Before(task.LeaseUntil) {
 		return nil
 	}
-	if !oauth429Eligible(cfg, a, task.Model) || task.Revision != cfg.Revision || !now.Before(task.ExpiresAt) {
+	epoch, _, err := oauth429AccountEpoch(ctx, tx, claimed.AccountID)
+	if err != nil {
+		return err
+	}
+	if task.AccountEpoch != epoch || task.AccountEpoch != claimed.AccountEpoch || !oauth429Eligible(cfg, a, task.Model) || task.Revision != cfg.Revision || !now.Before(task.ExpiresAt) {
 		task.State = "cancelled"
 	} else if err = fn(tx, cfg, a, task); err != nil {
 		return err
@@ -486,6 +503,7 @@ func (r *accountRepository) OAuth429Current(ctx context.Context, task *service.O
 	}
 	var current bool
 	err = db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM oauth_429_tasks t JOIN accounts a ON a.id=t.account_id
+ JOIN oauth_429_account_epochs e ON e.account_id=a.id AND e.epoch=(t.data->>'account_epoch')::bigint
  JOIN settings s ON s.key=$1 WHERE t.account_id=$2 AND t.model=$3 AND t.state='running'
  AND t.data->>'trigger_id'=$4 AND t.data->>'lease'=$5
  AND (t.data->>'lease_until')::timestamptz>clock_timestamp()

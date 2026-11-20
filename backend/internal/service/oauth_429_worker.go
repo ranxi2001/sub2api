@@ -50,6 +50,7 @@ type OAuth429Run struct {
 }
 type OAuth429Task struct {
 	AccountID    int64            `json:"account_id"`
+	AccountEpoch int64            `json:"account_epoch"`
 	Model        string           `json:"model"`
 	RequestModel string           `json:"request_model"`
 	Revision     string           `json:"revision"`
@@ -129,6 +130,9 @@ type OAuth429Observation struct {
 	AccountID int64
 	Model     string
 	Revision  string
+	// Request start fences a response spanning an account transition. At remains
+	// the response-header timestamp used by the statistical window.
+	StartedAt time.Time
 	OAuth429Sample
 }
 
@@ -166,7 +170,7 @@ func (s *AccountOpsService) startOAuth429Observations(ctx context.Context, repo 
 	oauth429HTTPObserver.Store(s)
 }
 
-func ObserveOAuth429HTTP(req *http.Request, accountID int64, status int) {
+func ObserveOAuth429HTTP(req *http.Request, accountID int64, status int, requestStarted ...time.Time) {
 	observer := oauth429HTTPObserver.Load()
 	if observer == nil || accountID <= 0 || req == nil || req.GetBody == nil || status < 200 || status > 599 || req.Context().Value(qualityProbeContextKey{}) != nil {
 		return
@@ -194,7 +198,11 @@ func ObserveOAuth429HTTP(req *http.Request, accountID int64, status int) {
 		return
 	}
 	digest := sha256.Sum256([]byte(requestID))
-	sample := OAuth429Observation{AccountID: accountID, Model: model, Revision: cfg.Revision, OAuth429Sample: OAuth429Sample{
+	started := time.Now().UTC()
+	if len(requestStarted) > 0 {
+		started = requestStarted[0]
+	}
+	sample := OAuth429Observation{StartedAt: started, AccountID: accountID, Model: model, Revision: cfg.Revision, OAuth429Sample: OAuth429Sample{
 		Request: hex.EncodeToString(digest[:]), Status: status, At: time.Now().UTC(),
 	}}
 	select {
