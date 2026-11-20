@@ -1596,7 +1596,7 @@ func accountListOrder(params pagination.PaginationParams) []func(*entsql.Selecto
 		}
 		return []func(*entsql.Selector){func(s *entsql.Selector) {
 			extra := s.C(dbaccount.FieldExtra)
-			expression := upstreamBillingRateSortExpression(extra, s.C(dbaccount.FieldPlatform))
+			expression := upstreamBillingRateSortExpression(extra)
 			s.OrderExpr(entsql.Expr(expression + " " + direction + " NULLS LAST"))
 			s.OrderBy(tieOrder(s.C(dbaccount.FieldID)))
 		}}
@@ -1642,7 +1642,7 @@ func accountListOrder(params pagination.PaginationParams) []func(*entsql.Selecto
 	return []func(*entsql.Selector){dbent.Asc(field), dbent.Asc(dbaccount.FieldID)}
 }
 
-func upstreamBillingRateSortExpression(extra, platform string) string {
+func upstreamBillingRateSortExpression(extra string) string {
 	status := extra + " #>> '{upstream_billing_probe,status}'"
 	effectiveJSON := extra + " #> '{upstream_billing_probe,data,effective_rate_multiplier}'"
 	effective := extra + " #>> '{upstream_billing_probe,data,effective_rate_multiplier}'"
@@ -1675,7 +1675,7 @@ func upstreamBillingRateSortExpression(extra, platform string) string {
 	for i, id := range foreignPlatforms {
 		foreignPlatforms[i] = pq.QuoteLiteral(id)
 	}
-	conversion := "CASE WHEN " + newAPIGroup + " AND " + platform + " IN (" + strings.Join(foreignPlatforms, ",") + ")" +
+	conversion := "CASE WHEN " + newAPIGroup + " AND " + dbaccount.Table + "." + dbaccount.FieldPlatform + " IN (" + strings.Join(foreignPlatforms, ",") + ")" +
 		" AND (" + extra + " -> 'new_api_apply_usd_rate') IS DISTINCT FROM 'false'::jsonb THEN 7 ELSE 1 END"
 	legacySnapshot := "jsonb_typeof(" + resolvedJSON + ") IS NULL AND jsonb_typeof(" + peakEnabledJSON + ") IS NULL"
 

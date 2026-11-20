@@ -158,7 +158,7 @@ func TestNewAPIIntegrationGroupRateSortReadsOnlyValidatedGroupSnapshot(t *testin
 	_, e = integrationDB.ExecContext(ctx, `UPDATE accounts SET extra=extra||$1::jsonb WHERE id=$2`, string(raw), a.ID)
 	require.NoError(t, e)
 	var rate sql.NullFloat64
-	query := `SELECT ` + upstreamBillingRateSortExpression("extra", "platform") + ` FROM accounts WHERE id=$1`
+	query := `SELECT ` + upstreamBillingRateSortExpression("extra") + ` FROM accounts WHERE id=$1`
 	e = integrationDB.QueryRowContext(ctx, query, a.ID).Scan(&rate)
 	require.NoError(t, e)
 	require.True(t, rate.Valid)
