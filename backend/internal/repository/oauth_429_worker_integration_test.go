@@ -3,6 +3,7 @@
 package repository
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -11,21 +12,18 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"context"
 	"github.com/Wei-Shaw/sub2api/internal/config"
-	"github.com/Wei-Shaw/sub2api/internal/handler/admin"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/Wei-Shaw/sub2api/internal/requestcapture"
 	"github.com/Wei-Shaw/sub2api/internal/service"
-	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
-	"strings"
 )
 
 type oauth429Loopback struct {
@@ -58,23 +56,10 @@ func oauth429Fixture(t *testing.T, history []string) (*accountRepository, *servi
 	c.DegradationAction.ProbeEnabled = &off
 	c.DegradationAction.ThresholdPercent = nil
 	c.DegradationAction.Independent429 = service.OAuth429TestConfig{Enabled: true, DailyTestBudget: 1000, MinSamples: 20}
-	raw, err := json.Marshal(c)
-	require.NoError(t, err)
 	svc := service.ProvideAccountOpsService(NewSettingRepository(integrationEntClient), NewAccountOpsRepository(integrationDB), nil, repo, NewGroupRepository(integrationEntClient, integrationDB), &config.Config{Runtime: config.RuntimeConfig{Role: config.RuntimeRoleGateway}}, nil, nil, nil, nil, nil)
 	t.Cleanup(svc.Stop)
-	handler := admin.NewAccountOpsHandler(svc, nil)
-	router := gin.New()
-	router.PUT("/auto-config", handler.SaveAutoConfig)
-	request := httptest.NewRequest(http.MethodPut, "/auto-config", strings.NewReader(string(raw)))
-	request.Header.Set("Content-Type", "application/json")
-	response := httptest.NewRecorder()
-	router.ServeHTTP(response, request)
-	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-	var saved struct {
-		Data service.OAuthAutoConfig `json:"data"`
-	}
-	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &saved))
-	c = saved.Data
+	c, err := svc.SaveOAuthAutoConfig(t.Context(), c)
+	require.NoError(t, err)
 
 	_, err = integrationDB.ExecContext(t.Context(), `DELETE FROM oauth_429_daily_budget`)
 	require.NoError(t, err)
