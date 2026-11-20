@@ -4,11 +4,15 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -78,4 +82,49 @@ func TestOAuth429RetainedNumericSummary(t *testing.T) {
 	// and supplies no evidence to any new trigger.
 	result := &ScheduledTestResult{Status: "success", ResponseText: "29", StartedAt: time.Now(), FinishedAt: time.Now(), PelicanConfig: &PelicanTestConfig{ModelID: "gpt-6-astra"}}
 	require.Equal(t, "incorrect", oauth429Verdict(result, nil, nil, "gpt-6-astra", true))
+}
+
+func TestOAuth429ConstructionMetadataDoesNotDependOnGetBody(t *testing.T) {
+	ctx := context.WithValue(t.Context(), ctxkey.Model, "alias-one")
+	ctx = context.WithValue(ctx, ctxkey.ClientRequestID, "metadata-fixture")
+	body := []byte(`{"input":"` + strings.Repeat("x", (1<<20)+128) + `","model":"gpt-6-astra"}`)
+	ctx = withOAuth429WireBody(ctx, body)
+	require.Equal(t, "gpt-6-astra", ctx.Value(oauth429WireModelKey{}))
+	require.Equal(t, "alias-one", ctx.Value(ctxkey.Model))
+	require.Equal(t, "metadata-fixture", ctx.Value(ctxkey.ClientRequestID))
+}
+
+func TestOAuth429ActualHTTPBuildersKeepParsedModel(t *testing.T) {
+	ctx := context.WithValue(t.Context(), ctxkey.Model, "alias-one")
+	ctx = context.WithValue(ctx, ctxkey.ClientRequestID, "builder-business")
+	body := []byte(`{"input":"` + strings.Repeat("x", (1<<20)+128) + `","model":"gpt-6-astra","stream":true}`)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", "/v1/responses", nil).WithContext(ctx)
+	svc := &OpenAIGatewayService{cfg: &config.Config{}}
+	account := &Account{ID: 71, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{}}
+	builders := []struct {
+		name  string
+		build func() (*http.Request, error)
+	}{
+		{"responses", func() (*http.Request, error) {
+			return svc.buildUpstreamRequest(ctx, c, account, body, "fixture", true, "", false)
+		}},
+		{"passthrough", func() (*http.Request, error) {
+			return svc.buildUpstreamRequestOpenAIPassthrough(ctx, c, account, body, "fixture")
+		}},
+		{"native_anthropic", func() (*http.Request, error) {
+			r, _, e := svc.buildNativeAnthropicUpstreamRequest(ctx, c, account, body, "fixture", "https://fixture.example/v1/messages")
+			return r, e
+		}},
+	}
+	for _, builder := range builders {
+		t.Run(builder.name, func(t *testing.T) {
+			req, err := builder.build()
+			require.NoError(t, err)
+			req.GetBody = nil
+			require.Equal(t, "gpt-6-astra", req.Context().Value(oauth429WireModelKey{}))
+			require.Equal(t, "alias-one", req.Context().Value(ctxkey.Model))
+			require.Equal(t, "builder-business", req.Context().Value(ctxkey.ClientRequestID))
+		})
+	}
 }

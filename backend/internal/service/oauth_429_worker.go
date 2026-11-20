@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -129,9 +130,10 @@ func ValidateOAuth429Upstream(req *http.Request, accountID int64) error {
 // Keep only routing metadata in the bounded queues. Each account has a single
 // FIFO consumer per gateway, including retried physical responses.
 type OAuth429Observation struct {
-	AccountID int64
-	Model     string
-	Revision  string
+	AccountID    int64
+	Model        string
+	Revision     string
+	RequestModel string
 	// Request start fences a response spanning an account transition. At remains
 	// the response-header timestamp used by the statistical window.
 	StartedAt time.Time
@@ -174,7 +176,7 @@ func (s *AccountOpsService) startOAuth429Observations(ctx context.Context, repo 
 
 func ObserveOAuth429HTTP(req *http.Request, accountID int64, status int, requestStarted ...time.Time) {
 	observer := oauth429HTTPObserver.Load()
-	if observer == nil || accountID <= 0 || req == nil || req.GetBody == nil || status < 200 || status > 599 || req.Context().Value(qualityProbeContextKey{}) != nil {
+	if observer == nil || accountID <= 0 || req == nil || status < 200 || status > 599 || req.Context().Value(qualityProbeContextKey{}) != nil {
 		return
 	}
 	cfg, _ := observer.autoConfig.Load().(OAuthAutoConfig)
@@ -186,17 +188,35 @@ func ObserveOAuth429HTTP(req *http.Request, accountID int64, status int, request
 	if requestID == "" {
 		return
 	}
-	body, err := req.GetBody()
-	if err != nil {
-		return
+	// Handlers already parsed the complete request, including large or streaming
+	// bodies. Preserve their actual public model; the repository resolves and
+	// validates its target under the live account mapping and epoch lock.
+	requestModel, _ := req.Context().Value(ctxkey.Model).(string)
+	model, _ := req.Context().Value(oauth429WireModelKey{}).(string)
+	if model == "" && req.GetBody != nil {
+		body, err := req.GetBody()
+		if err != nil {
+			return
+		}
+		var meta struct {
+			Model string `json:"model"`
+		}
+		err = json.NewDecoder(body).Decode(&meta)
+		_ = body.Close()
+		if err != nil {
+			return
+		}
+		model = meta.Model
 	}
-	raw, err := io.ReadAll(io.LimitReader(body, 1<<20))
-	_ = body.Close()
-	if err != nil {
-		return
+	if model == "" && req.URL != nil {
+		// Native Gemini identifies the model in its endpoint rather than JSON.
+		if _, tail, ok := strings.Cut(req.URL.Path, "/models/"); ok {
+			if value, _, ok := strings.Cut(tail, ":"); ok {
+				model = value
+			}
+		}
 	}
-	model := gjson.GetBytes(raw, "model").String()
-	if model == "" || len(model) > 256 {
+	if model == "" || len(requestModel) > 256 || len(model) > 256 {
 		return
 	}
 	digest := sha256.Sum256([]byte(requestID))
@@ -204,7 +224,7 @@ func ObserveOAuth429HTTP(req *http.Request, accountID int64, status int, request
 	if len(requestStarted) > 0 {
 		started = requestStarted[0]
 	}
-	sample := OAuth429Observation{StartedAt: started, AccountID: accountID, Model: model, Revision: cfg.Revision, OAuth429Sample: OAuth429Sample{
+	sample := OAuth429Observation{StartedAt: started, RequestModel: requestModel, AccountID: accountID, Model: model, Revision: cfg.Revision, OAuth429Sample: OAuth429Sample{
 		Request: hex.EncodeToString(digest[:]), Status: status, At: time.Now().UTC(),
 	}}
 	select {

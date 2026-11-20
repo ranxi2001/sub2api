@@ -88,10 +88,10 @@ jobs:
           cache-dependency-path: backend/go.sum
       - uses: actions/checkout@v6
         with:
-          ref: 5afe9675e1b60a4b3b4ff6f82ca976b618218210
+          ref: ee16421fb2d7e7ec87aabe18ffbcd90fa2281ec3
           path: repair-baseline
           persist-credentials: false
-      - name: Pre-repair deduplication and account transition behavioral RED
+      - name: Reviewed head deduplication and account transition behavioral RED
         shell: bash
         run: |
           set -euo pipefail
@@ -112,6 +112,29 @@ jobs:
           grep -F 'queued old-epoch sample must be rejected even after the account becomes schedulable again' evidence/repair-red.log
           grep -F -- '--- FAIL: TestOAuth429DedupSurvivesStatisticalWindowEviction' evidence/repair-red.log
           grep -F -- '--- FAIL: TestOAuth429QueuedObservationCannotCrossAccountTransition' evidence/repair-red.log
+      - uses: actions/checkout@v6
+        with:
+          ref: 8678e88f4dfb6bfb718993db8a2a15b4a6af8282
+          path: worker-production-baseline
+          persist-credentials: false
+      - name: Same complete worker behavior oracle on old production
+        shell: bash
+        run: |
+          set -euo pipefail
+          oracle=backend/internal/repository/oauth_429_immediate_oracle_integration_test.go
+          cp "$oracle" "worker-production-baseline/$oracle"
+          cmp "$oracle" "worker-production-baseline/$oracle"
+          sha256sum "$oracle" "worker-production-baseline/$oracle" > evidence/full-worker-oracle-sha256.txt
+          git -C worker-production-baseline rev-parse HEAD > evidence/full-worker-baseline-head.txt
+          set +e
+          (cd worker-production-baseline/backend && go test -tags=integration ./internal/repository -run '^TestOAuth429ImmediateWithoutQualityOpsBehaviorOracle$' -count=1 -v -timeout=10m) > evidence/full-worker-red.log 2>&1
+          result=$?
+          set -e
+          cat evidence/full-worker-red.log
+          test "$result" -ne 0
+          bash .github/scripts/assert-test-log-clean.sh red evidence/full-worker-red.log
+          grep -F 'threshold must immediately execute two independent provider tests with qualityops disabled and no plan' evidence/full-worker-red.log
+          grep -F -- '--- FAIL: TestOAuth429ImmediateWithoutQualityOpsBehaviorOracle' evidence/full-worker-red.log
       - name: Negative control rejects disconnected production worker
         shell: bash
         run: |
@@ -143,18 +166,22 @@ jobs:
           set -euo pipefail
           mkdir -p evidence
           git rev-parse HEAD > evidence/worker-head.txt
-          (cd backend && go test -race -tags=integration ./internal/repository -run '^TestOAuth429Worker|^TestOAuth429Persistent|^TestOAuth429HTTP|^TestOAuth429Alias|^TestOAuth429Dedup|^TestOAuth429Queued|^TestOAuth429AccountEpoch|^TestOAuth429Expiry' -count=1 -v -timeout=20m) 2>&1 | tee evidence/worker.log
+          (cd backend && go test -race -tags=integration ./internal/repository -run '^TestOAuth429Worker|^TestOAuth429Persistent|^TestOAuth429HTTP|^TestOAuth429ActualAlias|^TestOAuth429Immediate|^TestOAuth429Alias|^TestOAuth429Dedup|^TestOAuth429Queued|^TestOAuth429AccountEpoch|^TestOAuth429Expiry|^TestOAuth429First' -count=1 -v -timeout=20m) 2>&1 | tee evidence/worker.log
           bash .github/scripts/assert-test-log-clean.sh green evidence/worker.log
           grep -F -- '--- PASS: TestOAuth429WorkerIndependentPair/qualityops_off_two_wrong' evidence/worker.log
           grep -F -- '--- PASS: TestOAuth429WorkerIndependentPair/history_wrong_cannot_shortcut' evidence/worker.log
           grep -F -- '--- PASS: TestOAuth429DedupSurvivesStatisticalWindowEviction' evidence/worker.log
           grep -F -- '--- PASS: TestOAuth429QueuedObservationCannotCrossAccountTransition' evidence/worker.log
+          grep -F -- '--- PASS: TestOAuth429ImmediateWithoutQualityOpsBehaviorOracle' evidence/worker.log
+          grep -F -- '--- PASS: TestOAuth429HTTPParsedModelSurvivesStreamingAndLargeBody' evidence/worker.log
       - name: Real settings handler validation
         shell: bash
         run: |
           set -euo pipefail
           (cd backend && go test -race -tags=unit ./internal/service -run '^TestOAuth429' -count=1 -v) 2>&1 | tee evidence/classifier.log
           bash .github/scripts/assert-test-log-clean.sh green evidence/classifier.log
+          (cd backend && go test -tags=unit ./internal/handler -run '^TestOAuth429ParsedInputModelAndIdentitySurviveHTTPContext$' -count=1 -v) 2>&1 | tee evidence/model-context.log
+          bash .github/scripts/assert-test-log-clean.sh green evidence/model-context.log
           (cd backend && go test -tags=unit ./internal/handler/admin -run '^TestOAuthAutoConfig.*Degradation|^Test.*Degradation' -count=1 -v) 2>&1 | tee evidence/handler.log
           bash .github/scripts/assert-test-log-clean.sh green evidence/handler.log
           (cd backend && go test -race -tags=integration ./internal/handler/admin -run '^TestOAuth429HandlerPostgresWorkerLoopback$' -count=1 -v -timeout=10m) 2>&1 | tee evidence/handler-worker.log

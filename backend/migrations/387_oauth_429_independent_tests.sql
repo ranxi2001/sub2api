@@ -19,8 +19,6 @@ BEGIN
  IF NEW.schedulable IS DISTINCT FROM OLD.schedulable OR
     NEW.deleted_at IS DISTINCT FROM OLD.deleted_at OR
     NEW.status IS DISTINCT FROM OLD.status OR
-    NEW.expires_at IS DISTINCT FROM OLD.expires_at OR
-    NEW.auto_pause_on_expired IS DISTINCT FROM OLD.auto_pause_on_expired OR
     NEW.credentials->'model_mapping' IS DISTINCT FROM OLD.credentials->'model_mapping' THEN
   UPDATE oauth_429_tasks SET state='cancelled',updated_at=clock_timestamp()
   WHERE account_id=NEW.id AND state IN ('pending','running');

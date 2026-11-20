@@ -145,3 +145,16 @@ func TestOAuth429ExpiryAdmissionAndLeaseSelection(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, run)
 }
+
+func TestOAuth429FirstObservationCreatesTaskBeforeDedup(t *testing.T) {
+	repo, a, c := oauth429Fixture(t, nil)
+	observation := oauth429ObservationFixture(a.ID, "gpt-6-astra", c.Revision, 1, 200)
+	queued, err := repo.ObserveOAuth429(t.Context(), observation)
+	require.NoError(t, err)
+	require.False(t, queued)
+	var tasks, identities int
+	require.NoError(t, integrationDB.QueryRowContext(t.Context(), `SELECT count(*) FROM oauth_429_tasks WHERE account_id=$1`, a.ID).Scan(&tasks))
+	require.NoError(t, integrationDB.QueryRowContext(t.Context(), `SELECT count(*) FROM oauth_429_request_dedup WHERE account_id=$1`, a.ID).Scan(&identities))
+	require.Equal(t, 1, tasks)
+	require.Equal(t, 1, identities)
+}
