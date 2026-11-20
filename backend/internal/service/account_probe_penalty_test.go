@@ -54,7 +54,7 @@ func TestAccountProbePenaltyCanonicalBilling(t *testing.T) {
 		svc := newGatewayRecordUsageServiceWithBillingRepoForTest(usageRepo, billingRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{})
 		result := &ForwardResult{RequestID: "probe-test", Model: "claude-sonnet-4", Usage: ClaudeUsage{InputTokens: 10, OutputTokens: 13}, ProbePenaltyEligible: eligible}
 		account := &Account{ID: 701, Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Extra: map[string]any{AccountProbePenaltyExtraKey: map[string]any{"enabled": true, "minimum_charge": .001}, "quota_limit": 100.}}
-		err := svc.RecordUsage(context.Background(), &RecordUsageInput{Result: result, APIKey: &APIKey{ID: 501, Quota: 100}, User: &User{ID: 601}, Account: account})
+		err := svc.RecordUsage(context.Background(), &RecordUsageInput{Result: result, APIKey: &APIKey{ID: 501, Quota: 100}, User: &User{ID: 601}, Account: account, APIKeyService: &openAIRecordUsageAPIKeyQuotaStub{}})
 		require.NoError(t, err)
 		require.Equal(t, 13, usageRepo.lastLog.OutputTokens)
 		require.Equal(t, usageRepo.lastLog.ActualCost, billingRepo.lastCmd.BalanceCost)
