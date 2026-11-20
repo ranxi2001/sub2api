@@ -38,6 +38,41 @@ func (s *ConcurrencyCacheSuite) SetupTest() {
 	s.cache = s.rawCache
 }
 
+// The gateway keeps one account identity when serving different request targets.
+// Overlapping requests must consume one Redis budget across all gateway services.
+func (s *ConcurrencyCacheSuite) TestGatewayTargetsShareAccountConcurrency() {
+	account := &service.Account{ID: 959, Type: service.AccountTypeGateway, Concurrency: 2}
+	openAI := service.NewConcurrencyService(s.cache)
+	anthropic := service.NewConcurrencyService(s.cache)
+	gemini := service.NewConcurrencyService(s.cache)
+	ctxFor := func(platform string) context.Context {
+		return service.WithResolvedTargetPlatform(s.ctx, platform)
+	}
+	first, err := openAI.AcquireAccountSlot(ctxFor(service.PlatformOpenAI), account.ID, account.Concurrency)
+	s.Require().NoError(err)
+	s.Require().True(first.Acquired)
+	s.T().Cleanup(first.ReleaseFunc)
+	second, err := anthropic.AcquireAccountSlot(ctxFor(service.PlatformAnthropic), account.ID, account.Concurrency)
+	s.Require().NoError(err)
+	s.Require().True(second.Acquired)
+	s.T().Cleanup(second.ReleaseFunc)
+	third, err := gemini.AcquireAccountSlot(ctxFor(service.PlatformGemini), account.ID, account.Concurrency)
+	s.Require().NoError(err)
+	s.False(third.Acquired, "different target platforms share the same account budget")
+	count, err := s.cache.GetAccountConcurrency(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Equal(2, count)
+	first.ReleaseFunc()
+	second.ReleaseFunc()
+	count, err = s.cache.GetAccountConcurrency(s.ctx, account.ID)
+	s.Require().NoError(err)
+	s.Zero(count)
+	afterRelease, err := gemini.AcquireAccountSlot(ctxFor(service.PlatformAntigravity), account.ID, account.Concurrency)
+	s.Require().NoError(err)
+	s.Require().True(afterRelease.Acquired, "a different protocol can use a released shared slot")
+	afterRelease.ReleaseFunc()
+}
+
 type apiKeyConcurrencyCacheForTest interface {
 	TrackAPIKeySlot(ctx context.Context, apiKeyID int64, requestID string) error
 	ReleaseAPIKeySlot(ctx context.Context, apiKeyID int64, requestID string) error

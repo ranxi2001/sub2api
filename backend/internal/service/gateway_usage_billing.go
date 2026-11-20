@@ -976,7 +976,9 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	// 后扣运行在 worker 池的 background ctx 上，无法再从 ctx 取 ForcePlatform。
 	// 缺省（未设置）时回退到分组平台，保持对其它调用方的兼容。
 	quotaPlatform := input.QuotaPlatform
-	if quotaPlatform == "" {
+	if account.IsGateway() {
+		quotaPlatform = usageLog.Platform
+	} else if quotaPlatform == "" {
 		quotaPlatform = PlatformFromAPIKey(apiKey)
 		if quotaPlatform == PlatformComposite && account != nil {
 			quotaPlatform = account.Platform
@@ -1470,7 +1472,7 @@ func (s *GatewayService) buildRecordUsageLog(
 		)
 	}
 	usageLog := &UsageLog{
-		Platform:                 account.Platform,
+		Platform:                 usagePlatformForRequest(ctx, account, apiKey, input.QuotaPlatform),
 		UserID:                   user.ID,
 		APIKeyID:                 apiKey.ID,
 		AccountID:                account.ID,

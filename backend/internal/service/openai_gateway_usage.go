@@ -396,7 +396,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	}
 	usageLog := &UsageLog{
 		CustomerCostDetails:      customerCostDetails,
-		Platform:                 account.Platform,
+		Platform:                 usagePlatformForRequest(ctx, account, apiKey, input.QuotaPlatform),
 		UserID:                   user.ID,
 		APIKeyID:                 apiKey.ID,
 		AccountID:                account.ID,
@@ -545,7 +545,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	// Async usage billing runs outside the original request context, so it
 	// cannot recover ForcePlatform there. Fall back for internal/test callers.
 	quotaPlatform := input.QuotaPlatform
-	if quotaPlatform == "" {
+	if account.IsGateway() {
+		quotaPlatform = usageLog.Platform
+	} else if quotaPlatform == "" {
 		quotaPlatform = PlatformFromAPIKey(apiKey)
 	}
 
