@@ -9,7 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/tidwall/gjson"
+	"go.uber.org/zap"
 )
 
 // Only hashes and delivery/route metadata; never tool arguments/results. A
@@ -480,6 +482,13 @@ func (s *OpenAIGatewayService) verifyOpenAIToolInputs(ctx context.Context, r *op
 	return s.verifyOpenAIToolInputProofs(ctx, r, body, false)
 }
 
+// The externally visible refusal stays stable. Only fixed classifications go
+// to the journal; call IDs, proof bytes and tool contents stay private.
+func openAIToolProvenanceRefusal(ctx context.Context, r *openAIAgentRecoveryRequest, detail string) error {
+	logger.FromContext(ctx).Warn("openai.tool_provenance_refused", zap.String("check", detail))
+	return openAIRecoveryDiagnosticError("owner_conflict", "tool_provenance_unknown", r)
+}
+
 func (s *OpenAIGatewayService) verifyOpenAIToolInputProofs(ctx context.Context, r *openAIAgentRecoveryRequest, body []byte, discoveryOnly bool) error {
 	if discoveryOnly {
 		hasDiscovery := false
@@ -513,7 +522,7 @@ func (s *OpenAIGatewayService) verifyOpenAIToolInputProofs(ctx context.Context, 
 		}
 		fingerprint, ok := openAIToolFingerprint(item)
 		if !ok || r.userID <= 0 {
-			return openAIRecoveryDiagnosticError("owner_conflict", "tool_provenance_unknown", r)
+			return openAIToolProvenanceRefusal(ctx, r, "invalid_call_or_principal")
 		}
 		key := r.toolKey(item.Get("call_id").String())
 		raw, err := s.toolProofGet(ctx, key)
@@ -522,7 +531,7 @@ func (s *OpenAIGatewayService) verifyOpenAIToolInputProofs(ctx context.Context, 
 			select {
 			case <-ctx.Done():
 				timer.Stop()
-				return openAIRecoveryDiagnosticError("owner_conflict", "tool_provenance_unknown", r)
+				return openAIToolProvenanceRefusal(ctx, r, "pending_interrupted")
 			case <-timer.C:
 			}
 			raw, err = s.toolProofGet(ctx, key)
@@ -530,15 +539,21 @@ func (s *OpenAIGatewayService) verifyOpenAIToolInputProofs(ctx context.Context, 
 			// same ownership refusal whether the timer or GET sees the deadline.
 			// An independent backend timeout/error remains a store failure.
 			if ctx.Err() == context.DeadlineExceeded && errors.Is(err, context.DeadlineExceeded) {
-				return openAIRecoveryDiagnosticError("owner_conflict", "tool_provenance_unknown", r)
+				return openAIToolProvenanceRefusal(ctx, r, "pending_timeout")
 			}
 		}
 		if err != nil {
 			return openAIRecoveryDiagnosticError("store_unavailable", "tool_provenance_unavailable", r)
 		}
 		var proof openAIToolProof
-		if len(raw) > OpenAIToolProvenanceMaxBytes || json.Unmarshal([]byte(raw), &proof) != nil || proof.Call != fingerprint {
-			return openAIRecoveryDiagnosticError("owner_conflict", "tool_provenance_unknown", r)
+		if raw == "" {
+			return openAIToolProvenanceRefusal(ctx, r, "record_missing")
+		}
+		if len(raw) > OpenAIToolProvenanceMaxBytes || json.Unmarshal([]byte(raw), &proof) != nil {
+			return openAIToolProvenanceRefusal(ctx, r, "record_unusable")
+		}
+		if proof.Call != fingerprint {
+			return openAIToolProvenanceRefusal(ctx, r, "fingerprint_mismatch")
 		}
 		handoffValid := false
 		if h, ok := ctx.Value(openAIWSDiscoveryHandoffKey{}).(*openAIWSDiscoveryHandoff); ok && h != nil && kind == "tool_search_call" {

@@ -70,6 +70,7 @@ type openAIWSAgentRecovery struct {
 	pendingHistoryTools              map[string]openAIWSAcceptedToolHistory
 	historicalToolIDs                map[[32]byte]struct{}
 	historicalToolIDsExhausted       bool
+	completedTurnTools               map[string]openAIWSDeliveredTool
 	deliveredTools                   map[string]openAIWSDeliveredTool
 	pendingTools                     map[string]openAIWSDeliveredTool
 	localHistory                     openAIWSLocalHistory
@@ -360,13 +361,20 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 	previous := gjson.GetBytes(source, "previous_response_id").String()
 	projected := false
 	if proof, ok := req.Context().Value(openAIWSPlaintextProjectionKey{}).(*openAIWSPlaintextProjection); ok {
-		if proof == nil || mode != "http_bridge" || !account.IsOpenAIApiKey() || proof.accountID != account.ID ||
+		if proof == nil || mode != "http_bridge" || !openAIWSPlaintextBridgeAccount(account) || proof.accountID != account.ID ||
 			proof.anchor.response == "" || proof.anchor != r.completedBridge || proof.anchor != openAIWSBridgeAnchor(r.request, account, previous) ||
 			r.request.owner != nil || len(r.request.items) != 0 || r.request.preservesHistory() ||
 			proof.previous != previous || r.request.previousResponseID != previous ||
 			gjson.GetBytes(source, "store").Type != gjson.False || gjson.GetBytes(payload, "previous_response_id").Exists() ||
 			proof.sourceInput != openAIAgentRecoveryInputDigest(source) || proof.sourceControls != openAI409ControlsDigest(source) || proof.input != openAIAgentRecoveryInputDigest(payload) ||
 			proof.controls != openAI409ControlsDigest(payload) {
+			return openAIWSWireRefusal(ctx, "ws_projection_integrity", source, payload)
+		}
+		if account.IsOpenAIOAuth() && (r.request.disallowLearning || r.request.userID <= 0 || r.request.keyID <= 0 ||
+			!oauthBridgeDeliveredResults(source, r.request.model, previous, r.completedTurnTools) ||
+			openAIWSHasOpaqueField(gjson.GetBytes(proof.history, "input"), 0) ||
+			openAIAgentRecoveryInputDigest(proof.history) != proof.input ||
+			openAI409ControlsDigest(proof.history) != proof.controls) {
 			return openAIWSWireRefusal(ctx, "ws_projection_integrity", source, payload)
 		}
 		// Recheck the original pointer on the actual selected account before
@@ -383,15 +391,18 @@ func (r *openAIWSAgentRecovery) begin(account *Account, source, payload []byte, 
 				continue
 			}
 			if r.historicalToolIDsExhausted {
-				return openAIRecoveryDiagnosticError("owner_conflict", "tool_provenance_unknown", r.request)
+				return openAIToolProvenanceRefusal(ctx, r.request, "bridge_identity_limit")
 			}
 			fingerprint, valid := openAIToolFingerprint(item)
 			observed, found := r.deliveredTools[r.request.model+"\x00"+item.Get("call_id").String()]
 			if !found && acceptsPriorToolPair(r.acceptedHistoryTools, account, r.request.model, item, proof.history) {
 				continue
 			}
-			if !valid || !found || observed.conflicted || observed.fingerprint != fingerprint || observed.accountID != account.ID || observed.config != openAIAgentRecoveryConfig(account, r.request.model) {
-				return openAIRecoveryDiagnosticError("owner_conflict", "tool_provenance_unknown", r.request)
+			if !found {
+				return openAIToolProvenanceRefusal(ctx, r.request, "bridge_delivery_missing")
+			}
+			if !valid || observed.conflicted || observed.fingerprint != fingerprint || observed.accountID != account.ID || observed.config != openAIAgentRecoveryConfig(account, r.request.model) {
+				return openAIToolProvenanceRefusal(ctx, r.request, "bridge_delivery_mismatch")
 			}
 		}
 		handoff := &openAIWSDiscoveryHandoff{scope: *r.request, input: openAIAgentRecoveryInputDigest(proof.history), controls: openAI409ControlsDigest(proof.history), proofs: make(map[string]openAIToolProofSnapshot)}
@@ -577,6 +588,7 @@ func (r *openAIWSAgentRecovery) write(payload []byte, write func() error) error 
 				}
 				r.acceptedHistoryTools = r.pendingHistoryTools
 			}
+			r.completedTurnTools = r.pendingTools
 			r.completedResponse, r.completedAccount, r.completedModel = responseID, request.delivery.binding.accountID, request.model
 			r.completedBridge = openAIWSBridgeResponseAnchor{response: responseID, model: request.model, session: request.session,
 				account: request.delivery.binding.accountID, key: request.keyID, user: request.userID, group: request.groupID, config: request.delivery.binding.config}
@@ -584,6 +596,7 @@ func (r *openAIWSAgentRecovery) write(payload []byte, write func() error) error 
 				r.deliveredTools = make(map[string]openAIWSDeliveredTool)
 			}
 			for key, observed := range r.pendingTools {
+
 				// Reuse the delivery's terminal verdict for this manager-local
 				// proof. Shared persisted proofs additionally require encrypted
 				// anchors, which an ordinary plaintext call does not have.
@@ -1349,10 +1362,36 @@ func openAIWSToolResultDigest(item gjson.Result) [32]byte {
 }
 
 func acceptedOpenAIWSToolHistory(source []byte, account *Account, model string) map[string]openAIWSAcceptedToolHistory {
-	if account == nil || !account.IsOpenAIApiKey() || len(source) > 8<<20 ||
+	if !openAIWSPlaintextBridgeAccount(account) || int64(len(source)) > openAIWSClientReadLimitBytesDefault ||
 		gjson.GetBytes(source, "previous_response_id").String() != "" || gjson.GetBytes(source, "conversation").Exists() ||
 		len(openAIAgentRecoveryItemDigests(source)) != 0 || !openAIEncryptedJSONUnambiguous(source) {
 		return nil
+	}
+	// Large frames can carry images or long messages unrelated to tool history.
+	// Bound the tool data we normalize and fingerprint, after validating the
+	// entire original frame (including ambiguous keys and encrypted items).
+	if len(source) > 8<<20 {
+		const prefix = `{"input":[`
+		tools := []byte(prefix)
+		fits := true
+		gjson.GetBytes(source, "input").ForEach(func(_, item gjson.Result) bool {
+			switch item.Get("type").String() {
+			case "function_call", "custom_tool_call", "tool_search_call", "function_call_output", "custom_tool_call_output", "tool_search_output":
+				if len(tools)+len(item.Raw)+3 > 8<<20 {
+					fits = false
+					return false
+				}
+				if len(tools) > len(prefix) {
+					tools = append(tools, ',')
+				}
+				tools = append(tools, item.Raw...)
+			}
+			return true
+		})
+		if !fits {
+			return nil
+		}
+		source = append(tools, ']', '}')
 	}
 	if _, reason := inspectOpenAIWSCompletedTools(source); reason != "" {
 		return nil
@@ -1396,4 +1435,24 @@ func acceptsPriorToolPair(acceptedTools map[string]openAIWSAcceptedToolHistory, 
 		}
 	}
 	return false
+}
+
+// An OAuth HTTP bridge may consume results of the immediately preceding
+// delivered response. Reconnects and independent tasks have a different anchor.
+func oauthBridgeDeliveredResults(source []byte, model, previous string, delivered map[string]openAIWSDeliveredTool) bool {
+	input := gjson.GetBytes(source, "input")
+	if !input.IsArray() || previous == "" {
+		return false
+	}
+	count := 0
+	ok := true
+	input.ForEach(func(_, item gjson.Result) bool {
+		count++
+		kind := item.Get("type").String()
+		record, found := delivered[model+"\x00"+item.Get("call_id").String()]
+		ok = (kind == "function_call_output" || kind == "custom_tool_call_output") &&
+			found && !record.conflicted
+		return ok
+	})
+	return count > 0 && ok
 }
