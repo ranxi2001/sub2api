@@ -106,12 +106,16 @@ func TestObserverUsageScopeAndProjection(t *testing.T) {
 }
 
 func TestObserverProcurementSnapshotFollowsExistingAccountCostScope(t *testing.T) {
-	factor, accountRate, accountCost := .7, 2.0, 9.0
+	accountRate, accountCost := 2.0, 9.0
 	for _, role := range []string{service.RoleObserver, service.RoleUser} {
 		t.Run(role, func(t *testing.T) {
 			row := service.UsageLog{ID: 1, UserID: 42, AccountRateMultiplier: &accountRate,
-				ProcurementCostSnapshot: &service.ProcurementCostSnapshot{Version: 1, AccountType: "gateway", Provider: "new_api", TargetPlatform: "openai", Basis: "total_cost", CostMultiplier: &factor},
 				Account: &service.Account{ID: 7, Credentials: map[string]any{"api_key": "synthetic-must-not-leak"}}}
+			// Historical WS regressions compile this test package against older UsageLog types.
+			// The observer response below must expose the decoded snapshot on the candidate.
+			require.NoError(t, json.Unmarshal([]byte(`{"ProcurementCostSnapshot":{
+				"version":1,"account_type":"gateway","provider":"new_api","target_platform":"openai",
+				"basis":"total_cost","cost_multiplier":0.7}}`), &row))
 			r := &observerUsageRepo{record: &row, userUsageRepoCapture: userUsageRepoCapture{
 				listRows: []service.UsageLog{row}, stats: &usagestats.UsageStats{TotalAccountCost: &accountCost}}}
 			router := observerUsageRouter(r, role)
