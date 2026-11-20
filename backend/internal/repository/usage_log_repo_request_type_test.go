@@ -108,8 +108,8 @@ func TestUsageLogRepositoryCreateSyncRequestTypeAndLegacyFields(t *testing.T) {
 			createdAt,
 			sqlmock.AnyArg(), // queue_timing
 			sql.NullString{}, // platform
-			nil,             // customer_cost_details
-			nil,             // procurement_cost_snapshot
+			nil,              // customer_cost_details
+			nil,              // procurement_cost_snapshot
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(99), createdAt))
 
@@ -210,8 +210,8 @@ func TestUsageLogRepositoryCreate_PersistsServiceTier(t *testing.T) {
 			createdAt,
 			sqlmock.AnyArg(), // queue_timing
 			sql.NullString{}, // platform
-			nil,             // customer_cost_details
-			nil,             // procurement_cost_snapshot
+			nil,              // customer_cost_details
+			nil,              // procurement_cost_snapshot
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(100), createdAt))
 
