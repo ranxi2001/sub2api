@@ -692,10 +692,9 @@ describe('quality operations', () => {
     const row = wrapper.get('[data-plan-id="1"]')
     expect(row.text()).toContain('Hourly quality')
     expect(row.findAll('.rule-actions button').map(button => button.text())).toEqual([
-      'qualityOps.ciallo.title', 'common.newFeature', 'qualityOps.historyShort',
+      'qualityOps.historyShort',
       'qualityOps.editShort', 'qualityOps.runShort', 'qualityOps.copy', 'qualityOps.savePreset',
     ])
-    expect(row.findComponent(NewFeatureBadge).props('noticeId')).toBe(NEW_FEATURE_NOTICES.ciallo)
     expect(wrapper.find('[data-testid="quality-bulk-edit"]').exists()).toBe(true)
     await row.get('[data-testid="quality-rule-copy"]').trigger('click'); await flushPromises()
     expect(vm.editing).toBeNull()
@@ -1061,10 +1060,12 @@ describe('quality operations', () => {
   })
 
   it('saves Ciallo as the scheduled question with its built-in judge', async () => {
+    vi.mocked(listQualityPlans).mockResolvedValue([rules()[0]])
     const wrapper = mountView(); await flushPromises()
     await wrapper.get('[data-testid="quality-rule-edit"]').trigger('click'); await flushPromises()
     await wrapper.get('[data-testid="quality-question-kind"]').setValue('ciallo')
     expect(wrapper.find('[data-testid="quality-judge-kind"]').exists()).toBe(false)
+    expect(wrapper.findAllComponents(NewFeatureBadge).some(badge => badge.props('noticeId') === NEW_FEATURE_NOTICES.ciallo)).toBe(true)
     await wrapper.get('#quality-rule-form').trigger('submit'); await flushPromises()
     const patch = vi.mocked(scheduledTests.update).mock.calls.at(-1)?.[1].pelican_config
     expect(patch?.question_kind).toBe('ciallo')

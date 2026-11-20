@@ -30,7 +30,7 @@ const aliases = [
   ['@/api/admin/accountQuality', 'quality'], ['@/api/admin/accounts', 'accounts'],
   ['@/api/admin/groups', 'groups'], ['@/api/admin/scheduledTests', 'scheduled'],
 ].map(([find, name]) => ({ find, replacement: path.join(fixtures, `${name}.mjs`) }))
-const html = `<!doctype html><meta charset="utf-8"><div id="app"></div><script type="module">
+const html = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><div id="app"></div><script type="module">
 import {createApp} from 'vue'; import {createPinia} from 'pinia'; import {createI18n} from 'vue-i18n'; import {createRouter,createMemoryHistory} from 'vue-router';
 import View from '/src/views/admin/AccountQualityView.vue'; import zh from '/src/i18n/locales/zh/qualityOps.ts'; import en from '/src/i18n/locales/en/qualityOps.ts'; import '/src/style.css';
 const i18n=createI18n({legacy:false,locale:'zh',messages:{zh:{qualityOps:zh},en:{qualityOps:en}},missingWarn:false,fallbackWarn:false});window.qualityI18n=i18n;
@@ -94,6 +94,48 @@ try {
     await question.scrollIntoViewIfNeeded()
     await page.screenshot({ path: path.join(output, `zh-quality-ciallo-${device}.png`) })
   }
+  // Use the real account modal, locales and model picker. Its model directory
+  // is supplied by the local adapter; screenshots never start a model call.
+  const accountHtml = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><div id="app"></div><script type="module">
+    import {createApp,h} from 'vue'; import {createPinia} from 'pinia'; import {createI18n} from 'vue-i18n';
+    import IQ from '/src/components/admin/account/IQTestModal.vue'; import zh from '/src/i18n/locales/zh'; import '/src/style.css';
+    import api from '/src/api/client'; api.defaults.adapter=async req=>({data:{code:0,data:req.url.endsWith('/reasoning')?{supported_reasoning_levels:['medium'],default_reasoning_level:'medium'}:[{id:'gpt-6-astra'}]},status:200,statusText:'OK',config:req,headers:{}});
+    const app=createApp({render:()=>h(IQ,{show:true,account:{id:1,name:'虚构账号',platform:'openai',type:'apikey',credentials:{},status:'active'}})});
+    app.use(createPinia()).use(createI18n({legacy:false,locale:'zh',messages:{zh}})).mount('#app');</script>`
+  const accountServer = await createServer({
+    root: frontend, configFile: false, cacheDir: path.join(fixtures, 'iq-vite'),
+    plugins: [(vueModule.default || vueModule)(), { name:'iq-preview', configureServer(vite) {
+      vite.middlewares.use((req, res, next) => {
+        if (req.url !== '/') return next()
+        res.setHeader('Content-Type', 'text/html')
+        void vite.transformIndexHtml('/', accountHtml).then(html => res.end(html))
+      })
+    } }],
+    resolve: { alias: { '@': path.join(frontend, 'src') } },
+    css: { postcss: { plugins: [requireFrontend('tailwindcss')({ config: path.join(frontend, 'tailwind.config.js') }), requireFrontend('autoprefixer')()] } },
+    server: { host:'127.0.0.1', port:4182, strictPort:true },
+  })
+  try {
+    await accountServer.listen()
+    const iq = await browser.newPage({locale:'zh-CN'})
+    iq.on('pageerror', err => failures.push(err.message))
+    await iq.route('**/*', route => {
+      const u = new URL(route.request().url())
+      if (u.origin !== 'http://127.0.0.1:4182' || u.pathname.startsWith('/api/')) { blocked.push(u.pathname); return route.abort() }
+      return route.continue()
+    })
+    for (const [device,width] of [['mobile',390],['desktop',1280]]) {
+      await iq.setViewportSize({width,height:1000})
+      await iq.goto('http://127.0.0.1:4182/')
+      const selector = iq.getByTestId('question-select')
+      await selector.waitFor()
+      await iq.screenshot({path:path.join(output,`zh-account-candy-${device}.png`),animations:'disabled'})
+      await selector.getByRole('button').first().click()
+      await iq.getByRole('option', { name:'Ciallo 检测' }).click()
+      await iq.getByTestId('ciallo-panel').waitFor()
+      await iq.screenshot({path:path.join(output,`zh-account-ciallo-${device}.png`),animations:'disabled'})
+    }
+  } finally { await accountServer.close() }
   if (failures.length || blocked.length) throw new Error('offline_render_failed')
   await fs.writeFile(path.join(output, 'verification.json'), JSON.stringify({ commit: process.env.QUALITY_HEAD_SHA, component: 'AccountQualityView.vue', synthetic: true, paidRequests: 0, applicationApiCalls: 0, failures, blocked }, null, 2))
 } catch (err) {

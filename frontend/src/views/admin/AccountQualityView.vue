@@ -630,6 +630,10 @@ function isProbeResult(result: ScheduledTestResult) { return result.pelican_conf
 function resultLabel(result: ScheduledTestResult) {
   if (result.status === 'skipped') return t(result.error_message === 'model_catalog_unavailable' ? 'qualityOps.catalogUnavailable' : result.error_message === 'model_unavailable' ? 'qualityOps.modelUnavailableSkipped' : 'qualityOps.modelUnsupportedSkipped')
   if (!result.status) return t('qualityOps.notLoaded')
+  if (result.pelican_config?.question_kind === 'ciallo') {
+    if (result.quality_judgment?.kind === 'ciallo') return judgmentReason(result)
+    return t('qualityOps.ciallo.unassessable')
+  }
   const verdict = stateProbeVerdict(result)
   if (verdict) return t(probeLabels[verdict])
   return t(result.status === 'success' ? 'qualityOps.passed' : result.error_message === 'answer_mismatch' ? 'qualityOps.wrongAnswer' : result.quality_judgment?.verdict === 'unknown' || result.error_message?.startsWith('judge_') ? 'qualityOps.judgeUnknown' : 'qualityOps.requestError')
