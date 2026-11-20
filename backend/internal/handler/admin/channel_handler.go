@@ -69,7 +69,7 @@ type updateChannelRequest struct {
 type channelModelPricingRequest struct {
 	Platform                   string                     `json:"platform" binding:"omitempty,max=50"`
 	Models                     []string                   `json:"models" binding:"required,min=1,max=100"`
-	BillingMode                string                     `json:"billing_mode" binding:"omitempty,oneof=token per_request image"`
+	BillingMode                string                     `json:"billing_mode" binding:"omitempty,oneof=token per_request image video"`
 	InputPrice                 *float64                   `json:"input_price" binding:"omitempty,min=0"`
 	OutputPrice                *float64                   `json:"output_price" binding:"omitempty,min=0"`
 	CacheWritePrice            *float64                   `json:"cache_write_price" binding:"omitempty,min=0"`

@@ -21,6 +21,23 @@ import (
 
 const wanVideoModel = "wan3.0-video"
 
+// WanVideoUnitPrice snapshots the configured tariff before an upstream task
+// can incur a charge. The effective group multiplier is applied at settlement.
+func (s *OpenAIGatewayService) WanVideoUnitPrice(ctx context.Context, key *APIKey, model, resolution string) *float64 {
+	price := s.resolveOpenAIChannelPricing(ctx, model, key)
+	if price == nil || price.Mode != BillingModeVideo {
+		return nil
+	}
+	unit := s.resolver.GetRequestTierPrice(price, resolution)
+	if unit <= 0 {
+		unit = price.DefaultPerRequestPrice
+	}
+	if unit <= 0 {
+		return nil
+	}
+	return &unit
+}
+
 type wanMedia struct {
 	Type string `json:"type"`
 	URL  string `json:"url"`

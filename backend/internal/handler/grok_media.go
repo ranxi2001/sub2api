@@ -127,7 +127,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 			return
 		}
-		wanUnitPrice = service.LookupVideoModelPrice(apiKey.Group.VideoModelPrices, requestInfo.Model, requestInfo.Resolution)
+		wanUnitPrice = h.gatewayService.WanVideoUnitPrice(c.Request.Context(), apiKey, requestInfo.Model, requestInfo.Resolution)
 		if wanUnitPrice == nil || *wanUnitPrice <= 0 {
 			h.errorResponse(c, http.StatusBadRequest, "video_price_missing", "Configure a Wan price for this resolution")
 			return
