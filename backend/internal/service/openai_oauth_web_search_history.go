@@ -78,6 +78,10 @@ func openAIAdditionalToolsInsertIndex(itemTypes []string) int {
 // ensureOpenAIOAuthWebSearchToolForHistory is the map variant used by the
 // Codex OAuth transform.
 func ensureOpenAIOAuthWebSearchToolForHistory(reqBody map[string]any, responsesLite bool) bool {
+	return declareOpenAIWebSearchHistoryTool(reqBody, responsesLite, false)
+}
+
+func declareOpenAIWebSearchHistoryTool(reqBody map[string]any, responsesLite, requireDisabled bool) bool {
 	if reqBody == nil {
 		return false
 	}
@@ -115,6 +119,11 @@ func ensureOpenAIOAuthWebSearchToolForHistory(reqBody map[string]any, responsesL
 	}
 	tools, _ := reqBody["tools"].([]any)
 	callerDeclaredTools = callerDeclaredTools || len(tools) > 0
+	// A replay may add a historical declaration only when the resulting
+	// choice prohibits calling it. Keep the caller's other tools available.
+	if requireDisabled && reqBody["tool_choice"] != "none" && (callerDeclaredTools || !shouldPinOpenAIWebSearchHistoryToolChoice(reqBody["tool_choice"])) {
+		return false
+	}
 
 	switch {
 	case !responsesLite:

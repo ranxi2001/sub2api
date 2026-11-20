@@ -95,6 +95,34 @@ func normalizeOpenAIResponsesLegacyIngressWithConfig(cfg *config.Config, body []
 	return normalized, true, nil
 }
 
+// Both ordinary Codex requests and verified OAuth replays use this projection.
+func convertCodexLegacyFunctionControls(body map[string]any) bool {
+	functions, hasFunctions := body["functions"]
+	call, hasCall := body["function_call"]
+	if hasFunctions {
+		if declarations, ok := functions.([]any); ok {
+			tools := make([]any, 0, len(declarations))
+			for _, declaration := range declarations {
+				tools = append(tools, map[string]any{"type": "function", "function": declaration})
+			}
+			body["tools"] = tools
+		}
+		delete(body, "functions")
+	}
+	if hasCall {
+		switch choice := call.(type) {
+		case string:
+			body["tool_choice"] = choice
+		case map[string]any:
+			if name, ok := choice["name"].(string); ok && strings.TrimSpace(name) != "" {
+				body["tool_choice"] = map[string]any{"type": "function", "name": name}
+			}
+		}
+		delete(body, "function_call")
+	}
+	return hasFunctions || hasCall
+}
+
 type convertedLegacyResponsesMessages struct {
 	input              any
 	instructions       string

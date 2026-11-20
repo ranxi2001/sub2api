@@ -3,6 +3,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"testing"
@@ -12,6 +13,59 @@ import (
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
+
+func TestOpenAI409NativeControlsOAuthToolHistory(t *testing.T) {
+	t.Run("legacy_named_function", func(t *testing.T) {
+		option := httpRebuildFixtureOptions{
+			request: func(body map[string]any, _ bool) {
+				if body["previous_response_id"] != "resp_rebuild_A" {
+					return
+				}
+				functions := httpRebuildToolDefinitions()
+				for _, f := range functions {
+					delete(f.(map[string]any), "type")
+				}
+				delete(body, "tools")
+				body["functions"] = functions
+				body["function_call"] = map[string]any{"name": "run_tests"}
+			},
+			provider: func(t *testing.T, body []byte, _ http.Header, n int) {
+				if n == 2 {
+					require.Equal(t, "run_tests", gjson.GetBytes(body, "tool_choice.name").String())
+					require.False(t, gjson.GetBytes(body, "functions").Exists())
+					require.False(t, gjson.GetBytes(body, "function_call").Exists())
+				}
+			},
+		}
+		runHTTPRebuildFixture(t, service.AccountTypeOAuth, false, "previous", "completed", "issue854_auth", "", option)
+	})
+	t.Run("historical_search_only", func(t *testing.T) {
+		option := httpRebuildFixtureOptions{
+			request: func(body map[string]any, _ bool) {
+				if body["previous_response_id"] != "resp_rebuild_A" {
+					return
+				}
+				body["tools"] = []any{}
+				var input []json.RawMessage
+				require.NoError(t, json.Unmarshal(body["input"].(json.RawMessage), &input))
+				body["input"] = append(input, json.RawMessage(`{"type":"web_search_call","id":"ws_fixture","status":"completed"}`))
+			},
+			toolsAvailable: func(body []byte) bool {
+				return httpRebuildToolsAvailable(body) || (gjson.GetBytes(body, "tools.#").Int() == 1 &&
+					gjson.GetBytes(body, "tools.0.type").String() == "web_search" && gjson.GetBytes(body, "tool_choice").String() == "none")
+			},
+			provider: func(t *testing.T, body []byte, _ http.Header, n int) {
+				if n == 2 {
+					require.Equal(t, "none", gjson.GetBytes(body, "tool_choice").String())
+					require.Equal(t, "web_search", gjson.GetBytes(body, "tools.0.type").String())
+				}
+			},
+		}
+		// The provider rejects B after recording the physical request. The
+		// fixture asserts one B send and no subsequent generation or retry.
+		runHTTPRebuildFixture(t, service.AccountTypeOAuth, false, "previous", "rejected", "issue854_auth", "", option)
+	})
+}
 
 // Real authentication, scheduler, native builders, Redis delivery fences and
 // a loopback provider. A emits a patch once, becomes unavailable, then B must
