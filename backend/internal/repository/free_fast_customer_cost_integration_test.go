@@ -183,3 +183,26 @@ func TestFreeUltrafastCustomerCostDurableReplay(t *testing.T) {
 	require.Equal(t, "99.99900400", balance)
 	require.Equal(t, "0.00099600", quota)
 }
+
+func TestAccountProbePenaltyDurableReplay(t *testing.T) {
+	ctx := context.Background()
+	repo, cmd, usage, _ := durableBillingFixture(t)
+	cmd.BalanceCost, cmd.APIKeyQuotaCost = .001, .001
+	usage.InputTokens, usage.OutputTokens = 10, 13
+	usage.InputCost, usage.OutputCost, usage.TotalCost, usage.ActualCost = .00003, .000195, .000225, .001
+	usage.CustomerCostDetails = &service.CustomerCostDetails{Version: 4, ProbePenalty: &service.ProbePenaltyReceipt{MinimumCharge: .001, Adjustment: .0007525, ActualCost: .001, OriginalOutputTokens: 13, BillingOutputTokens: 59, OutputTokenPrice: .0000165}}
+	require.NoError(t, repo.StageUsageBilling(ctx, &cmd, &usage))
+	key := service.UsageBillingEventKey{RequestID: cmd.RequestID, APIKeyID: cmd.APIKeyID}
+	for i := 0; i < 2; i++ {
+		recovered, err := repo.ApplyStagedUsageBilling(ctx, key)
+		require.NoError(t, err)
+		require.True(t, recovered.Settled)
+		require.Equal(t, .001, recovered.Event.Usage.CustomerCostDetails.ProbePenalty.ActualCost)
+		require.Equal(t, 13, recovered.Event.Usage.OutputTokens)
+	}
+	var balance, quota string
+	require.NoError(t, repo.db.QueryRowContext(ctx, "SELECT balance::text FROM users WHERE id=$1", cmd.UserID).Scan(&balance))
+	require.NoError(t, repo.db.QueryRowContext(ctx, "SELECT quota_used::text FROM api_keys WHERE id=$1", cmd.APIKeyID).Scan(&quota))
+	require.Equal(t, "99.99900000", balance)
+	require.Equal(t, "0.00100000", quota)
+}

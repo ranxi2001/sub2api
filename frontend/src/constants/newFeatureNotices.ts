@@ -89,4 +89,5 @@ export const NEW_FEATURE_NOTICES = {
   bpsAccountMultiProxy: 'bps-account-multi-proxy-request-routing',
   openaiAccountMultiProxy: '2026-11-16-openai-account-multi-proxy',
   cacheTtlBillingFromRequest: 'anthropic-apikey-cache-ttl-billing-from-request-initial-announcement',
+  accountProbePenalty: 'account-claude-probe-penalty-initial-announcement',
 } as const

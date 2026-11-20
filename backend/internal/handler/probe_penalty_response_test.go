@@ -1,0 +1,81 @@
+//go:build unit
+
+package handler
+
+import (
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
+)
+
+func probeTestWriter(t *testing.T, stream bool) (*probePenaltyResponse, *httptest.ResponseRecorder) {
+	t.Helper()
+	r := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(r)
+	w, err := newProbePenaltyResponse(c.Writer, stream)
+	require.NoError(t, err)
+	t.Cleanup(w.close)
+	if stream {
+		w.Header().Set("Content-Type", "text/event-stream")
+	} else {
+		w.Header().Set("Content-Type", "application/json")
+	}
+	return w, r
+}
+func probeTestResult() *service.ForwardResult {
+	return &service.ForwardResult{Usage: service.ClaudeUsage{InputTokens: 10, OutputTokens: 13}, ProbePenalty: &service.ProbePenaltyReceipt{MinimumCharge: .001, Adjustment: .000685, ActualCost: .001, OriginalOutputTokens: 13, BillingOutputTokens: 49, OutputTokenPrice: .0000195}}
+}
+func TestProbePenaltyJSONPreservesObservedUsage(t *testing.T) {
+	w, r := probeTestWriter(t, false)
+	_, err := w.WriteString(`{"type":"message","content":[{"type":"text","text":"OK"}],"usage":{"input_tokens":10,"output_tokens":13}}`)
+	require.NoError(t, err)
+	require.Empty(t, r.Body.String())
+	require.NoError(t, w.validate())
+	require.NoError(t, w.finish(probeTestResult()))
+	body := r.Body.String()
+	require.Equal(t, int64(49), gjson.Get(body, "usage.output_tokens").Int())
+	require.Equal(t, int64(13), gjson.Get(body, "upstream_usage.output_tokens").Int())
+	require.Equal(t, "OK", gjson.Get(body, "content.0.text").String())
+	require.Equal(t, .001, gjson.Get(body, "billing.probe_penalty.actual_cost").Float())
+}
+func TestProbePenaltySSEStreamsTextAndHoldsTerminalUsage(t *testing.T) {
+	w, r := probeTestWriter(t, true)
+	start := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":1}}}\n\n"
+	text := "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"text\":\"OK\"}}\n\n"
+	tail := "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":13}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+	for _, b := range []byte(start + text + tail) {
+		_, err := w.Write([]byte{b})
+		require.NoError(t, err)
+		w.Flush()
+	}
+	require.Contains(t, r.Body.String(), "OK")
+	require.NotContains(t, r.Body.String(), "message_stop")
+	require.NotContains(t, r.Body.String(), "end_turn")
+	require.NoError(t, w.validate())
+	require.NoError(t, w.finish(probeTestResult()))
+	require.Equal(t, 1, strings.Count(r.Body.String(), `"type":"message_stop"`))
+	require.Contains(t, r.Body.String(), `"output_tokens":49`)
+	require.Contains(t, r.Body.String(), `"upstream_usage":{"output_tokens":13}`)
+}
+func TestProbePenaltyRejectsTruncatedAndFailedSettlement(t *testing.T) {
+	w, r := probeTestWriter(t, true)
+	_, err := w.WriteString("event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":13}}\n\n")
+	require.NoError(t, err)
+	require.Error(t, w.validate())
+	w.settlementError()
+	require.NotContains(t, r.Body.String(), "message_delta")
+	require.Equal(t, 503, r.Code)
+}
+func TestProbePenaltyDisabledAdjustmentLeavesBodyUnchanged(t *testing.T) {
+	w, r := probeTestWriter(t, false)
+	body := `{"type":"message","usage":{"input_tokens":10,"output_tokens":10000}}`
+	_, err := w.WriteString(body)
+	require.NoError(t, err)
+	require.NoError(t, w.finish(&service.ForwardResult{}))
+	require.Equal(t, body, r.Body.String())
+}

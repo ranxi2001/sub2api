@@ -2049,6 +2049,7 @@ export interface CustomerCostDetails {
   cache_cost_details?: CustomerCacheCostDetail[]
   image_minimum_charge?: number
   image_minimum_charge_adjustment?: number
+  probe_penalty?: { minimum_charge: number; adjustment: number; actual_cost: number; original_output_tokens: number; billing_output_tokens: number; output_token_price: number }
   version: number
   free_fast: boolean
   free_ultrafast?: boolean

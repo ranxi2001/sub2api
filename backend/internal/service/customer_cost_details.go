@@ -9,6 +9,7 @@ import (
 // are Standard components before the customer rate; upstream UsageLog monetary
 // fields and the billing command remain authoritative and unchanged.
 type CustomerCostDetails struct {
+	ProbePenalty                 *ProbePenaltyReceipt      `json:"probe_penalty,omitempty"`
 	ImageMinimumCharge           float64                   `json:"image_minimum_charge,omitempty"`
 	ImageMinimumChargeAdjustment float64                   `json:"image_minimum_charge_adjustment,omitempty"`
 	CacheCostDetails             []CustomerCacheCostDetail `json:"cache_cost_details,omitempty"`

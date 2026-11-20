@@ -2191,6 +2191,7 @@
           <p class="input-hint">{{ t('admin.accounts.groupBillingRateMultiplierHint') }}</p>
         </div>
       </div>
+      <ProbePenaltySettings v-if="editingAccount?.platform === 'anthropic'" v-model:enabled="probePenaltyEnabled" v-model:minimum="probePenaltyMinimum" />
       <!-- OpenAI OAuth RPM limit -->
       <div
         v-if="editingAccount?.platform === 'openai' && editingAccount?.type === 'oauth'"
@@ -3878,6 +3879,7 @@ import { DEFAULT_BPS_RECOVERY_INTERVAL_MINUTES, MAX_BPS_RECOVERY_INTERVAL_MINUTE
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import ProbePenaltySettings from './ProbePenaltySettings.vue'
 import OpenAIProxySettings from '@/components/account/OpenAIProxySettings.vue'
 import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 
@@ -5169,6 +5171,8 @@ const mixedChannelWarningMessageText = computed(() => {
   return mixedChannelWarningRawMessage.value
 })
 
+const probePenaltyEnabled = ref(false)
+const probePenaltyMinimum = ref(0.001)
 const costMultiplier = ref(DEFAULT_ACCOUNT_COST_MULTIPLIER)
 const costMultiplierAutoSync = ref(true)
 
@@ -5293,6 +5297,9 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   form.concurrency = newAccount.concurrency
   form.load_factor = newAccount.load_factor ?? null
   form.priority = newAccount.priority
+  const penalty = newAccount.extra?.probe_penalty as { enabled?: boolean; minimum_charge?: number } | undefined
+  probePenaltyEnabled.value = penalty?.enabled === true
+  probePenaltyMinimum.value = penalty?.minimum_charge ?? 0.001
   costMultiplier.value = readAccountCostMultiplier(newAccount.extra)
   costMultiplierAutoSync.value = newAccount.extra?.cost_multiplier_auto_sync !== false
   form.rate_multiplier = newAccount.rate_multiplier ?? 1
@@ -7492,6 +7499,14 @@ const handleSubmit = async () => {
       costExtra.cost_multiplier_auto_sync = costMultiplierAutoSync.value
     } else {
       delete costExtra.cost_multiplier_auto_sync
+    }
+    if (editingAccount.value.platform === 'anthropic') {
+      const minimum = probePenaltyMinimum.value
+      if (!Number.isFinite(minimum) || minimum < 0 || minimum > 1000 || (probePenaltyEnabled.value && minimum <= 0) || Math.abs(minimum * 1e8 - Math.round(minimum * 1e8)) > 0.00001) {
+        appStore.showError(t('admin.accounts.probePenalty.invalid'))
+        return
+      }
+      costExtra.probe_penalty = { enabled: probePenaltyEnabled.value, minimum_charge: minimum }
     }
     delete costExtra.new_api_apply_usd_rate
     updatePayload.extra = costExtra

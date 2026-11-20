@@ -926,10 +926,38 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 			// 记录 Forward 前已写入字节数，Forward 后若增加则说明 SSE 内容已发，禁止 failover
 			writerSizeBeforeForward := c.Writer.Size()
+			var probeResponse *probePenaltyResponse
+			if account.ProbePenaltyMinimum() > 0 {
+				if !h.gatewayService.ProbePenaltySettlementEnabled() {
+					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Probe penalty requires durable settlement", streamStarted)
+					return
+				}
+				probeResponse, err = newProbePenaltyResponse(c.Writer, attemptParsedReq.Stream)
+				if err != nil {
+					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Probe penalty response unavailable", streamStarted)
+					return
+				}
+				defer probeResponse.close()
+				c.Writer = probeResponse
+			}
 			if account.Platform == service.PlatformAntigravity && account.Type != service.AccountTypeAPIKey {
 				result, err = h.antigravityGatewayService.Forward(requestCtx, c, account, attemptBody, hasBoundSession)
 			} else {
 				result, err = h.gatewayService.Forward(requestCtx, c, account, attemptParsedReq)
+			}
+
+			if probeResponse != nil {
+				c.Writer = probeResponse.ResponseWriter
+				if err == nil {
+					err = probeResponse.validate()
+				}
+				if err != nil && probeResponse.size >= 0 {
+					if probeResponse.status >= http.StatusBadRequest {
+						_ = probeResponse.finish(nil)
+					} else {
+						probeResponse.settlementError()
+					}
+				}
 			}
 
 			// 兜底释放串行锁（正常情况已通过回调提前释放）
@@ -975,8 +1003,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				forceCacheBilling := fs.ForceCacheBilling
 				quotaPlatform := service.QuotaPlatform(c.Request.Context(), currentAPIKey)
 				sessionID := service.ExtractClientSessionID(c)
-				h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
-					if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
+				record := func(ctx context.Context) error {
+					return h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
 						Result:             result,
 						QuotaPlatform:      quotaPlatform,
 						APIKey:             currentAPIKey,
@@ -993,15 +1021,23 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						ForceCacheBilling:  forceCacheBilling,
 						APIKeyService:      h.apiKeyService,
 						ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel),
-					}); err != nil {
-						logger.L().With(
-							zap.String("component", "handler.gateway.messages"),
-							zap.Int64("user_id", subject.UserID),
-							zap.Int64("api_key_id", currentAPIKey.ID),
-							zap.Any("group_id", currentAPIKey.GroupID),
-							zap.String("model", reqModel),
-							zap.Int64("account_id", account.ID),
-						).Error("gateway.record_usage_failed", zap.Error(err))
+					})
+				}
+				if probeResponse != nil && err == nil {
+					result.ProbePenaltyEligible = true
+					if billingErr := record(service.WithProbePenaltyResult(context.WithoutCancel(c.Request.Context()), result)); billingErr != nil {
+						reqLog.Error("gateway.probe_penalty_settlement_failed", zap.Error(billingErr))
+						probeResponse.settlementError()
+						return
+					}
+					if responseErr := probeResponse.finish(result); responseErr != nil {
+						reqLog.Error("gateway.probe_penalty_response_failed", zap.Error(responseErr))
+					}
+					return
+				}
+				h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
+					if billingErr := record(ctx); billingErr != nil {
+						reqLog.Error("gateway.record_usage_failed", zap.Error(billingErr))
 					}
 				})
 			}
