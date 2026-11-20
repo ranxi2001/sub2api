@@ -42,7 +42,7 @@ func TestOAuthDegradationSelectedActionsPostgres(t *testing.T) {
 			require.NoError(t, repo.SetGroupAllowedModels(ctx, a.ID, map[int64][]string{retained.ID: {"gpt-6.1-sol"}}))
 			var groupEventsBefore int
 			require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM scheduler_outbox WHERE account_id=$1 AND event_type=$2", a.ID, service.SchedulerOutboxEventAccountGroupsChanged).Scan(&groupEventsBefore))
-			require.NoError(t, repo.EvaluateOAuthDegradation(ctx, a.ID, time.Now()))
+			require.NoError(t, evaluateConfirmedProbe(ctx, repo, a.ID, time.Now()))
 			got, err := repo.GetByID(ctx, a.ID)
 			require.NoError(t, err)
 			require.True(t, got.HasOAuthDegradationAction())
@@ -94,7 +94,7 @@ func TestOAuthDegradationSelectedActionsPostgres(t *testing.T) {
 			got, err = repo.GetByID(ctx, a.ID)
 			require.NoError(t, err)
 			require.Equal(t, 41, got.Concurrency, "native manual takeover restores configured success upgrades")
-			require.NoError(t, repo.EvaluateOAuthDegradation(ctx, a.ID, time.Now()))
+			require.NoError(t, evaluateConfirmedProbe(ctx, repo, a.ID, time.Now()))
 			var events int
 			require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM account_auto_config_events WHERE account_id=$1 AND kind='degradation_applied'", a.ID).Scan(&events))
 			require.Equal(t, 1, events, "selected actions retain one-time transaction semantics")

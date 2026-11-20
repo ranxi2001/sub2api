@@ -39,6 +39,7 @@ export const NEW_FEATURE_NOTICES = {
   settingsSaveDock: 'settings-save-dock-initial-announcement',
   qwenPlatform: 'qwen-platform-initial-announcement',
   qwenCache: 'qwen-cache-strict-session-initial-announcement',
+  oauth429IndependentTests: 'oauth-degradation-429-independent-tests',
   oauthDegradation429: 'oauth-degradation-429-conditions-initial-announcement',
   oauthDegradationCandyRetest: 'oauth-degradation-candy-retest',
   priorityAccountPerformance: 'priority-account-performance-scoring-initial-announcement',

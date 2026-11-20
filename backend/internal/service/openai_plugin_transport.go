@@ -199,12 +199,21 @@ func (s *AccountTestService) doOpenAIAccountTestUpstream(
 		if err := gateway.applyOpenAICodexTicket(request.Context(), account, model, request.Header, "sse"); err != nil {
 			return nil, err
 		}
+		if expected, independent := request.Context().Value(oauth429ExecutionKey{}).(*oauth429Execution); independent {
+			ticket := gateway.boundCodexTicket(request, account)
+			if ticket == nil || ticket.AccountID != expected.AccountID || (ticket.SourceAccountID != 0 && ticket.SourceAccountID != expected.AccountID) {
+				return nil, fmt.Errorf("independent test cannot use another account's ticket")
+			}
+		}
 		// This restores the complete cookie/egress bundle, holds it until body close,
 		// observes replacements and enforces the configured strict response policy.
 		request = request.WithContext(context.WithValue(request.Context(), astraCandySkipObservationKey{}, true))
-		return gateway.doOpenAIUpstream(request, proxyURL, account)
+		resp, err := gateway.doOpenAIUpstream(request, proxyURL, account)
+		recordOAuth429TestStatus(request, account.ID, resp, err)
+		return resp, err
 	}
-	if s.pluginManager != nil && !account.OpenAIRequestProxyEnabled() {
+	_, independent429 := request.Context().Value(oauth429ExecutionKey{}).(*oauth429Execution)
+	if s.pluginManager != nil && !account.OpenAIRequestProxyEnabled() && !independent429 {
 		response, handled, err := s.pluginManager.RoundTripOpenAIOAuth(request.Context(), request, proxyURL, account)
 		if handled {
 			if options, ok := pelicanTestOptionsFromContext(request.Context()); ok && options.nativeOAuthTransport != nil && !IsAstraSourceAcquisition(request.Context()) {

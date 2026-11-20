@@ -8,6 +8,7 @@ import (
 )
 
 const (
+	AutoConfigEventOAuth429    = "oauth429_review_completed"
 	AutoConfigEventDegradation = "degradation_applied"
 	AutoConfigEventSaved       = "config_saved"
 	AutoConfigEventInitial     = "initial_applied"
@@ -17,6 +18,7 @@ const (
 
 // Explicit fields keep credentials, raw upstream responses and request bodies out of history.
 type AutoConfigEventDetails struct {
+	OAuth429            *OAuth429Task          `json:"oauth429,omitempty"`
 	Degradation         *OAuthDegradationState `json:"degradation,omitempty"`
 	ModelMapping        map[string]string      `json:"model_mapping,omitempty"`
 	Config              *OAuthAutoConfig       `json:"config,omitempty"`
@@ -44,7 +46,7 @@ type autoConfigInitialRecorder interface {
 }
 
 func ValidAutoConfigEventKind(kind string) bool {
-	return kind == "" || kind == AutoConfigEventDegradation || kind == AutoConfigEventSaved || kind == AutoConfigEventInitial || kind == AutoConfigEventUpgrade || kind == AutoConfigEventCooldown
+	return kind == "" || kind == AutoConfigEventOAuth429 || kind == AutoConfigEventDegradation || kind == AutoConfigEventSaved || kind == AutoConfigEventInitial || kind == AutoConfigEventUpgrade || kind == AutoConfigEventCooldown
 }
 func (s *AccountOpsService) ListAutoConfigEvents(ctx context.Context, before int64, kind string, limit int) ([]AutoConfigEvent, error) {
 	repo, ok := s.repo.(AutoConfigEventRepository)

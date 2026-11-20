@@ -36,6 +36,8 @@ func degradationPolicyFixture(t *testing.T) (*accountRepository, service.OAuthAu
 	threshold := 50.0
 	c.Revision = fmt.Sprintf("degradation-fixture-%d", time.Now().UnixNano())
 	c.DegradationAction.Enabled = true
+	off := false
+	c.DegradationAction.Upstream429Enabled = &off
 	c.DegradationAction.ThresholdPercent = &threshold
 	c.DegradationAction.Models = []string{"gpt-6-luna"}
 	raw, err := json.Marshal(c)
@@ -81,6 +83,7 @@ func degradationAccountFixture(t *testing.T, concurrency int, mapping map[string
 		_, err := integrationDB.ExecContext(ctx, `INSERT INTO scheduled_test_results(plan_id,status,started_at,finished_at,created_at,pelican_config,quality_round_id,quality_action,quality_judgment,error_message) VALUES($1,$2,$3,$4,$4,'{"parallel_count":1}',$5,'evaluated',jsonb_build_object('verdict',$6::text),$7)`, plan, status, at, at.Add(time.Second), fmt.Sprintf("fixture-%d-%d", a.ID, i), verdict, message)
 		require.NoError(t, err)
 	}
+	prepareConfirmedProbeFixture(t, a.ID)
 	return a
 }
 func TestOAuthDegradationPostgresMatrix(t *testing.T) {
@@ -112,7 +115,7 @@ func TestOAuthDegradationPostgresMatrix(t *testing.T) {
 				_, err := integrationDB.ExecContext(ctx, "UPDATE accounts SET concurrency=0 WHERE id=$1", a.ID)
 				require.NoError(t, err)
 			}
-			require.NoError(t, repo.EvaluateOAuthDegradation(ctx, a.ID, time.Now()))
+			require.NoError(t, evaluateConfirmedProbe(ctx, repo, a.ID, time.Now()))
 			got, err := repo.GetByID(ctx, a.ID)
 			require.NoError(t, err)
 			require.Equal(t, tc.applied, got.HasOAuthDegradationAction())
@@ -151,13 +154,13 @@ func TestOAuthDegradationPostgresMatrix(t *testing.T) {
 	})
 	_, err := integrationDB.ExecContext(ctx, "INSERT INTO settings(key,value) VALUES($1,'15') ON CONFLICT(key) DO UPDATE SET value='15'", service.SettingKeyAccountPerformanceWindowMinutes)
 	require.NoError(t, err)
-	require.NoError(t, repo.EvaluateOAuthDegradation(ctx, a.ID, time.Now()))
+	require.NoError(t, evaluateConfirmedProbe(ctx, repo, a.ID, time.Now()))
 	got, err := repo.GetByID(ctx, a.ID)
 	require.NoError(t, err)
 	require.False(t, got.HasOAuthDegradationAction())
 	_, err = integrationDB.ExecContext(ctx, "UPDATE settings SET value='60' WHERE key=$1", service.SettingKeyAccountPerformanceWindowMinutes)
 	require.NoError(t, err)
-	require.NoError(t, repo.EvaluateOAuthDegradation(ctx, a.ID, time.Now()))
+	require.NoError(t, evaluateConfirmedProbe(ctx, repo, a.ID, time.Now()))
 	got, err = repo.GetByID(ctx, a.ID)
 	require.NoError(t, err)
 	require.True(t, got.HasOAuthDegradationAction(), "live 60-minute window includes the unchanged 16-minute-old probe")
@@ -206,7 +209,7 @@ func TestOAuthDegradationSettingsCASAndDisableFence(t *testing.T) {
 	var locked string
 	require.NoError(t, tx.QueryRowContext(ctx, "SELECT value FROM settings WHERE key=$1 FOR UPDATE", service.SettingKeyOAuthAutoConfig).Scan(&locked))
 	result := make(chan error, 1)
-	go func() { result <- repo.EvaluateOAuthDegradation(ctx, a.ID, time.Now()) }()
+	go func() { result <- evaluateConfirmedProbe(ctx, repo, a.ID, time.Now()) }()
 	select {
 	case err := <-result:
 		t.Fatalf("evaluation passed a locked configuration: %v", err)
@@ -257,7 +260,7 @@ func TestOAuthDegradationReevaluationRestartAndUpgradeHold(t *testing.T) {
 	require.NoError(t, err)
 	_, err = integrationDB.ExecContext(ctx, "UPDATE settings SET value=$2 WHERE key=$1", service.SettingKeyOAuthAutoConfig, string(raw))
 	require.NoError(t, err)
-	require.NoError(t, repo.EvaluateOAuthDegradation(ctx, a.ID, time.Now()))
+	require.NoError(t, evaluateConfirmedProbe(ctx, repo, a.ID, time.Now()))
 	got, err := repo.GetByID(ctx, a.ID)
 	require.NoError(t, err)
 	appliedAt := got.UpdatedAt
@@ -270,7 +273,7 @@ func TestOAuthDegradationReevaluationRestartAndUpgradeHold(t *testing.T) {
 	// A new repository has no process-local memory from the original evaluator.
 	restarted := newAccountRepositoryWithSQL(integrationEntClient, integrationDB, nil)
 	for range 3 {
-		require.NoError(t, restarted.EvaluateOAuthDegradation(ctx, a.ID, time.Now()))
+		require.NoError(t, evaluateConfirmedProbe(ctx, restarted, a.ID, time.Now()))
 	}
 	got, err = repo.GetByID(ctx, a.ID)
 	require.NoError(t, err)

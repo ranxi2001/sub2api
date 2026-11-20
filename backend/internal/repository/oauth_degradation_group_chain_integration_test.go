@@ -73,7 +73,7 @@ func TestOAuthDegradationGroupOutboxSchedulerChain(t *testing.T) {
 	}
 	setWrites(false)
 	ops := service.NewAccountOpsService(NewSettingRepository(integrationEntClient), NewAccountOpsRepository(integrationDB), nil)
-	ops.SetNotificationDependencies(repo, nil, false, "UTC")
+	ops.SetNotificationDependencies(confirmedProbeAccounts{repo}, nil, false, "UTC")
 	ops.Start()
 	defer ops.Stop()
 	require.Eventually(t, func() bool {
@@ -146,11 +146,11 @@ func TestOAuthDegradationGroupOutboxSchedulerChain(t *testing.T) {
 	selection, _, err := fresh.SelectAccountWithScheduler(ctx, &kept.ID, "", "", "gpt-6-luna", nil, service.OpenAIUpstreamTransportHTTPSSE, false)
 	require.ErrorIs(t, err, service.ErrNoAvailableAccounts)
 	require.Nil(t, selection, "retained group's model restriction still applies")
-	require.NoError(t, repo.EvaluateOAuthDegradation(ctx, a.ID, time.Now()))
+	require.NoError(t, evaluateConfirmedProbe(ctx, repo, a.ID, time.Now()))
 	history, _ := degradationRows(t, a.ID)
 	require.Equal(t, 1, history)
 	require.NoError(t, repo.BindGroups(ctx, a.ID, []int64{closed.ID, kept.ID}), "an explicit native edit may restore removed membership")
-	require.NoError(t, repo.EvaluateOAuthDegradation(ctx, a.ID, time.Now()), "the one-time action must not repeat after a manual restoration")
+	require.NoError(t, evaluateConfirmedProbe(ctx, repo, a.ID, time.Now()), "the one-time action must not repeat after a manual restoration")
 	restored, err := repo.GetByID(ctx, a.ID)
 	require.NoError(t, err)
 	require.ElementsMatch(t, []int64{closed.ID, kept.ID}, restored.GroupIDs)
