@@ -1,0 +1,42 @@
+name: Account probe penalty UI
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [production]
+    paths:
+      - 'frontend/src/components/account/ProbePenaltySettings.vue'
+      - '.github/scripts/account-probe-penalty-screenshot.mjs'
+      - '.github/workflows/account-probe-penalty.yml'
+permissions:
+  contents: read
+jobs:
+  screenshots:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Install isolated browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/probe-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/probe-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Render actual account setting
+        env:
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/probe-browser/node_modules/playwright
+          SCREENSHOT_DIR: ${{ runner.temp }}/probe-ui
+        run: node .github/scripts/account-probe-penalty-screenshot.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: account-probe-penalty-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/probe-ui

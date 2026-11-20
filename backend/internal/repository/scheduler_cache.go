@@ -1666,6 +1666,7 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		// Priority scoring runs on candidate metadata before full hydration.
 		// Dropping saved procurement cost silently substitutes the 0.1 default.
 		service.AccountCostMultiplierExtraKey,
+		service.AccountProbePenaltyExtraKey,
 		// Anthropic shared-window and Fable-only threshold checks run on this
 		// projection. UpdateExtra refreshes both payloads without a bucket rebuild.
 		"session_window_utilization",
