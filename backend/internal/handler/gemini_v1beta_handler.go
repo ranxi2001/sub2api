@@ -992,7 +992,7 @@ func googleErrorWithType(c *gin.Context, status int, errType, code, message stri
 // googleClientErrorType 返回客户端请求类 4xx 状态码对应的 ops 错误类型；其余状态码返回空串。
 func googleClientErrorType(status int) string {
 	switch status {
-	case http.StatusBadRequest, http.StatusRequestEntityTooLarge:
+	case http.StatusBadRequest, http.StatusRequestTimeout, http.StatusRequestEntityTooLarge:
 		return "invalid_request_error"
 	case http.StatusUnauthorized:
 		return "authentication_error"
