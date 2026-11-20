@@ -56,6 +56,18 @@ type wanCreate struct {
 	} `json:"parameters"`
 }
 
+// The fixed-duration supplier rejects null media and an empty aspect ratio.
+func (input wanCreate) fixedDurationBody() ([]byte, error) {
+	payload := map[string]any{"model": input.Model, "prompt": input.Input.Prompt, "duration": input.Parameters.Duration, "resolution": input.Parameters.Resolution}
+	if len(input.Input.Media) > 0 {
+		payload["media"] = input.Input.Media
+	}
+	if input.Parameters.Ratio != "" {
+		payload["aspect_ratio"] = input.Parameters.Ratio
+	}
+	return json.Marshal(payload)
+}
+
 // ParseWanVideoRequest accepts the gateway video JSON contract and normalizes the
 // exact prompt and reference images forwarded to the moderation service.
 func ParseWanVideoRequest(contentType string, body []byte) (GrokMediaRequestInfo, error) {
@@ -205,7 +217,7 @@ func (s *OpenAIGatewayService) forwardWanVideo(ctx context.Context, c *gin.Conte
 				}
 			}
 			// The supplier omits metering on completion. Send the exact duration and tier from the admission quote.
-			body, err = json.Marshal(map[string]any{"model": input.Model, "prompt": input.Input.Prompt, "duration": input.Parameters.Duration, "resolution": input.Parameters.Resolution, "aspect_ratio": input.Parameters.Ratio, "media": input.Input.Media})
+			body, err = input.fixedDurationBody()
 			if err != nil {
 				return nil, nil, err
 			}

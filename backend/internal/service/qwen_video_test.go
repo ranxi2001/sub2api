@@ -54,3 +54,11 @@ func TestWanFixedDurationSupplierCompletion(t *testing.T) {
 	require.Equal(t, 2.0, task.BilledSeconds)
 	require.Equal(t, "480p", task.Resolution)
 }
+
+func TestWanFixedDurationTextOnlyWireBody(t *testing.T) {
+	input, _, err := parseWanCreate([]byte(`{"model":"wan3.0-video","prompt":"fixture","seconds":2,"resolution":"480p"}`))
+	require.NoError(t, err)
+	wire, err := input.fixedDurationBody()
+	require.NoError(t, err)
+	require.JSONEq(t, `{"model":"wan3.0-video","prompt":"fixture","duration":2,"resolution":"480P"}`, string(wire))
+}
