@@ -7506,7 +7506,12 @@ const handleSubmit = async () => {
         appStore.showError(t('admin.accounts.probePenalty.invalid'))
         return
       }
-      costExtra.probe_penalty = { enabled: probePenaltyEnabled.value, minimum_charge: minimum }
+      const original = editingAccount.value.extra?.probe_penalty as { enabled?: boolean; minimum_charge?: number } | undefined
+      if (probePenaltyEnabled.value !== (original?.enabled === true) || minimum !== (original?.minimum_charge ?? 0.001)) {
+        costExtra.probe_penalty = { enabled: probePenaltyEnabled.value, minimum_charge: minimum }
+      } else {
+        delete costExtra.probe_penalty
+      }
     }
     delete costExtra.new_api_apply_usd_rate
     updatePayload.extra = costExtra

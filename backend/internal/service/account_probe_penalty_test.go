@@ -84,3 +84,21 @@ func TestAccountProbePenaltySubscriptionAfterDiscount(t *testing.T) {
 	require.Zero(t, billingRepo.lastCmd.BalanceCost)
 	require.Equal(t, .001, usageRepo.lastLog.ActualCost)
 }
+
+type probeReceiptReplayRepo struct{ imageReceiptRepo }
+
+func (*probeReceiptReplayRepo) StageUsageBilling(context.Context, *UsageBillingCommand, *UsageLog) error {
+	return nil
+}
+func TestAccountProbePenaltyReceiptUsesCanonicalReplay(t *testing.T) {
+	canonical := &ProbePenaltyReceipt{MinimumCharge: .002, ActualCost: .002, Adjustment: .0015, OriginalOutputTokens: 13, BillingOutputTokens: 90, OutputTokenPrice: .00002}
+	repo := &probeReceiptReplayRepo{imageReceiptRepo{recovery: &UsageBillingRecovery{Settled: true, Event: UsageBillingEvent{Usage: UsageLog{OutputTokens: 13, InputTokens: 10, CustomerCostDetails: &CustomerCostDetails{Version: 4, ProbePenalty: canonical}}}}}}
+	current := &ForwardResult{Usage: ClaudeUsage{OutputTokens: 1}, ProbePenalty: &ProbePenaltyReceipt{ActualCost: .001, BillingOutputTokens: 50}}
+	_, err := applyDurableUsageBilling(WithProbePenaltyResult(context.Background(), current), repo, &UsageBillingCommand{RequestID: "replay", APIKeyID: 1}, &UsageLog{}, &postUsageBillingParams{}, &billingDeps{})
+	require.NoError(t, err)
+	require.Equal(t, canonical, current.ProbePenalty)
+	require.Equal(t, 13, current.Usage.OutputTokens)
+	repo.recovery.Settled = false
+	_, err = applyDurableUsageBilling(WithProbePenaltyResult(context.Background(), current), repo, &UsageBillingCommand{RequestID: "unknown", APIKeyID: 1}, &UsageLog{}, &postUsageBillingParams{}, &billingDeps{})
+	require.ErrorIs(t, err, ErrUsageBillingOutcomeUnknown)
+}

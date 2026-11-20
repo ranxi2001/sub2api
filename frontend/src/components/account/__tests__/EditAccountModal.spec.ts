@@ -4011,3 +4011,12 @@ describe('Claude account probe penalty', () => {
     expect(later.get('button').exists()).toBe(true)
   })
 })
+
+
+it('omits untouched probe settings so stale editors cannot restore old charges', async () => {
+  vi.clearAllMocks(); checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false }); updateAccountMock.mockResolvedValue(buildAccount())
+  const account = { ...buildAccount(), platform: 'anthropic', credentials: { api_key: 'synthetic' }, extra: { probe_penalty: { enabled: true, minimum_charge: .001 } } }
+  const wrapper = mountModal(account); await flushPromises()
+  await wrapper.get('#edit-account-form').trigger('submit.prevent'); await flushPromises()
+  expect(updateAccountMock.mock.calls[0][1].extra).not.toHaveProperty('probe_penalty')
+})

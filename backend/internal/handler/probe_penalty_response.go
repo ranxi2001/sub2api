@@ -18,13 +18,14 @@ import (
 // canonical ledger commits. Non-streaming bodies use the existing private spool.
 type probePenaltyResponse struct {
 	*imageBillingResponse
-	pending  []byte
-	tail     []byte
-	live     bool
-	holding  bool
-	jsonMode bool
-	seenBody bool
-	protocol string
+	pending       []byte
+	tail          []byte
+	live          bool
+	holding       bool
+	jsonMode      bool
+	seenBody      bool
+	observedUsage bool
+	protocol      string
 }
 
 func newProbePenaltyResponse(w gin.ResponseWriter, stream bool) (*probePenaltyResponse, error) {
@@ -60,6 +61,9 @@ func (w *probePenaltyResponse) Write(b []byte) (int, error) {
 		}
 		block := w.pending[:end+separator]
 		payload := probeEventData(block)
+		if gjson.GetBytes(payload, "message.usage").IsObject() || gjson.GetBytes(payload, "usage").IsObject() {
+			w.observedUsage = true
+		}
 		kind := gjson.GetBytes(payload, "type").String()
 		if strings.HasPrefix(kind, "response.") {
 			w.protocol = "responses"
@@ -134,12 +138,12 @@ func (w *probePenaltyResponse) validate() error {
 		}
 		return nil
 	}
-	var usage, stop bool
+	usage, stop := w.observedUsage, false
 	for _, block := range bytes.Split(bytes.ReplaceAll(body, []byte("\r\n"), []byte("\n")), []byte("\n\n")) {
 		payload := probeEventData(block)
 		switch gjson.GetBytes(payload, "type").String() {
 		case "message_delta":
-			usage = gjson.GetBytes(payload, "usage.output_tokens").Exists()
+			usage = usage || gjson.GetBytes(payload, "usage").IsObject()
 		case "message_stop":
 			stop = true
 		case "response.completed", "response.incomplete":
@@ -169,8 +173,8 @@ func rewriteProbeUsage(body []byte, result *service.ForwardResult) ([]byte, erro
 		prefix = "response."
 	}
 	original := gjson.GetBytes(body, prefix+"usage")
-	if !original.IsObject() {
-		return nil, errors.New("missing terminal usage")
+	if !original.Exists() {
+		original = gjson.Parse("null")
 	}
 	body, err := sjson.SetRawBytes(body, prefix+"upstream_usage", []byte(original.Raw))
 	if err != nil {
@@ -178,18 +182,25 @@ func rewriteProbeUsage(body []byte, result *service.ForwardResult) ([]byte, erro
 	}
 	// Preserve all input/cache details from the existing protocol converter.
 	output := "output_tokens"
-	if gjson.GetBytes(body, prefix+"usage.completion_tokens").Exists() {
+	if gjson.GetBytes(body, prefix+"object").String() == "chat.completion" || gjson.GetBytes(body, "object").String() == "chat.completion.chunk" {
 		output = "completion_tokens"
 	}
-	extra := result.ProbePenalty.BillingOutputTokens - result.ProbePenalty.OriginalOutputTokens
-	body, err = sjson.SetBytes(body, prefix+"usage."+output, original.Get(output).Int()+int64(extra))
+	body, err = sjson.SetBytes(body, prefix+"usage."+output, result.ProbePenalty.BillingOutputTokens)
 	if err != nil {
 		return nil, err
 	}
 	if original.Get("total_tokens").Exists() {
-		body, err = sjson.SetBytes(body, prefix+"usage.total_tokens", original.Get("total_tokens").Int()+int64(extra))
+		body, err = sjson.SetBytes(body, prefix+"usage.total_tokens", original.Get("total_tokens").Int()-original.Get(output).Int()+int64(result.ProbePenalty.BillingOutputTokens))
 		if err != nil {
 			return nil, err
+		}
+	}
+	if gjson.GetBytes(body, "type").String() == "message_delta" || gjson.GetBytes(body, "type").String() == "message" {
+		for key, value := range map[string]int{"input_tokens": result.Usage.InputTokens, "cache_creation_input_tokens": result.Usage.CacheCreationInputTokens, "cache_read_input_tokens": result.Usage.CacheReadInputTokens} {
+			body, err = sjson.SetBytes(body, "usage."+key, value)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 	metadata := map[string]any{"usage_kind": "billing_equivalent", "probe_penalty": result.ProbePenalty}
@@ -209,7 +220,7 @@ func (w *probePenaltyResponse) finish(result *service.ForwardResult) error {
 			last := -1
 			for i, block := range blocks {
 				payload := probeEventData(block)
-				if gjson.GetBytes(payload, "usage").IsObject() || gjson.GetBytes(payload, "response.usage").IsObject() {
+				if gjson.GetBytes(payload, "type").String() == "message_delta" || gjson.GetBytes(payload, "usage").IsObject() || gjson.GetBytes(payload, "response.usage").IsObject() {
 					last = i
 				}
 			}
@@ -218,9 +229,6 @@ func (w *probePenaltyResponse) finish(result *service.ForwardResult) error {
 					continue
 				}
 				payload := probeEventData(block)
-				if !gjson.GetBytes(payload, "usage").IsObject() && !gjson.GetBytes(payload, "response.usage").IsObject() {
-					continue
-				}
 				var rewritten []byte
 				rewritten, err = rewriteProbeUsage(payload, result)
 				if err != nil {

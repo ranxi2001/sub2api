@@ -167,3 +167,42 @@ func TestProbePenaltyStreamingRequestJSONFallback(t *testing.T) {
 	require.Equal(t, "application/json", r.Header().Get("Content-Type"))
 	require.Equal(t, int64(49), gjson.Get(r.Body.String(), "usage.output_tokens").Int())
 }
+
+func TestProbePenaltySparseTerminalUsageAcrossGateways(t *testing.T) {
+	for _, usage := range []string{`{"output_tokens":0}`, `{"cache_read_input_tokens":2}`, `null`, ``} {
+		for _, endpoint := range []string{"messages", "chat/completions", "responses"} {
+			t.Run(endpoint+"/"+usage, func(t *testing.T) {
+				suffix := `{"type":"message_delta","delta":{"stop_reason":"end_turn"}`
+				if usage != "" {
+					suffix += `,"usage":` + usage
+				}
+				suffix += `}`
+				stream := compatStreamUsagePartialStream + "event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":13}}\n\n" + "event: message_delta\ndata: " + suffix + "\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+				repo := &probeHandlerBilling{}
+				run := runCompatStreamUsageHandlerWithDelivery(t, endpoint, stream, true, repo, "", map[string]any{service.AccountProbePenaltyExtraKey: map[string]any{"enabled": true, "minimum_charge": .001}})
+				require.NotNil(t, repo.event)
+				require.Equal(t, 13, repo.event.Usage.OutputTokens)
+				require.Equal(t, .001, repo.event.Command.BalanceCost)
+				expected := repo.event.Usage.CustomerCostDetails.ProbePenalty.BillingOutputTokens
+				found := false
+				for _, block := range strings.Split(run.rec.Body.String(), "\n\n") {
+					payload := probeEventData([]byte(block))
+					prefix := ""
+					if gjson.GetBytes(payload, "type").String() == "response.completed" {
+						prefix = "response."
+					}
+					if !gjson.GetBytes(payload, prefix+"billing.probe_penalty").Exists() {
+						continue
+					}
+					output := gjson.GetBytes(payload, prefix+"usage.output_tokens")
+					if !output.Exists() {
+						output = gjson.GetBytes(payload, prefix+"usage.completion_tokens")
+					}
+					require.Equal(t, int64(expected), output.Int())
+					found = true
+				}
+				require.True(t, found, "the last sparse delta must contain canonical cumulative billing usage")
+			})
+		}
+	}
+}
