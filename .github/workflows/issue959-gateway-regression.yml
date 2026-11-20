@@ -17,7 +17,8 @@ on:
       - 'backend/internal/repository/profit_operations.go'
       - 'backend/internal/repository/usage_log_repo*'
       - 'backend/internal/handler/dto/procurement_cost_snapshot*'
-      - 'backend/migrations/391_usage_procurement_cost_snapshot.sql'
+      - 'backend/internal/handler/usage_observer_test.go'
+      - 'backend/migrations/392_usage_procurement_cost_snapshot.sql'
       - 'backend/internal/repository/concurrency_cache*'
       - 'backend/internal/repository/integration_harness_test.go'
       - 'backend/go.mod'
@@ -77,8 +78,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          go test -race -tags=unit ./internal/service ./internal/handler/admin ./internal/handler/dto ./internal/repository \
-            -run '^Test(GatewayIdentity|GatewayUsage|GatewayManagement|GatewayDataImport|AccountGatewayDTO|NewAPIGateway|NewAPICostRequest|NewAPICostScale|UsagePlatformSnapshots|ProcurementSnapshot)' \
+          go test -race -tags=unit ./internal/service ./internal/handler ./internal/handler/admin ./internal/handler/dto ./internal/repository \
+            -run '^Test(GatewayIdentity|GatewayUsage|GatewayManagement|GatewayDataImport|AccountGatewayDTO|NewAPIGateway|NewAPICostRequest|NewAPICostScale|UsagePlatformSnapshots|ProcurementSnapshot|ObserverProcurementSnapshot)' \
             -count=1 -v -timeout=10m 2>&1 | tee ../evidence/unit-race.log
           if grep -Eq -- 'no tests to run|--- SKIP:' ../evidence/unit-race.log; then
             exit 1
@@ -94,6 +95,7 @@ jobs:
           grep -F -- '--- PASS: TestAccountGatewayDTORedactsCallingKey' ../evidence/unit-race.log
           grep -F -- '--- PASS: TestProcurementSnapshotMixedTargetsThroughUsageWriters' ../evidence/unit-race.log
           grep -F -- '--- PASS: TestProcurementSnapshotAdminDTOAndUserPrivacy' ../evidence/unit-race.log
+          grep -F -- '--- PASS: TestObserverProcurementSnapshotFollowsExistingAccountCostScope' ../evidence/unit-race.log
       - name: Shared account slots against isolated Redis
         working-directory: backend
         shell: bash

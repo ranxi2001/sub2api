@@ -137,7 +137,7 @@ func TestProcurementSnapshotMigrationLeavesHistoryAndChargesUntouched(t *testing
 	defer func() { _ = tx.Rollback() }()
 	_, err = tx.Exec(`CREATE TEMP TABLE usage_logs(id bigint,total_cost numeric,actual_cost numeric) ON COMMIT DROP; INSERT INTO usage_logs VALUES(1,10,3)`)
 	require.NoError(t, err)
-	sql, err := migrations.FS.ReadFile("391_usage_procurement_cost_snapshot.sql")
+	sql, err := migrations.FS.ReadFile("392_usage_procurement_cost_snapshot.sql")
 	require.NoError(t, err)
 	for i := 0; i < 2; i++ {
 		_, err = tx.Exec(string(sql))
