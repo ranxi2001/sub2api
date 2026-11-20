@@ -33,11 +33,22 @@ func opsContextLimitRejectionSQL(alias string) string {
 	return `(` + standard + ` OR ` + wrapped + ` OR ` + normalized + `)`
 }
 
+func opsDeepSeekInputContentRejectionSQL(alias string) string {
+	p := alias + "."
+	message := "'" + strings.ToLower(service.DeepSeekInputContentRejectionMessage) + "'"
+	return `(COALESCE(` + p + `status_code, 0) >= 400
+ AND ` + p + `platform = 'deepseek'
+ AND COALESCE(` + p + `error_phase, '') <> 'account_auth'
+ AND COALESCE(NULLIF(` + p + `upstream_status_code, 0), ` + p + `status_code, 0) IN (400, 403)
+ AND (lower(btrim(` + p + `error_message)) = ` + message + `
+   OR lower(btrim(` + p + `upstream_error_message)) = ` + message + `))`
+}
+
 func opsClientRejectionSQL(alias string) string {
 	p := alias + "."
 	model := opsExplicitRequestRejectionSQL(alias, "400, 404", service.OpsModelCapabilityRejectionNeedles)
 	contextLimit := opsContextLimitRejectionSQL(alias)
-	return `COALESCE((` + model + ` OR ` + contextLimit + ` OR (
+	return `COALESCE((` + opsDeepSeekInputContentRejectionSQL(alias) + ` OR ` + model + ` OR ` + contextLimit + ` OR (
  ((COALESCE(` + p + `is_business_limited, FALSE)
    AND (COALESCE(` + p + `error_owner, '') = 'client'
      OR (` + p + `error_owner = 'platform' AND ` + p + `error_phase = 'routing'
@@ -75,7 +86,7 @@ func opsEffectivePhaseSQL(alias string) string {
 func opsEffectiveTypeSQL(alias string) string {
 	model := opsExplicitRequestRejectionSQL(alias, "400, 404", service.OpsModelCapabilityRejectionNeedles)
 	contextLimit := opsContextLimitRejectionSQL(alias)
-	return `(CASE WHEN ` + model + ` THEN 'model_not_found' WHEN ` + contextLimit + ` THEN 'context_limit' ELSE ` + alias + `.error_type END)`
+	return `(CASE WHEN ` + opsDeepSeekInputContentRejectionSQL(alias) + ` THEN 'content_policy' WHEN ` + model + ` THEN 'model_not_found' WHEN ` + contextLimit + ` THEN 'context_limit' ELSE ` + alias + `.error_type END)`
 }
 
 // Forwarding and serving Pods can persist the same failure. Count one final
