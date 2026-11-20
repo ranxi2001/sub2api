@@ -19,7 +19,6 @@ func legacyParseGatewayRequestCurrentBody(parsed *ParsedRequest, protocol string
 	if parsed == nil || parsed.Body == nil {
 		return fmt.Errorf("empty request body")
 	}
-	parsed.Body.parsed = nil
 
 	bodyBytes := parsed.Body.Bytes()
 	if !gjson.ValidBytes(bodyBytes) {
@@ -80,7 +79,6 @@ func legacyParseGatewayRequestCurrentBody(parsed *ParsedRequest, protocol string
 	}
 
 	legacySetGatewayRequestRanges(parsed, protocol, jsonStr)
-	parsed.saveBodyState()
 	return nil
 }
 

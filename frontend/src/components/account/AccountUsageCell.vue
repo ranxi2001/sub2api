@@ -41,6 +41,7 @@
         <div v-if="usageInfo.error" class="text-xs text-amber-600 dark:text-amber-400 truncate max-w-[200px]" :title="usageInfo.error">
           {{ usageInfo.error }}
         </div>
+        <NewFeatureBadge v-if="noticeUserId != null && (estimateWindowTotalCost(usageInfo.five_hour) != null || estimateWindowTotalCost(usageInfo.seven_day) != null)" :notice-id="NEW_FEATURE_NOTICES.claudeWindowCost" :user-id="noticeUserId" />
         <!-- 5h Window -->
         <UsageProgressBar
           v-if="usageInfo.five_hour"
