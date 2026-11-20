@@ -9,6 +9,7 @@ on:
       - 'backend/internal/service/openai_gateway_service.go'
       - 'backend/internal/handler/openai_gateway_handler.go'
       - 'backend/internal/handler/openai_http_bridge_warmup_test.go'
+      - 'backend/internal/handler/openai_ws_tool_result_bridge_test.go'
       - '.github/workflows/ws-http-bridge-warmup.yml'
 permissions:
   contents: read
@@ -51,12 +52,12 @@ jobs:
       - name: Candidate warmup, full-history tool loop and refusal controls
         run: |
           set -euo pipefail
-          (cd backend && go test -race -json -tags=unit,bridgewarmup ./internal/handler ./internal/service -run '^Test(HTTPBridgeWarmup|HTTPBridgeAcceptedHistory|OpenAIWSHTTPBridgeAPIKeyReusesClientToolMappingWhenFollowupOmitsTools|PrepareOpenAIWSHTTPBridgeBody)' -count=1 -timeout=3m) | tee "$RUNNER_TEMP/http-warmup-head.jsonl"
+          (cd backend && go test -race -json -tags=unit,bridgewarmup ./internal/handler ./internal/service -run '^Test(HTTPBridgeLargeHistoryToolResult|HTTPBridgeWarmup|HTTPBridgeAcceptedHistory|OpenAIWSHTTPBridgeAPIKeyReusesClientToolMappingWhenFollowupOmitsTools|PrepareOpenAIWSHTTPBridgeBody)' -count=1 -timeout=3m) | tee "$RUNNER_TEMP/http-warmup-head.jsonl"
           python3 - "$RUNNER_TEMP/http-warmup-head.jsonl" <<'PY'
           import json,sys
           rows=[json.loads(line) for line in open(sys.argv[1]) if line.startswith('{')]
           assert not any(r.get('Action') in ('build-fail','fail','skip') for r in rows)
-          for name in ('TestHTTPBridgeWarmupThenToolContinuation','TestHTTPBridgeWarmupGuards','TestHTTPBridgeWarmupDefaultsAndForeignPointer','TestHTTPBridgeWarmupWithPriorCompletedToolHistory','TestHTTPBridgeAcceptedHistoryRequiresCompletedDelivery'):
+          for name in ('TestHTTPBridgeLargeHistoryToolResult/api_key_large','TestHTTPBridgeLargeHistoryToolResult/oauth_large','TestHTTPBridgeLargeHistoryToolResult/oauth_wrong_response','TestHTTPBridgeLargeHistoryToolResult/oauth_unobserved_call','TestHTTPBridgeLargeHistoryToolResult/oauth_old_call','TestHTTPBridgeWarmupThenToolContinuation','TestHTTPBridgeWarmupGuards','TestHTTPBridgeWarmupDefaultsAndForeignPointer','TestHTTPBridgeWarmupWithPriorCompletedToolHistory','TestHTTPBridgeAcceptedHistoryRequiresCompletedDelivery'):
               assert any(r.get('Test')==name and r.get('Action')=='pass' for r in rows),name
           PY
       - uses: actions/upload-artifact@v7

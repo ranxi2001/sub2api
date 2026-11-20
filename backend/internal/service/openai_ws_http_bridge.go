@@ -575,7 +575,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	// store=false cannot carry a provider-side response pointer over HTTP.
 	// The ingress has reconstructed this same bridge's history; retain an immutable
 	// proof before request construction, rather than trusting final wire bytes.
-	if !s.openAILegacyCompatibility() && account.IsOpenAIApiKey() && s.settingService != nil && s.settingService.IsOpenAI409OmitEncryptedHistoryEnabled(ctx) {
+	if !s.openAILegacyCompatibility() && openAIWSPlaintextBridgeAccount(account) && s.settingService != nil && s.settingService.IsOpenAI409OmitEncryptedHistoryEnabled(ctx) {
 		source, _ := ctx.Value(openAIWSAgentSourceKey{}).([]byte)
 		previous := gjson.GetBytes(source, "previous_response_id").String()
 		// The ingress has already stripped invalid item IDs. Derive that one

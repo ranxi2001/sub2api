@@ -51,3 +51,13 @@ func TestSchedulerMetadataDropsUnlistedCredentials(t *testing.T) {
 	require.Equal(t, map[string]string{"seedance-2-5": "doubao-seedance-2-5-260628"}, projected.Credentials["model_mapping"])
 	require.NotContains(t, projected.Credentials, "unlisted_secret")
 }
+
+func TestSchedulerMetadataKeepsQwenVideoProtocol(t *testing.T) {
+	for _, protocol := range []string{"openai", "fixed_duration", "dashscope", ""} {
+		account := service.Account{Platform: service.PlatformQwen, Type: service.AccountTypeAPIKey, Credentials: map[string]any{
+			"base_url": "https://example.com", "qwen_video_protocol": protocol,
+		}}
+		meta := buildSchedulerMetadataAccount(account)
+		require.Equal(t, protocol != "", meta.SupportsOpenAIEndpointCapability(service.OpenAIEndpointCapabilityVideos))
+	}
+}

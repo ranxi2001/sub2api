@@ -2154,6 +2154,10 @@ func (a *Account) SupportsOpenAIEndpointCapability(capability OpenAIEndpointCapa
 	if a == nil {
 		return false
 	}
+	if capability == OpenAIEndpointCapabilityVideos && a.Platform == PlatformQwen {
+		mode := a.GetCredential("qwen_video_protocol")
+		return a.Type == AccountTypeAPIKey && (mode == "dashscope" || mode == "openai" || mode == "fixed_duration") && a.GetCredential("base_url") != ""
+	}
 	if capability == OpenAIEndpointCapabilityMiniMaxH3 {
 		return a.Platform == PlatformMiniMax && a.Type == AccountTypeAPIKey && !a.IsCodingPlan() &&
 			strings.TrimSpace(a.GetCredential("base_url")) != ""

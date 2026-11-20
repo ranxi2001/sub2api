@@ -75,6 +75,10 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		h.errorResponse(c, http.StatusUnauthorized, "authentication_error", "Invalid API key")
 		return
 	}
+	if endpoint.IsOpenAIVideo() && apiKey.Group != nil && apiKey.Group.Platform == service.PlatformQwen {
+		platform = service.PlatformQwen
+		noAccountCode, noAccountMessage = "qwen_video_unavailable", "No eligible Qwen video account"
+	}
 	subject, ok := middleware2.GetAuthSubjectFromContext(c)
 	if !ok {
 		h.errorResponse(c, http.StatusInternalServerError, "api_error", "User context not found")
@@ -116,7 +120,19 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 
 	contentType := c.GetHeader("Content-Type")
 	var requestInfo service.GrokMediaRequestInfo
-	if endpoint == service.OpenAIVideoEndpointCreate {
+	var wanUnitPrice *float64
+	if platform == service.PlatformQwen && endpoint == service.OpenAIVideoEndpointCreate {
+		requestInfo, err = service.ParseWanVideoRequest(contentType, body)
+		if err != nil {
+			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+			return
+		}
+		wanUnitPrice = h.gatewayService.WanVideoUnitPrice(c.Request.Context(), apiKey, requestInfo.Model, requestInfo.Resolution)
+		if wanUnitPrice == nil || *wanUnitPrice <= 0 {
+			h.errorResponse(c, http.StatusBadRequest, "video_price_missing", "Configure a Wan price for this resolution")
+			return
+		}
+	} else if endpoint == service.OpenAIVideoEndpointCreate {
 		requestInfo, err = service.ParseOpenAIVideoRequest(contentType, body)
 		if err != nil {
 			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
@@ -251,6 +267,14 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 			if loadErr != nil || task == nil || task.UpstreamTaskID == "" {
 				h.errorResponse(c, http.StatusNotFound, "not_found_error", "Video request not found")
 				return
+			}
+			if platform == service.PlatformQwen {
+				if task.WanUnitPrice == nil {
+					h.errorResponse(c, http.StatusBadGateway, "video_price_missing", "Missing Wan task quote")
+					return
+				}
+				requestInfo.Resolution = task.VideoResolution
+				requestInfo.DurationSeconds = task.VideoDurationSeconds
 			}
 			upstreamVideoTaskID = task.UpstreamTaskID
 		}
@@ -563,6 +587,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 			// model/duration/resolution so status can still price if upstream omits them.
 			// Retry once: missing pending causes silent underpricing (status omits resolution).
 			pending := service.GrokVideoPendingBilling{
+				WanUnitPrice:         wanUnitPrice,
 				MiniMaxH3BaseCost:    result.MiniMaxH3BaseCost,
 				Model:                requestModel,
 				BillingModel:         firstNonEmptyString(result.BillingModel, requestModel),
@@ -761,6 +786,10 @@ func prepareGrokVideoCompletionBilling(
 		}
 		if strings.TrimSpace(merged.UpstreamModel) == "" {
 			merged.UpstreamModel = pending.UpstreamModel
+		}
+		if pending.WanUnitPrice != nil && merged.WanBilledSeconds > 0 {
+			cost := merged.WanBilledSeconds * *pending.WanUnitPrice
+			merged.WanBaseCost = &cost
 		}
 		// Official status omits resolution — always prefer create request.
 		if strings.TrimSpace(pending.VideoResolution) != "" {

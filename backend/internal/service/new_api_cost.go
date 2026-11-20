@@ -20,10 +20,25 @@ func NewAPIApplyUSDRate(a *Account) bool {
 func NewAPICostScale(a *Account) float64 { return newAPICostScaleFor(a, NewAPIApplyUSDRate(a)) }
 
 func newAPICostScaleFor(a *Account, applyUSDRate bool) float64 {
-	if a == nil {
+	// A gateway can serve x1 and x7 requests concurrently. Neither probe preview
+	// nor persistence may turn its raw group ratio into one account-wide cost.
+	if a == nil || a.IsGateway() {
 		return 0
 	}
-	spec, ok := domain.LookupPlatform(a.Platform)
+	return newAPICostScaleForPlatform(a.Platform, applyUSDRate)
+}
+
+// NewAPICostScaleForRequest uses the concrete target only for gateway accounts.
+// Legacy single-platform accounts retain their existing account-based formula.
+func NewAPICostScaleForRequest(a *Account, targetPlatform string) float64 {
+	if !a.IsGateway() {
+		return NewAPICostScale(a)
+	}
+	return newAPICostScaleForPlatform(targetPlatform, NewAPIApplyUSDRate(a))
+}
+
+func newAPICostScaleForPlatform(platform string, applyUSDRate bool) float64 {
+	spec, ok := domain.LookupPlatform(platform)
 	if !ok {
 		return 0
 	}
@@ -31,6 +46,16 @@ func newAPICostScaleFor(a *Account, applyUSDRate bool) float64 {
 		return 1
 	}
 	return 7
+}
+
+// NewAPIGatewayCostForRequest converts a successful fixed group ratio without
+// mutating the shared account, raw ratio or wallet. No fixed ratio means no
+// converted cost. Persistence in usage/profit snapshots is a separate step.
+func NewAPIGatewayCostForRequest(a *Account, targetPlatform string) (float64, bool) {
+	if !a.IsGateway() || !NewAPICostSyncEnabled(a) {
+		return 0, false
+	}
+	return NewAPICostToSync(decodeUpstreamBillingProbeSnapshot(a.Extra), NewAPICostScaleForRequest(a, targetPlatform))
 }
 
 func NewAPICostSyncEnabled(a *Account) bool {

@@ -185,6 +185,9 @@ backend/internal/service/oauth_degradation_429_test.go
 backend/internal/service/oauth_degradation_validation_test.go
 backend/internal/service/oauth_degradation_candy_test.go
 
+# Ciallo quality questions were introduced after the WS residual RED baseline.
+backend/internal/service/ciallo_test.go
+
 # Controls diagnostics require the newer recovery APIs, not historical RED sources.
 backend/internal/service/openai_409_controls_diagnostics_test.go
 backend/internal/handler/openai_owner_conflict_diagnostics_test.go
