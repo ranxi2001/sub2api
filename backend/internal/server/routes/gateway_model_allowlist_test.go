@@ -104,7 +104,7 @@ func TestGatewayRoutesGroupModelAllowlistMountedOnEveryGatewayRoute(t *testing.T
 	}
 
 	// codexDirect 链是一条 Use 调用，直接断言顺序。
-	codexDirect := regexp.MustCompile(regexp.QuoteMeta(`codexDirect.Use(traffic, bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), captureTraffic, imageAdmission, groupModelAllowlist, rejectConflictingFields, apiKeyModelPolicy, groupCodexCLIOnly, groupBlockSubagents, groupAntiDistillation, groupStreamOnly, apiKeyLongContext, podRoute, compositeTarget, apiKeyLongContext, requireGroupAnthropic)`))
+	codexDirect := regexp.MustCompile(regexp.QuoteMeta(`codexDirect.Use(traffic, groupBodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), captureTraffic, imageAdmission, groupModelAllowlist, rejectConflictingFields, apiKeyModelPolicy, groupCodexCLIOnly, groupBlockSubagents, groupAntiDistillation, groupStreamOnly, apiKeyLongContext, podRoute, compositeTarget, apiKeyLongContext, requireGroupAnthropic)`))
 	require.Regexp(t, codexDirect, source, "codexDirect chain must mount the allowlist after auth, then protection and stream-only admission before compositeTarget")
 
 	// 所有带 apiKeyAuth 的根路径路由必须收敛到 rootRoute，避免漏挂。
