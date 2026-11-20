@@ -239,6 +239,10 @@ func oauth429Verdict(result *ScheduledTestResult, err, contextErr error, model s
 	return "incorrect"
 }
 
+func (s *ScheduledTestRunnerService) StartOAuth429Worker() {
+	s.oauth429Start.Do(s.startOAuth429)
+}
+
 func (s *ScheduledTestRunnerService) startOAuth429() {
 	if s.oauth429Repo == nil || s.oauth429Slots == nil {
 		return

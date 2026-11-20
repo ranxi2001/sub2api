@@ -226,3 +226,42 @@ it('announces 429 conditions independently of the original dismissed feature', a
  expect(useNewFeatureNoticeStore().isDismissed(41,old)).toBe(true)
  reload.unmount();future.unmount()
 })
+
+it('requires explicit authorization and a bounded budget for independent 429 calls', async () => {
+ const w = mount(AutoConfigView); await flushPromises()
+ expect(w.get<HTMLInputElement>('[data-testid="independent-429-enabled"]').element.checked).toBe(false)
+ expect(w.get<HTMLInputElement>('[data-testid="independent-429-budget"]').element.value).toBe('0')
+ await w.get('[data-testid="degradation-probe-enabled"]').setValue(false)
+ await w.get('[data-testid="degradation-enabled"]').setValue(true)
+ await w.get('[data-testid="independent-429-enabled"]').setValue(true)
+ await w.get('form').trigger('submit'); await flushPromises()
+ expect(saveAutoConfig).not.toHaveBeenCalled()
+ await w.get('[data-testid="independent-429-budget"]').setValue('20')
+ await w.get('[data-testid="independent-429-samples"]').setValue('25')
+ await w.get('form').trigger('submit'); await flushPromises()
+ expect(saveAutoConfig).toHaveBeenCalledWith(expect.objectContaining({ degradation_action: expect.objectContaining({ independent_429: { enabled: true, daily_test_budget: 20, min_samples: 25 } }) }))
+ const saved = vi.mocked(saveAutoConfig).mock.calls[0][0]
+ w.unmount(); vi.mocked(getAutoConfig).mockResolvedValueOnce(saved)
+ const reloaded = mount(AutoConfigView); await flushPromises()
+ expect(reloaded.get<HTMLInputElement>('[data-testid="independent-429-enabled"]').element.checked).toBe(true)
+ expect(reloaded.get<HTMLInputElement>('[data-testid="independent-429-budget"]').element.value).toBe('20')
+ reloaded.unmount()
+})
+
+it('independent 429 notice shares dismissal and persists without reviving earlier notices', async () => {
+ const prior = 'oauth-degradation-429-conditions-initial-announcement'
+ const current = 'oauth-degradation-429-independent-tests'
+ useNewFeatureNoticeStore().dismiss(41, prior)
+ const w = mount(AutoConfigView); await flushPromises()
+ const linked = mount(NewFeatureBadge, { props: { noticeId: current, userId: 41 } })
+ expect(linked.find('[data-testid="new-feature-badge"]').exists()).toBe(true)
+ await w.get('[data-testid="independent-429"] [data-testid="new-feature-badge"]').trigger('click')
+ expect(linked.find('[data-testid="new-feature-badge"]').exists()).toBe(false)
+ w.unmount(); linked.unmount(); setActivePinia(createPinia())
+ const login = mount(NewFeatureBadge, { props: { noticeId: current, userId: 41 } })
+ const future = mount(NewFeatureBadge, { props: { noticeId: 'future-429-fixture', userId: 41 } })
+ expect(login.find('[data-testid="new-feature-badge"]').exists()).toBe(false)
+ expect(future.find('[data-testid="new-feature-badge"]').exists()).toBe(true)
+ expect(useNewFeatureNoticeStore().isDismissed(41, prior)).toBe(true)
+ login.unmount(); future.unmount()
+})

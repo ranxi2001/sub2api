@@ -23,7 +23,7 @@ func TestOAuthDegradationNativeModelEditRestoresAccount(t *testing.T) {
 	a := degradationAccountFixture(t, 30, original, []string{"incorrect"}, time.Minute)
 	_, err = integrationDB.ExecContext(ctx, `UPDATE accounts SET credentials=credentials||'{"compact_model_mapping":{"custom":"gpt-6-astra"}}'::jsonb,extra=extra||'{"openai_passthrough":true,"openai_oauth_passthrough":true}'::jsonb WHERE id=$1`, a.ID)
 	require.NoError(t, err)
-	require.NoError(t, repo.EvaluateOAuthDegradation(ctx, a.ID, time.Now()))
+	require.NoError(t, evaluateConfirmedProbe(ctx, repo, a.ID, time.Now()))
 	got, err := repo.GetByID(ctx, a.ID)
 	require.NoError(t, err)
 	require.Equal(t, map[string]any{"custom": "gpt-6-luna", "gpt-6-luna": "gpt-6-luna"}, got.Credentials["model_mapping"], "the account editor sees the actual restricted mapping, preserving custom targets")
@@ -40,7 +40,7 @@ func TestOAuthDegradationNativeModelEditRestoresAccount(t *testing.T) {
 	got.Concurrency = 30
 	got.Schedulable = true
 	require.NoError(t, repo.Update(ctx, got))
-	require.NoError(t, repo.EvaluateOAuthDegradation(ctx, a.ID, time.Now()))
+	require.NoError(t, evaluateConfirmedProbe(ctx, repo, a.ID, time.Now()))
 	restored, err := repo.GetByID(ctx, a.ID)
 	require.NoError(t, err)
 	require.True(t, restored.IsModelSupported("gpt-6-astra"), "manual native mapping change must remove the effective restriction")
@@ -57,14 +57,14 @@ func TestOAuthDegradationEmptyIntersectionUsesNativePause(t *testing.T) {
 	repo, _ := degradationPolicyFixture(t)
 	original := map[string]any{"gpt-6-astra": "gpt-6-astra"}
 	a := degradationAccountFixture(t, 30, original, []string{"incorrect"}, time.Minute)
-	require.NoError(t, repo.EvaluateOAuthDegradation(ctx, a.ID, time.Now()))
+	require.NoError(t, evaluateConfirmedProbe(ctx, repo, a.ID, time.Now()))
 	got, err := repo.GetByID(ctx, a.ID)
 	require.NoError(t, err)
 	require.False(t, got.Schedulable, "empty intersection is visible as disabled scheduling")
 	require.Equal(t, original, got.Credentials["model_mapping"], "do not store an empty map that would grant every model")
 	got.Schedulable = true
 	require.NoError(t, repo.Update(ctx, got))
-	require.NoError(t, repo.EvaluateOAuthDegradation(ctx, a.ID, time.Now()))
+	require.NoError(t, evaluateConfirmedProbe(ctx, repo, a.ID, time.Now()))
 	got, err = repo.GetByID(ctx, a.ID)
 	require.NoError(t, err)
 	require.True(t, got.Schedulable, "administrator can recover through the existing scheduling field")

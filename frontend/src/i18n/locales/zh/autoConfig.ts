@@ -60,8 +60,13 @@ export default {
     errors: { accounts_unavailable: '账号状态读取失败。', metric_unavailable: '监控指标读取失败。', account_enable_failed: '部分兜底账号开启失败，请检查账号状态。' }
   },
  degradation: {
+  "independentScope": "每个账号模型保留滚动一小时内最多 200 个样本，每次触发预留两次调用。未完成调用不重试，不拿历史结果补位；持续 429 不会反复触发测试。修改配置、停调或删除账号取消旧证据。仅在勾选限模型且被测模型不在保留名单时阻断该模型；其他模型、账号并发和分组不受影响。这里限制调用次数，不是金额；预算 0 表示尚未授权。",
+  "independentSamples": "最少业务请求样本（20–200）",
+  "independentBudget": "集群每日测试调用预算（UTC，2–1000 次）",
+  "independentHint": "默认关闭，需明确授权；模型调用可能产生成本。达到阈值立即对原账号、原模型发起两次完整独立测试，仅受正常执行准入和可用并发限制；不等额外冷却、完整一小时或质量运维计划。只有两次明确错答才可限制被测模型。正确、拒绝、空答、截断或取消均不能授权处置。",
+  "independentEnable": "授权达 429 阈值后主动进行两次独立测试",
   "title": "降智后处置",
-  "hint": "启用降智率判断时，窗口内须有明确错答且降智率达标。429 同时达标即可处置，否则按勾选项在本轮糖果题答错后立即复核。关闭降智率判断后仅按 429 条件处置。",
+  "hint": "普通探针分支保留原确认流程。HTTP 429 压力只触发下方独立测试，不代表答案错误，也不直接降低账号并发。",
   "conditions": "判断条件",
   "conditionsRequired": "请勾选 429 条件或启用糖果题复核。",
   "candyRetest": "即时复核糖果题，两次均明确答错才处置",
@@ -70,7 +75,7 @@ export default {
   "upstream429": "429 错误率过高",
   "upstreamErrorThreshold": "上游错误率阈值（%）",
   "upstream429ShareThreshold": "429 占错误响应阈值（%）",
-  "upstream429Hint": "429 条件默认勾选：窗口内至少 20 次上游 HTTP 响应，同时满足错误率 ≥80%、429 占错误响应 ≥80%（阈值可修改）。只使用当前评估进程观测到的响应，每次重试独立计数；无响应的网络错误和原生 WebSocket 不计入。触发后执行下方所选动作一次。",
+  "upstream429Hint": "按原账号和目标模型统计 HTTP 错误率与错误中的 429 占比。每个业务请求跨重试只计一次，以首次 HTTP 响应为准；无响应的传输错误和后台测试不计入。",
   "upstream429Event": "429 错误过高 · 错误 {failures}/{total}（阈值 {errorThreshold}%）· 429 {rateLimited}/{failures}（阈值 {shareThreshold}%）· 本进程 HTTP 响应 · {actions} · 窗口 {start} — {end}",
   "threshold": "降智率阈值（%）",
   "actions": "达到阈值后执行（可多选）",
@@ -234,6 +239,8 @@ export default {
   "history": "自动升级记录",
   "cooling": "冷却至 {time}",
   "logs": {
+ oauth429Detail: '被测模型 {model}：{verdicts}；仅两个明确错答才可按配置限制该模型。',
+ oauth429Verdicts: { correct: '正确', incorrect: '明确错答', inconclusive: '无法确定' },
     "title": "近期日志",
     "description": "查看配置保存、OAuth 首次配置及账号并发变化，按最新记录排序。",
     "filter": "筛选日志类型",
@@ -259,6 +266,7 @@ export default {
     "upgradeDetail": "并发 {before} → {after}，进入 {seconds} 秒冷却。",
     "cooldownDetail": "请求失败，成功进度已清零，冷却 {seconds} 秒；并发保持 {concurrency}。",
     "kinds": {
+ "oauth429_review_completed": "429 独立测试完成",
  "degradation_applied": "降智后处置",
       "config_saved": "配置已保存",
       "initial_applied": "首次配置已应用",

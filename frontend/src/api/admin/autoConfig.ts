@@ -44,7 +44,7 @@ export interface AutoConfig {
 export async function getAutoConfig(): Promise<AutoConfig> { return (await apiClient.get('/admin/account-ops/auto-config')).data }
 export async function saveAutoConfig(config: AutoConfig): Promise<AutoConfig> { return (await apiClient.put('/admin/account-ops/auto-config', config)).data }
 
-export type AutoConfigEventKind = 'config_saved' | 'initial_applied' | 'concurrency_upgraded' | 'failure_cooldown' | 'degradation_applied'
+export type AutoConfigEventKind = 'config_saved' | 'initial_applied' | 'concurrency_upgraded' | 'failure_cooldown' | 'degradation_applied' | 'oauth429_review_completed'
 export interface AutoConfigEvent {
   id: number
   account_id: number
@@ -53,6 +53,7 @@ export interface AutoConfigEvent {
   kind: AutoConfigEventKind
   created_at: string
   details: {
+    oauth429?: { model: string; trigger_id: string; runs: Array<{ id: string; result_id: string; verdict: string }> }
     degradation?: { trigger_reason?: string; candy_review?: { model_id: string; incorrect: number }; upstream_error?: import('@/types/accountPerformance').UpstreamHTTPErrorEvidence; upstream_error_threshold_percent?: number; upstream_429_share_threshold_percent?: number; revision: string; limit_concurrency?: boolean; limit_models?: boolean; limit_groups?: boolean; models: string[] | null; group_ids?: number[]; removed_group_ids?: number[]; threshold_percent: number; degradation_percent: number; quality_samples: number; window_start: string; window_end: string; concurrency_cap: number }
     model_mapping?: Record<string, string>
     config?: AutoConfig

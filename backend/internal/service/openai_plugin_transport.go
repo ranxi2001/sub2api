@@ -210,10 +210,8 @@ func (s *AccountTestService) doOpenAIAccountTestUpstream(
 		request = request.WithContext(context.WithValue(request.Context(), astraCandySkipObservationKey{}, true))
 		return gateway.doOpenAIUpstream(request, proxyURL, account)
 	}
-	if _, independent := request.Context().Value(oauth429ExecutionKey{}).(oauth429Execution); independent && s.pluginManager != nil && !account.OpenAIRequestProxyEnabled() {
-		return nil, fmt.Errorf("independent test cannot certify plugin credential ownership")
-	}
-	if s.pluginManager != nil && !account.OpenAIRequestProxyEnabled() {
+	_, independent429 := request.Context().Value(oauth429ExecutionKey{}).(oauth429Execution)
+	if s.pluginManager != nil && !account.OpenAIRequestProxyEnabled() && !independent429 {
 		response, handled, err := s.pluginManager.RoundTripOpenAIOAuth(request.Context(), request, proxyURL, account)
 		if handled {
 			if options, ok := pelicanTestOptionsFromContext(request.Context()); ok && options.nativeOAuthTransport != nil && !IsAstraSourceAcquisition(request.Context()) {

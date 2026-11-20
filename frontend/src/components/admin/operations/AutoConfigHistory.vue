@@ -78,7 +78,7 @@ import { getAutoConfigEvents, type AutoConfigEvent, type AutoConfigEventKind } f
 const props = defineProps<{ refreshKey: number }>()
 const { t } = useI18n()
 const auth = useAuthStore()
-const kinds: AutoConfigEventKind[] = ['config_saved', 'initial_applied', 'concurrency_upgraded', 'failure_cooldown', 'degradation_applied']
+const kinds: AutoConfigEventKind[] = ['config_saved', 'initial_applied', 'concurrency_upgraded', 'failure_cooldown', 'degradation_applied', 'oauth429_review_completed']
 const kind = ref<AutoConfigEventKind | ''>('')
 const events = ref<AutoConfigEvent[]>([])
 const hasMore = ref(false), loading = ref(false), error = ref(''), retryMore = ref(false)
@@ -120,6 +120,7 @@ function badgeClass(value: AutoConfigEventKind) {
 }
 function details(event: AutoConfigEvent) {
   const d = event.details
+  if (event.kind === 'oauth429_review_completed' && d.oauth429) return t('autoConfig.logs.oauth429Detail', { model: d.oauth429.model, verdicts: d.oauth429.runs.map(run => t('autoConfig.logs.oauth429Verdicts.' + run.verdict)).join(' / ') })
   if (event.kind === 'degradation_applied' && d.degradation) {
     const e = d.degradation
     const actions = []

@@ -28,8 +28,8 @@ func oauth429PolicyAccount(ctx context.Context, tx *sql.Tx, id int64) (service.O
 	}
 	var credentials, extra []byte
 	a := &service.Account{ID: id}
-	err := tx.QueryRowContext(ctx, `SELECT platform,type,status,schedulable,concurrency,credentials,COALESCE(extra,'{}') FROM accounts
- WHERE id=$1 AND deleted_at IS NULL AND parent_account_id IS NULL FOR UPDATE`, id).Scan(&a.Platform, &a.Type, &a.Status, &a.Schedulable, &a.Concurrency, &credentials, &extra)
+	err := tx.QueryRowContext(ctx, `SELECT name,platform,type,status,schedulable,concurrency,credentials,COALESCE(extra,'{}') FROM accounts
+ WHERE id=$1 AND deleted_at IS NULL AND parent_account_id IS NULL FOR UPDATE`, id).Scan(&a.Name, &a.Platform, &a.Type, &a.Status, &a.Schedulable, &a.Concurrency, &credentials, &extra)
 	if err != nil {
 		return cfg, nil, err
 	}
@@ -369,6 +369,13 @@ func (r *accountRepository) CompleteOAuth429(ctx context.Context, task *service.
 			}
 		}
 		current.State = "complete"
+		audit := *current
+		audit.Samples = nil
+		audit.Lease = ""
+		audit.LeaseUntil = time.Time{}
+		if err := insertAutoConfigEvent(ctx, tx, service.AutoConfigEvent{AccountID: a.ID, AccountName: a.Name, Platform: a.Platform, Kind: service.AutoConfigEventOAuth429, Details: service.AutoConfigEventDetails{OAuth429: &audit, Concurrency: a.Concurrency, PreviousConcurrency: a.Concurrency}}); err != nil {
+			return err
+		}
 		one, two := current.Runs[0], current.Runs[1]
 		if one.Verdict != "incorrect" || two.Verdict != "incorrect" || one.ID == two.ID || one.ResultID == "" || one.ResultID == two.ResultID || one.StartedAt.Before(current.TriggeredAt) || two.StartedAt.Before(one.FinishedAt) {
 			return nil

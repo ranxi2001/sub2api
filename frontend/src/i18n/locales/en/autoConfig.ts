@@ -60,8 +60,13 @@ export default {
     errors: { accounts_unavailable: 'Could not read account state.', metric_unavailable: 'Could not read the monitored metric.', account_enable_failed: 'Some fallback accounts could not be enabled. Check their state.' }
   },
  degradation: {
+  "independentScope": "The rolling hour retains at most 200 samples per account/model. Each trigger reserves two calls; incomplete calls are not retried or replaced with history. A continuing 429 episode cannot repeatedly trigger tests. Editing configuration or stopping/deleting an account cancels pending evidence. Only the tested model may be blocked when model restriction is selected and that model is outside the retained model list; other models, account concurrency and groups stay unchanged. This is a call-count budget, not a currency limit. Budget 0 means no authorization.",
+  "independentSamples": "Minimum business request samples (20–200)",
+  "independentBudget": "Cluster-wide daily test-call budget (UTC, 2–1000)",
+  "independentHint": "Disabled until explicitly authorized. These model calls may cost money. Reaching the thresholds immediately starts two new complete tests on the same account and model, subject to execution admission and available concurrency. No extra cooldown, full-hour wait or quality operations schedule is required. Only two explicit wrong answers can restrict the tested model. Correct, rejected, empty, truncated or cancelled answers cannot authorize action.",
+  "independentEnable": "Authorize two independent tests when the 429 threshold is reached",
   "title": "Degradation actions",
-  "hint": "With probe checks enabled, the rolling window must include a wrong answer and meet the degradation threshold. Matching 429 evidence confirms the action immediately. Otherwise, a failed candy round can trigger two confirmation tests. Disable probe checks to use 429 evidence alone.",
+  "hint": "The probe branch retains its confirmation policy. HTTP 429 pressure only starts the independent tests below; it never proves a wrong answer or directly changes account concurrency.",
   "conditions": "Conditions",
   "conditionsRequired": "Select 429 evidence or enable candy confirmation tests.",
   "candyRetest": "Run two immediate candy tests and require two confirmed wrong answers",
@@ -70,7 +75,7 @@ export default {
   "upstream429": "Excessive 429 errors",
   "upstreamErrorThreshold": "Upstream error threshold (%)",
   "upstream429ShareThreshold": "429 share of error responses (%)",
-  "upstream429Hint": "Enabled by default: at least 20 upstream HTTP responses, error rate ≥80% and 429 share of errors ≥80% in the window (thresholds are editable). Uses responses observed by the evaluating process; retries count separately. Network failures without a response and native WebSocket are excluded. Applies the selected actions once.",
+  "upstream429Hint": "HTTP error percentage and the 429 share of HTTP failures are calculated for the original account and target model. Business requests are counted once across retries; the first HTTP response counts. Transport errors without a response and background tests are excluded.",
   "upstream429Event": "Excessive 429 errors · errors {failures}/{total} (threshold {errorThreshold}%) · 429 {rateLimited}/{failures} (threshold {shareThreshold}%) · process-local HTTP responses · {actions} · window {start} — {end}",
   "threshold": "Degradation threshold (%)",
   "actions": "Actions at the threshold (select one or more)",
@@ -234,6 +239,8 @@ export default {
   "history": "Auto-upgrade record",
   "cooling": "Cooling down until {time}",
   "logs": {
+ oauth429Detail: 'Tested model {model}: {verdicts}; only two explicit wrong answers can restrict this model under the configured policy.',
+ oauth429Verdicts: { correct: 'Correct', incorrect: 'Confirmed wrong', inconclusive: 'Inconclusive' },
     "title": "Recent logs",
     "description": "Configuration saves, initial OAuth setup and concurrency changes, newest first.",
     "filter": "Filter log type",
@@ -259,6 +266,7 @@ export default {
     "upgradeDetail": "Concurrency {before} → {after}; {seconds}-second cooldown started.",
     "cooldownDetail": "Request failed; success progress reset and a {seconds}-second cooldown started. Concurrency remains {concurrency}.",
     "kinds": {
+ "oauth429_review_completed": "429 independent tests completed",
  "degradation_applied": "Degradation applied",
       "config_saved": "Configuration saved",
       "initial_applied": "Initial setup applied",

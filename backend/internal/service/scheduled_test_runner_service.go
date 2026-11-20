@@ -19,6 +19,7 @@ type ScheduledTestRunnerService struct {
 	oauth429Wake   chan struct{}
 	oauth429Cancel context.CancelFunc
 	oauth429WG     sync.WaitGroup
+	oauth429Start  sync.Once
 	planRepo       ScheduledTestPlanRepository
 	scheduledSvc   *ScheduledTestService
 	accountTestSvc *AccountTestService
@@ -65,7 +66,7 @@ func (s *ScheduledTestRunnerService) Start() {
 	}
 	s.startOnce.Do(func() {
 		s.startQualityTriggers()
-		s.startOAuth429()
+		s.StartOAuth429Worker()
 		loc := time.Local
 		if s.cfg != nil {
 			if parsed, err := time.LoadLocation(s.cfg.Timezone); err == nil && parsed != nil {

@@ -16,10 +16,16 @@ import (
 	"testing"
 	"time"
 
+	"context"
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/handler/admin"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
+	"github.com/Wei-Shaw/sub2api/internal/requestcapture"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"strings"
 )
 
 type oauth429Loopback struct {
@@ -48,13 +54,28 @@ func oauth429Fixture(t *testing.T, history []string) (*accountRepository, *servi
 	t.Helper()
 	repo, c := degradationPolicyFixture(t)
 	off := false
+	c.DegradationAction.Upstream429Enabled = nil
 	c.DegradationAction.ProbeEnabled = &off
 	c.DegradationAction.ThresholdPercent = nil
 	c.DegradationAction.Independent429 = service.OAuth429TestConfig{Enabled: true, DailyTestBudget: 1000, MinSamples: 20}
 	raw, err := json.Marshal(c)
 	require.NoError(t, err)
-	_, err = integrationDB.ExecContext(t.Context(), `UPDATE settings SET value=$2 WHERE key=$1`, service.SettingKeyOAuthAutoConfig, string(raw))
-	require.NoError(t, err)
+	svc := service.ProvideAccountOpsService(NewSettingRepository(integrationEntClient), NewAccountOpsRepository(integrationDB), nil, repo, NewGroupRepository(integrationEntClient, integrationDB), &config.Config{Runtime: config.RuntimeConfig{Role: config.RuntimeRoleGateway}}, nil, nil, nil, nil, nil)
+	t.Cleanup(svc.Stop)
+	handler := admin.NewAccountOpsHandler(svc, nil)
+	router := gin.New()
+	router.PUT("/auto-config", handler.SaveAutoConfig)
+	request := httptest.NewRequest(http.MethodPut, "/auto-config", strings.NewReader(string(raw)))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var saved struct {
+		Data service.OAuthAutoConfig `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &saved))
+	c = saved.Data
+
 	_, err = integrationDB.ExecContext(t.Context(), `DELETE FROM oauth_429_daily_budget`)
 	require.NoError(t, err)
 	a := degradationAccountFixture(t, 50, map[string]any{"gpt-6-astra": "gpt-6-astra", "gpt-6-luna": "gpt-6-luna"}, history, time.Minute)
@@ -139,10 +160,13 @@ func TestOAuth429WorkerIndependentPair(t *testing.T) {
 			require.NoError(t, err)
 			require.False(t, before.IsOAuth429ModelBlocked("gpt-6-astra"))
 			require.Zero(t, calls.Load(), "history cannot stand in for an actual execution")
-			task, err := repo.ClaimOAuth429(t.Context())
-			require.NoError(t, err)
-			require.NotNil(t, task)
-			require.NoError(t, runner.RunOAuth429Task(t.Context(), repo, task))
+			runner.StartOAuth429Worker()
+			require.Eventually(t, func() bool {
+				var state string
+				err := integrationDB.QueryRowContext(t.Context(), `SELECT state FROM oauth_429_tasks WHERE account_id=$1 AND model='gpt-6-astra'`, a.ID).Scan(&state)
+				return err == nil && state == "complete"
+			}, 8*time.Second, 20*time.Millisecond, "actual background worker must complete immediately without a quality plan or cooldown")
+			runner.Stop()
 			require.EqualValues(t, 2, calls.Load(), "qualityops off must still actively execute two complete independent calls")
 			after, err := repo.GetByID(t.Context(), a.ID)
 			require.NoError(t, err)
@@ -160,7 +184,7 @@ func TestOAuth429WorkerIndependentPair(t *testing.T) {
 			require.Len(t, saved.Runs, 2)
 			require.NotEqual(t, saved.Runs[0].ID, saved.Runs[1].ID)
 			require.NotEqual(t, saved.Runs[0].ResultID, saved.Runs[1].ResultID)
-			require.NoError(t, repo.CompleteOAuth429(t.Context(), task))
+			require.NoError(t, repo.CompleteOAuth429(t.Context(), &saved))
 			for i := 20; i < 60; i++ {
 				require.False(t, oauth429Observe(t, repo, a.ID, "gpt-6-astra", i))
 			}
@@ -257,3 +281,52 @@ func TestOAuth429PersistentClaimRestartAndFences(t *testing.T) {
 
 // Compile-time production repository contract.
 var _ service.OAuth429Repository = (*accountRepository)(nil)
+
+func TestOAuth429BudgetAndDuplicateAdmission(t *testing.T) {
+	repo, a, c := oauth429Fixture(t, nil)
+	c.DegradationAction.Independent429.DailyTestBudget = 2
+	raw, err := json.Marshal(c)
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(t.Context(), `UPDATE settings SET value=$2 WHERE key=$1`, service.SettingKeyOAuthAutoConfig, string(raw))
+	require.NoError(t, err)
+	oauth429Prime(t, repo, a.ID, "gpt-6-astra")
+	for i := 0; i < 20; i++ {
+		require.False(t, oauth429Observe(t, repo, a.ID, "gpt-6-luna", i), "the first pair reserved the entire global budget")
+	}
+	var reserved int
+	require.NoError(t, integrationDB.QueryRowContext(t.Context(), `SELECT reserved FROM oauth_429_daily_budget WHERE day=(clock_timestamp() AT TIME ZONE 'UTC')::date`).Scan(&reserved))
+	require.Equal(t, 2, reserved)
+	var pending int
+	require.NoError(t, integrationDB.QueryRowContext(t.Context(), `SELECT count(*) FROM oauth_429_tasks WHERE state='pending'`).Scan(&pending))
+	require.Equal(t, 1, pending)
+}
+
+// Business response ingress wakes the real durable observer without a quality plan.
+func TestOAuth429HTTPTransportDeduplicatesAndWakesWorker(t *testing.T) {
+	repo, a, _ := oauth429Fixture(t, nil)
+	runner, calls, _ := oauth429Runner(t, repo, []string{"23", "27"})
+	business := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(429) }))
+	defer business.Close()
+	transport := &accountResponseTransport{base: http.DefaultTransport}
+	runner.StartOAuth429Worker()
+	defer runner.Stop()
+	for i := 0; i < 20; i++ {
+		ctx := context.WithValue(t.Context(), ctxkey.ClientRequestID, fmt.Sprintf("business-http-%d-%d", a.ID, i))
+		ctx = requestcapture.WithAccount(ctx, a.ID)
+		for range 2 {
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, business.URL+"/v1/responses", strings.NewReader(`{"model":"gpt-6-astra","input":"fixture"}`))
+			require.NoError(t, err)
+			response, err := transport.RoundTrip(req)
+			require.NoError(t, err)
+			_ = response.Body.Close()
+		}
+		if i < 19 {
+			require.Zero(t, calls.Load(), "physical retries must not count as independent business samples")
+		}
+	}
+	require.Eventually(t, func() bool {
+		got, err := repo.GetByID(t.Context(), a.ID)
+		return err == nil && got.IsOAuth429ModelBlocked("gpt-6-astra")
+	}, 8*time.Second, 20*time.Millisecond)
+	require.EqualValues(t, 2, calls.Load())
+}

@@ -80,9 +80,9 @@ func TestOAuthDegradationDeterministicReplicas(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
 	results := make(chan error, 2)
-	go func() { results <- one.EvaluateOAuthDegradation(ctx, a.ID, time.Now()) }()
+	go func() { results <- evaluateConfirmedProbe(ctx, one, a.ID, time.Now()) }()
 	degradationEntered(t, pidOne, "%FROM accounts%FOR UPDATE%", gatePID)
-	go func() { results <- two.EvaluateOAuthDegradation(ctx, a.ID, time.Now()) }()
+	go func() { results <- evaluateConfirmedProbe(ctx, two, a.ID, time.Now()) }()
 	// A queued tuple lock can make worker two wait on worker one instead of the
 	// gate transaction. Both still entered the exact account-lock statement.
 	degradationEntered(t, pidTwo, "%FROM accounts%FOR UPDATE%", 0)
@@ -99,7 +99,7 @@ func TestOAuthDegradationDeterministicReplicas(t *testing.T) {
 	require.Equal(t, 1, history)
 	require.Equal(t, 1, outbox, "two actual transactions must enqueue one penalty")
 	restarted, _, _ := degradationReplica(t)
-	require.NoError(t, restarted.EvaluateOAuthDegradation(ctx, a.ID, time.Now()))
+	require.NoError(t, evaluateConfirmedProbe(ctx, restarted, a.ID, time.Now()))
 	history, outbox = degradationRows(t, a.ID)
 	require.Equal(t, 1, history)
 	require.Equal(t, 1, outbox)
@@ -117,7 +117,7 @@ func TestOAuthDegradationDeterministicLiveFence(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 		defer cancel()
 		result := make(chan error, 1)
-		go func() { result <- repo.EvaluateOAuthDegradation(ctx, a.ID, time.Now()) }()
+		go func() { result <- evaluateConfirmedProbe(ctx, repo, a.ID, time.Now()) }()
 		degradationEntered(t, pid, "%settings%FOR SHARE%", gatePID)
 		c.DegradationAction.Enabled = false
 		raw, err := json.Marshal(c)
@@ -146,7 +146,7 @@ func TestOAuthDegradationDeterministicLiveFence(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 		defer cancel()
 		action, saved := make(chan error, 1), make(chan error, 1)
-		go func() { action <- repo.EvaluateOAuthDegradation(ctx, a.ID, time.Now()) }()
+		go func() { action <- evaluateConfirmedProbe(ctx, repo, a.ID, time.Now()) }()
 		degradationEntered(t, pid, "%FROM accounts%FOR UPDATE%", degradationGatePID(t, tx))
 		next := c
 		next.Revision += "-disabled"
@@ -236,7 +236,7 @@ func TestOAuthDegradationTransactionFailures(t *testing.T) {
 			})
 			_, err = integrationDB.ExecContext(t.Context(), fmt.Sprintf("CREATE TRIGGER %s BEFORE INSERT ON %s FOR EACH ROW EXECUTE FUNCTION %s()", trigger, table, fn))
 			require.NoError(t, err)
-			err = repo.EvaluateOAuthDegradation(t.Context(), a.ID, time.Now())
+			err = evaluateConfirmedProbe(t.Context(), repo, a.ID, time.Now())
 			require.ErrorContains(t, err, "degradation fixture transaction fault")
 			after, err := repo.GetByID(t.Context(), a.ID)
 			require.NoError(t, err)
@@ -250,7 +250,7 @@ func TestOAuthDegradationTransactionFailures(t *testing.T) {
 			t.Logf("real PostgreSQL %s INSERT fault: concurrency/marker/hold/models/history/outbox all rolled back", table)
 			_, err = integrationDB.ExecContext(t.Context(), fmt.Sprintf("DROP TRIGGER %s ON %s", trigger, table))
 			require.NoError(t, err)
-			require.NoError(t, repo.EvaluateOAuthDegradation(t.Context(), a.ID, time.Now()))
+			require.NoError(t, evaluateConfirmedProbe(t.Context(), repo, a.ID, time.Now()))
 			history, outbox = degradationRows(t, a.ID)
 			require.Equal(t, 1, history)
 			require.Equal(t, 1, outbox)

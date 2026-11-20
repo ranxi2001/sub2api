@@ -17,6 +17,7 @@ import (
 func TestOAuth429RequiresFreshIndependentTestsBeforeAction(t *testing.T) {
 	repo, c := degradationPolicyFixture(t)
 	off := false
+	c.DegradationAction.Upstream429Enabled = nil
 	c.DegradationAction.ProbeEnabled = &off
 	c.DegradationAction.ThresholdPercent = nil
 	raw, err := json.Marshal(c)

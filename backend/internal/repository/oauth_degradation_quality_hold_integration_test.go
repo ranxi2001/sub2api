@@ -67,7 +67,8 @@ func TestOAuthDegradationHoldSurvivesQualityRecovery(t *testing.T) {
  VALUES($1,'failed',clock_timestamp(),clock_timestamp(),clock_timestamp(),'{"parallel_count":1}',$2,'evaluated','{"verdict":"incorrect"}','state_degraded')`, f.plan.ID, fmt.Sprintf("%s-%d-%d", name, f.account, i))
 						require.NoError(t, err)
 					}
-					require.NoError(t, repo.EvaluateOAuthDegradation(ctx, f.account, time.Now()))
+					prepareConfirmedProbeFixture(t, f.account)
+					require.NoError(t, evaluateConfirmedProbe(ctx, repo, f.account, time.Now()))
 					a, err := repo.GetByID(ctx, f.account)
 					require.NoError(t, err)
 					require.Equal(t, tc.target, a.Concurrency)
