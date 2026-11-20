@@ -18,10 +18,10 @@ var confirmedProbeFixtures sync.Map
 // Legacy account-action tests explicitly enter the existing trusted probe/candy
 // confirmation API. HTTP pressure no longer authorizes their account-wide action.
 // This fixture is not used by independent-429 worker tests as run evidence.
-func prepareConfirmedProbeFixture(t *testing.T, id int64) {
+func prepareConfirmedProbeFixture(t *testing.T, id int64) service.OAuthDegradationCandyReview {
 	t.Helper()
-	if _, ok := confirmedProbeFixtures.Load(id); ok {
-		return
+	if saved, ok := confirmedProbeFixtures.Load(id); ok {
+		return saved.(service.OAuthDegradationCandyReview)
 	}
 	ctx := t.Context()
 	var raw string
@@ -29,7 +29,7 @@ func prepareConfirmedProbeFixture(t *testing.T, id int64) {
 	var cfg service.OAuthAutoConfig
 	require.NoError(t, json.Unmarshal([]byte(raw), &cfg))
 	if !cfg.DegradationAction.UsesCandyRetest() {
-		return
+		return service.OAuthDegradationCandyReview{}
 	}
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	review := service.OAuthDegradationCandyReview{ModelID: "gpt-6-luna", LeaseUntil: now.Add(10 * time.Minute), StartedAt: now, Incorrect: 2, Revision: cfg.Revision}
@@ -46,6 +46,7 @@ func prepareConfirmedProbeFixture(t *testing.T, id int64) {
 		_, err := integrationDB.ExecContext(context.Background(), `DELETE FROM scheduled_test_plans WHERE id=$1`, review.PlanID)
 		require.NoError(t, err)
 	})
+	return review
 }
 func evaluateConfirmedProbe(ctx context.Context, repo *accountRepository, id int64, now time.Time) error {
 	value, ok := confirmedProbeFixtures.Load(id)
