@@ -44,7 +44,7 @@ func oauth429PolicyAccount(ctx context.Context, tx *sql.Tx, id int64) (service.O
 	return cfg, a, nil
 }
 func oauth429EligibleRequest(c service.OAuthAutoConfig, a *service.Account, request, target, endpoint string) bool {
-	return c.Revision != "" && c.DegradationAction.Enabled && c.DegradationAction.UsesUpstream429() && c.DegradationAction.Independent429.Enabled && c.DegradationAction.Validate() == nil && a != nil && a.Type == service.AccountTypeOAuth && a.Schedulable && a.Status == service.StatusActive && a.Concurrency > 0 && !(a.AutoPauseOnExpired && a.ExpiresAt != nil && !time.Now().Before(*a.ExpiresAt)) && !a.IsOAuth429ModelBlocked(target) && a.IsModelSupported(request) && service.ResolveOAuth429TargetModel(a, request, endpoint) == target
+	return c.Revision != "" && c.DegradationAction.Enabled && c.DegradationAction.UsesUpstream429() && c.DegradationAction.Independent429.Enabled && c.DegradationAction.Validate() == nil && a != nil && a.Type == service.AccountTypeOAuth && a.Schedulable && a.Status == service.StatusActive && a.Concurrency > 0 && !(a.AutoPauseOnExpired && a.ExpiresAt != nil && !time.Now().Before(*a.ExpiresAt)) && service.OAuth429RequestModelSupported(a, request, endpoint) && service.ResolveOAuth429TargetModel(a, request, endpoint) == target
 }
 
 // The HTTP wire model may be reachable only through a public mapping alias.
@@ -54,7 +54,7 @@ func oauth429RequestModel(a *service.Account, target, endpoint string) string {
 	if a == nil {
 		return ""
 	}
-	if service.ResolveOAuth429TargetModel(a, target, endpoint) == target && a.IsModelSupported(target) {
+	if service.ResolveOAuth429TargetModel(a, target, endpoint) == target && service.OAuth429RequestModelSupported(a, target, endpoint) {
 		return target
 	}
 	mapping := a.GetModelMapping()
@@ -64,7 +64,7 @@ func oauth429RequestModel(a *service.Account, target, endpoint string) string {
 	}
 	sort.Strings(keys)
 	for _, name := range keys {
-		if !strings.Contains(name, "*") && service.ResolveOAuth429TargetModel(a, name, endpoint) == target && a.IsModelSupported(name) {
+		if !strings.Contains(name, "*") && service.ResolveOAuth429TargetModel(a, name, endpoint) == target && service.OAuth429RequestModelSupported(a, name, endpoint) {
 			return name
 		}
 	}
@@ -125,7 +125,7 @@ func (r *accountRepository) ObserveOAuth429(ctx context.Context, observation ser
 	}
 	requestModel := observation.RequestModel
 	if requestModel != "" {
-		if a == nil || !a.IsModelSupported(requestModel) {
+		if !service.OAuth429RequestModelSupported(a, requestModel, observation.Endpoint) {
 			return false, nil
 		}
 		target := service.ResolveOAuth429TargetModel(a, requestModel, observation.Endpoint)

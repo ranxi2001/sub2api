@@ -241,11 +241,15 @@ func ObserveOAuth429HTTP(req *http.Request, accountID int64, status int, request
 }
 
 func (a *Account) IsOAuth429ModelBlocked(model string) bool {
+	return a.isOAuth429ModelBlockedForEndpoint(model, "")
+}
+
+func (a *Account) isOAuth429ModelBlockedForEndpoint(model, endpoint string) bool {
 	if a == nil {
 		return false
 	}
 	entries, _ := a.Extra[OAuth429ModelBlocksKey].(map[string]any)
-	return entries[model] != nil || entries[ResolveOAuth429TargetModel(a, model, "")] != nil
+	return len(entries) > 0 && (entries[model] != nil || entries[ResolveOAuth429TargetModel(a, model, endpoint)] != nil)
 }
 
 const OAuth429ConsecutiveLimit = 5

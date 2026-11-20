@@ -98,5 +98,10 @@ func TestOAuth429EndpointResolution(t *testing.T) {
 	require.True(t, a.IsOAuth429ModelBlocked("alias-one"))
 	require.True(t, a.IsOAuth429ModelBlocked("alias-two"))
 	require.False(t, a.IsOAuth429ModelBlocked("other"))
+	require.False(t, OAuth429RequestModelSupported(a, "alias-one", "/v1/responses"))
+	require.True(t, OAuth429RequestModelSupported(a, "alias-one", "/v1/responses/compact"), "a normal target block must not block a different compact target")
+	a.Extra[OAuth429ModelBlocksKey] = map[string]any{"gpt-6-luna": map[string]any{}}
+	require.True(t, OAuth429RequestModelSupported(a, "alias-one", "/v1/responses"))
+	require.False(t, OAuth429RequestModelSupported(a, "alias-one", "/v1/responses/compact"))
 	require.False(t, strings.Contains(ResolveOAuth429TargetModel(a, "alias-one", ""), "openai/"))
 }

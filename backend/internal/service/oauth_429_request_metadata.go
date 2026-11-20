@@ -9,6 +9,10 @@ import (
 
 type oauth429WireModelKey struct{}
 
+func OAuth429RequestModelSupported(account *Account, requested, endpoint string) bool {
+	return account != nil && supportsOpenAIRequestModel(account, requested, strings.HasSuffix(endpoint, "/responses/compact"))
+}
+
 // ResolveOAuth429TargetModel uses the forwarding contract for this account and
 // endpoint. It deliberately does not infer a different allowed public alias.
 // Admission of the original input remains a separate, mandatory check.
