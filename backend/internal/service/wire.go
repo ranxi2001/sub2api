@@ -1350,6 +1350,11 @@ func ProvideAccountOpsService(settings SettingRepository, repo AccountOpsReposit
 	svc.SetNotificationQuotaReaders(usageLogs, geminiQuota)
 	svc.autoAccounts, _ = accounts.(AccountConcurrencyRepository)
 	svc.autoGroups = groups
+	if routing, ok := accounts.(OAuth429RoutingConfigurator); ok {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		svc.oauth429Routing, svc.oauth429RoutingErr = routing.ConfigureOAuth429Routing(ctx, oauth429ConfiguredCompactModel(cfg))
+		cancel()
+	}
 	svc.start(cfg.RunsBackgroundJobs())
 	return svc
 }

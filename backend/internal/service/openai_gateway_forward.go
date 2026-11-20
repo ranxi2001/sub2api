@@ -91,6 +91,14 @@ func prismBrowserResponsesURL(baseURL string) string {
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (result *OpenAIForwardResult, resultErr error) {
+	ctx = s.withOAuth429Routing(ctx, gjson.GetBytes(body, "model").String(), IsOpenAIResponsesCompactPath(c))
+	endpoint := ""
+	if IsOpenAIResponsesCompactPath(c) {
+		endpoint = "/responses/compact"
+	}
+	if account.isOAuth429ModelBlockedForEndpoint(gjson.GetBytes(body, "model").String(), endpoint, oauth429CompactModel(ctx)) {
+		return nil, denyOpenAITurn("model_runtime_blocked")
+	}
 	preparedCtx, preparedBody, prepareErr := s.prepareOpenAIAgentOAuthReplay(ctx, account, body)
 	if prepareErr != nil {
 		return nil, prepareErr
@@ -108,7 +116,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		return nil, admissionErr
 	}
 	ctx = admittedCtx
-	endpoint := openAIResponsesUpstreamEndpoint
+	endpoint = openAIResponsesUpstreamEndpoint
 	if IsOpenAIResponsesCompactPath(c) {
 		endpoint += "/compact"
 	}

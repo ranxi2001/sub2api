@@ -102,6 +102,19 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p evidence
+          # Reviewed640 contains the same unrelated unused-variable compiler
+          # defect fixed in26837ecc8. Apply only that fixture repair so RED can
+          # reach its named behavior assertion; retain the exact baseline diff.
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('normalization-baseline/backend/internal/repository/oauth_429_metadata_integration_test.go')
+          s=p.read_text()
+          old='func TestOAuth429HTTPWithoutResponseDoesNotSample(t *testing.T) {\n\trepo, a, _ := oauth429Fixture(t, nil)'
+          new=old.replace('repo, a, _ :=', '_, a, _ :=')
+          assert s.count(old)==1
+          p.write_text(s.replace(old,new,1))
+          PY
+          git -C normalization-baseline diff -- backend/internal/repository/oauth_429_metadata_integration_test.go > evidence/normalization-baseline-compile-compat.patch
           oracle=backend/internal/repository/oauth_429_normalization_integration_test.go
           cp "$oracle" "normalization-baseline/$oracle"
           cmp "$oracle" "normalization-baseline/$oracle"
@@ -192,7 +205,7 @@ jobs:
           set -euo pipefail
           mkdir -p evidence
           git rev-parse HEAD > evidence/worker-head.txt
-          (cd backend && go test -race -tags=integration ./internal/repository -run '^TestOAuth429Worker|^TestOAuth429Persistent|^TestOAuth429HTTP|^TestOAuth429ActualAlias|^TestOAuth429Immediate|^TestOAuth429Alias|^TestOAuth429Dedup|^TestOAuth429Queued|^TestOAuth429AccountEpoch|^TestOAuth429Expiry|^TestOAuth429First' -count=1 -v -timeout=20m) 2>&1 | tee evidence/worker.log
+          (cd backend && go test -race -tags=integration ./internal/repository -run '^TestOAuth429Worker|^TestOAuth429Persistent|^TestOAuth429HTTP|^TestOAuth429Compact|^TestOAuth429ActualAlias|^TestOAuth429Immediate|^TestOAuth429Alias|^TestOAuth429Dedup|^TestOAuth429Queued|^TestOAuth429AccountEpoch|^TestOAuth429Expiry|^TestOAuth429First' -count=1 -v -timeout=20m) 2>&1 | tee evidence/worker.log
           bash .github/scripts/assert-test-log-clean.sh green evidence/worker.log
           grep -F -- '--- PASS: TestOAuth429WorkerIndependentPair/qualityops_off_two_wrong' evidence/worker.log
           grep -F -- '--- PASS: TestOAuth429WorkerIndependentPair/history_wrong_cannot_shortcut' evidence/worker.log
@@ -201,6 +214,8 @@ jobs:
           grep -F -- '--- PASS: TestOAuth429ImmediateWithoutQualityOpsBehaviorOracle' evidence/worker.log
           grep -F -- '--- PASS: TestOAuth429HTTPParsedModelSurvivesStreamingAndLargeBody' evidence/worker.log
           grep -F -- '--- PASS: TestOAuth429HTTPForwardNormalization' evidence/worker.log
+          grep -F -- '--- PASS: TestOAuth429CompactGlobalForwardWorker' evidence/worker.log
+          grep -F -- '--- PASS: TestOAuth429CompactRoutingChangeFencesEveryStage' evidence/worker.log
       - name: Real settings handler validation
         shell: bash
         run: |
@@ -209,6 +224,7 @@ jobs:
           bash .github/scripts/assert-test-log-clean.sh green evidence/classifier.log
           grep -F -- '--- PASS: TestOAuth429RealForwardNormalization' evidence/classifier.log
           grep -F -- '--- PASS: TestOAuth429EndpointResolution' evidence/classifier.log
+          grep -F -- '--- PASS: TestOAuth429CompactGlobalForwardAndAdmission' evidence/classifier.log
           (cd backend && go test -tags=unit ./internal/handler -run '^TestOAuth429ParsedInputModelAndIdentitySurviveHTTPContext$' -count=1 -v) 2>&1 | tee evidence/model-context.log
           bash .github/scripts/assert-test-log-clean.sh green evidence/model-context.log
           (cd backend && go test -tags=unit ./internal/handler/admin -run '^TestOAuthAutoConfig.*Degradation|^Test.*Degradation' -count=1 -v) 2>&1 | tee evidence/handler.log

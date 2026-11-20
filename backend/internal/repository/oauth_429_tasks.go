@@ -43,18 +43,18 @@ func oauth429PolicyAccount(ctx context.Context, tx *sql.Tx, id int64) (service.O
 	}
 	return cfg, a, nil
 }
-func oauth429EligibleRequest(c service.OAuthAutoConfig, a *service.Account, request, target, endpoint string) bool {
-	return c.Revision != "" && c.DegradationAction.Enabled && c.DegradationAction.UsesUpstream429() && c.DegradationAction.Independent429.Enabled && c.DegradationAction.Validate() == nil && a != nil && a.Type == service.AccountTypeOAuth && a.Schedulable && a.Status == service.StatusActive && a.Concurrency > 0 && !(a.AutoPauseOnExpired && a.ExpiresAt != nil && !time.Now().Before(*a.ExpiresAt)) && service.OAuth429RequestModelSupported(a, request, endpoint) && service.ResolveOAuth429TargetModel(a, request, endpoint) == target
+func oauth429EligibleRequest(c service.OAuthAutoConfig, a *service.Account, request, target, endpoint, compactModel string) bool {
+	return c.Revision != "" && c.DegradationAction.Enabled && c.DegradationAction.UsesUpstream429() && c.DegradationAction.Independent429.Enabled && c.DegradationAction.Validate() == nil && a != nil && a.Type == service.AccountTypeOAuth && a.Schedulable && a.Status == service.StatusActive && a.Concurrency > 0 && !(a.AutoPauseOnExpired && a.ExpiresAt != nil && !time.Now().Before(*a.ExpiresAt)) && service.OAuth429RequestModelSupported(a, request, endpoint, compactModel) && service.ResolveOAuth429TargetModel(a, request, endpoint, compactModel) == target
 }
 
 // The HTTP wire model may be reachable only through a public mapping alias.
 // Persist that input name separately; the test transport still fences the actual
 // target model and every alias of the blocked target observes the same action.
-func oauth429RequestModel(a *service.Account, target, endpoint string) string {
+func oauth429RequestModel(a *service.Account, target, endpoint, compactModel string) string {
 	if a == nil {
 		return ""
 	}
-	if service.ResolveOAuth429TargetModel(a, target, endpoint) == target && service.OAuth429RequestModelSupported(a, target, endpoint) {
+	if service.ResolveOAuth429TargetModel(a, target, endpoint, compactModel) == target && service.OAuth429RequestModelSupported(a, target, endpoint, compactModel) {
 		return target
 	}
 	mapping := a.GetModelMapping()
@@ -64,7 +64,7 @@ func oauth429RequestModel(a *service.Account, target, endpoint string) string {
 	}
 	sort.Strings(keys)
 	for _, name := range keys {
-		if !strings.Contains(name, "*") && service.ResolveOAuth429TargetModel(a, name, endpoint) == target && service.OAuth429RequestModelSupported(a, name, endpoint) {
+		if !strings.Contains(name, "*") && service.ResolveOAuth429TargetModel(a, name, endpoint, compactModel) == target && service.OAuth429RequestModelSupported(a, name, endpoint, compactModel) {
 			return name
 		}
 	}
@@ -116,6 +116,10 @@ func (r *accountRepository) ObserveOAuth429(ctx context.Context, observation ser
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	routing, err := r.oauth429RoutingPolicy(ctx, tx)
+	if err != nil {
+		return false, err
+	}
 	cfg, a, err := oauth429PolicyAccount(ctx, tx, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
@@ -123,20 +127,26 @@ func (r *accountRepository) ObserveOAuth429(ctx context.Context, observation ser
 	if err != nil {
 		return false, err
 	}
+	if observation.RoutingRevision != "" && observation.RoutingRevision != routing.Revision {
+		return false, nil
+	}
+	if strings.HasSuffix(observation.Endpoint, "/responses/compact") && (observation.RequestModel == "" || observation.RoutingRevision != routing.Revision || observation.CompactModel != routing.CompactModel) {
+		return false, nil
+	}
 	requestModel := observation.RequestModel
 	if requestModel != "" {
-		if !service.OAuth429RequestModelSupported(a, requestModel, observation.Endpoint) {
+		if !service.OAuth429RequestModelSupported(a, requestModel, observation.Endpoint, routing.CompactModel) {
 			return false, nil
 		}
-		target := service.ResolveOAuth429TargetModel(a, requestModel, observation.Endpoint)
+		target := service.ResolveOAuth429TargetModel(a, requestModel, observation.Endpoint, routing.CompactModel)
 		if model != "" && model != target {
 			return false, nil
 		}
 		model = target
 	} else {
-		requestModel = oauth429RequestModel(a, model, observation.Endpoint)
+		requestModel = oauth429RequestModel(a, model, observation.Endpoint, routing.CompactModel)
 	}
-	if cfg.Revision != observation.Revision || requestModel == "" || !oauth429EligibleRequest(cfg, a, requestModel, model, observation.Endpoint) {
+	if cfg.Revision != observation.Revision || requestModel == "" || !oauth429EligibleRequest(cfg, a, requestModel, model, observation.Endpoint, routing.CompactModel) {
 		return false, nil
 	}
 	epoch, validSince, err := oauth429AccountEpoch(ctx, tx, id)
@@ -148,7 +158,7 @@ func (r *accountRepository) ObserveOAuth429(ctx context.Context, observation ser
 	if started.IsZero() {
 		started = observation.At
 	}
-	if started.Before(validSince) || observation.At.Before(validSince) || started.After(observation.At) || observation.At.After(now) || observation.At.Before(now.Add(-time.Hour)) {
+	if started.Before(routing.ValidSince) || observation.At.Before(routing.ValidSince) || started.Before(validSince) || observation.At.Before(validSince) || started.After(observation.At) || observation.At.After(now) || observation.At.Before(now.Add(-time.Hour)) {
 		return false, nil
 	}
 	task, err := oauth429Load(ctx, tx, id, model)
@@ -177,13 +187,14 @@ func (r *accountRepository) ObserveOAuth429(ctx context.Context, observation ser
 				return false, err
 			}
 		}
-		task = &service.OAuth429Task{AccountID: id, AccountEpoch: epoch, Model: model, Revision: cfg.Revision, Armed: true, State: "observing"}
+		task = &service.OAuth429Task{AccountID: id, AccountEpoch: epoch, Model: model, Revision: cfg.Revision, RoutingRevision: routing.Revision, CompactModel: routing.CompactModel, Armed: true, State: "observing"}
 		// A cold completed episode can be evicted after its samples expire.
 		// Keep it latched until a new non-pressure window is observed.
 		var previous int64
 		err = tx.QueryRowContext(ctx, `SELECT (details->'oauth429'->>'generation')::bigint FROM account_auto_config_events
  WHERE account_id=$1 AND kind='oauth429_review_completed' AND details->'oauth429'->>'model'=$2
- AND details->'oauth429'->>'revision'=$3 ORDER BY id DESC LIMIT 1`, id, model, cfg.Revision).Scan(&previous)
+ AND details->'oauth429'->>'revision'=$3
+ AND COALESCE(details->'oauth429'->>'routing_revision','')=$4 ORDER BY id DESC LIMIT 1`, id, model, cfg.Revision, routing.Revision).Scan(&previous)
 		if err == nil {
 			task.Generation = previous
 			task.Armed = false
@@ -196,7 +207,7 @@ func (r *accountRepository) ObserveOAuth429(ctx context.Context, observation ser
 	} else if err != nil {
 		return false, err
 	}
-	if task.Revision != cfg.Revision || task.AccountEpoch != epoch {
+	if task.Revision != cfg.Revision || task.AccountEpoch != epoch || task.RoutingRevision != routing.Revision {
 		task.AccountEpoch = epoch
 		task.Revision = cfg.Revision
 		task.State = "observing"
@@ -204,6 +215,8 @@ func (r *accountRepository) ObserveOAuth429(ctx context.Context, observation ser
 		task.Samples = nil
 		task.Runs = nil
 	}
+	task.RoutingRevision = routing.Revision
+	task.CompactModel = routing.CompactModel
 	fresh, err := oauth429RememberRequest(ctx, tx, id, model, request, observation.At)
 	if err != nil {
 		return false, err
@@ -314,6 +327,10 @@ func (r *accountRepository) claimOAuth429(ctx context.Context, id int64, model s
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	routing, err := r.oauth429RoutingPolicy(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
 	cfg, a, err := oauth429PolicyAccount(ctx, tx, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -336,7 +353,7 @@ func (r *accountRepository) claimOAuth429(ctx context.Context, id int64, model s
 		return nil, err
 	}
 	now := time.Now().UTC()
-	if task.AccountEpoch != epoch || !oauth429EligibleRequest(cfg, a, task.RequestModel, model, task.Endpoint) || task.Revision != cfg.Revision || !now.Before(task.ExpiresAt) {
+	if task.RoutingRevision != routing.Revision || task.CompactModel != routing.CompactModel || task.AccountEpoch != epoch || !oauth429EligibleRequest(cfg, a, task.RequestModel, model, task.Endpoint, routing.CompactModel) || task.Revision != cfg.Revision || !now.Before(task.ExpiresAt) {
 		task.State = "cancelled"
 		if err = oauth429Save(ctx, tx, task); err != nil {
 			return nil, err
@@ -375,6 +392,10 @@ func (r *accountRepository) mutateOAuth429(ctx context.Context, claimed *service
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	routing, err := r.oauth429RoutingPolicy(ctx, tx)
+	if err != nil {
+		return err
+	}
 	cfg, a, err := oauth429PolicyAccount(ctx, tx, claimed.AccountID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
@@ -397,7 +418,7 @@ func (r *accountRepository) mutateOAuth429(ctx context.Context, claimed *service
 	if err != nil {
 		return err
 	}
-	if task.AccountEpoch != epoch || task.AccountEpoch != claimed.AccountEpoch || !oauth429EligibleRequest(cfg, a, task.RequestModel, task.Model, task.Endpoint) || task.Revision != cfg.Revision || !now.Before(task.ExpiresAt) {
+	if task.RoutingRevision != routing.Revision || task.CompactModel != routing.CompactModel || task.AccountEpoch != epoch || task.AccountEpoch != claimed.AccountEpoch || !oauth429EligibleRequest(cfg, a, task.RequestModel, task.Model, task.Endpoint, routing.CompactModel) || task.Revision != cfg.Revision || !now.Before(task.ExpiresAt) {
 		task.State = "cancelled"
 	} else if err = fn(tx, cfg, a, task); err != nil {
 		return err
@@ -508,9 +529,17 @@ func (r *accountRepository) OAuth429Current(ctx context.Context, task *service.O
 		return false, err
 	}
 	var current bool
+	var expectedModel any
+	if expected := r.oauth429ExpectedRoutingModel(); expected != nil {
+		expectedModel = *expected
+	}
 	err = db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM oauth_429_tasks t JOIN accounts a ON a.id=t.account_id
  JOIN oauth_429_account_epochs e ON e.account_id=a.id AND e.epoch=(t.data->>'account_epoch')::bigint
- JOIN settings s ON s.key=$1 WHERE t.account_id=$2 AND t.model=$3 AND t.state='running'
+ JOIN settings s ON s.key=$1
+ LEFT JOIN settings routing ON routing.key='smart_ops_oauth429_routing'
+ WHERE COALESCE(routing.value::jsonb->>'revision','')=COALESCE(t.data->>'routing_revision','')
+ AND ($6::text IS NULL OR routing.value::jsonb->>'compact_model'=$6)
+ AND t.account_id=$2 AND t.model=$3 AND t.state='running'
  AND t.data->>'trigger_id'=$4 AND t.data->>'lease'=$5
  AND (t.data->>'lease_until')::timestamptz>clock_timestamp()
  AND (t.data->>'expires_at')::timestamptz>clock_timestamp()
@@ -518,6 +547,6 @@ func (r *accountRepository) OAuth429Current(ctx context.Context, task *service.O
  AND NOT(a.auto_pause_on_expired AND a.expires_at IS NOT NULL AND a.expires_at<=clock_timestamp())
  AND s.value::jsonb->>'revision'=t.data->>'revision'
  AND s.value::jsonb->'degradation_action'->>'enabled'='true'
- AND s.value::jsonb->'degradation_action'->'independent_429'->>'enabled'='true')`, service.SettingKeyOAuthAutoConfig, task.AccountID, task.Model, task.TriggerID, task.Lease).Scan(&current)
+ AND s.value::jsonb->'degradation_action'->'independent_429'->>'enabled'='true')`, service.SettingKeyOAuthAutoConfig, task.AccountID, task.Model, task.TriggerID, task.Lease, expectedModel).Scan(&current)
 	return current, err
 }

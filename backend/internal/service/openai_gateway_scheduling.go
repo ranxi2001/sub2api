@@ -455,7 +455,11 @@ func openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx context.Con
 			return "quota_auto_pause"
 		}
 	}
-	if requestedModel != "" && !supportsOpenAIRequestModel(account, requestedModel, requireCompact) {
+	modelCompact := requireCompact
+	if route, ok := ctx.Value(oauth429RequestRouteKey{}).(oauth429RequestRoute); ok {
+		modelCompact = route.Compact
+	}
+	if requestedModel != "" && !supportsOpenAIRequestModel(account, requestedModel, modelCompact, oauth429CompactModel(ctx)) {
 		return "model_not_supported"
 	}
 	if requestedModel != "" && !pelicanGroupTestModelAllowed(ctx, account, requestedModel) {
@@ -934,6 +938,7 @@ func (s *OpenAIGatewayService) selectAccountForModelWithExclusions(ctx context.C
 // selectAccountForModelWithExclusionsStickyHit 与 selectAccountForModelWithExclusions 相同，
 // 另返回账号是否来自粘性会话命中。
 func (s *OpenAIGatewayService) selectAccountForModelWithExclusionsStickyHit(ctx context.Context, groupID *int64, platform string, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, stickyAccountID int64, requiredCapability OpenAIEndpointCapability, preferLowUpstreamRate bool) (*Account, bool, error) {
+	ctx = s.withOAuth429Routing(ctx, requestedModel, requireCompact)
 	platform = NormalizeOpenAICompatiblePlatform(platform)
 	if s.checkChannelPricingRestriction(ctx, groupID, requestedModel) {
 		slog.Warn("channel pricing restriction blocked request",
@@ -1213,6 +1218,7 @@ func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Contex
 }
 
 func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Context, groupID *int64, platform string, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, requiredCapability OpenAIEndpointCapability, useUpstreamTokenCost bool, stickyBindingAllowed ...func(*Account) bool) (*AccountSelectionResult, error) {
+	ctx = s.withOAuth429Routing(ctx, requestedModel, requireCompact)
 	platform = NormalizeOpenAICompatiblePlatform(platform)
 	if s.checkChannelPricingRestriction(ctx, groupID, requestedModel) {
 		slog.Warn("channel pricing restriction blocked request",

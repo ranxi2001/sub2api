@@ -401,7 +401,7 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 		return s.sendErrorAndEnd(c, "Account not found")
 	}
 	if expected, ok := ctx.Value(oauth429ExecutionKey{}).(*oauth429Execution); ok {
-		if account.ID != expected.AccountID || !OAuth429RequestModelSupported(account, modelID, expected.Endpoint) || ResolveOAuth429TargetModel(account, modelID, expected.Endpoint) != expected.Model || account.IsCredentialShadow() || account.IsSIWCEnabled() || account.IsExcelBPSEnabled() || account.IsPrismBrowserEnabledForModel(modelID) || isOpenAIImageModel(expected.Model) {
+		if account.ID != expected.AccountID || !OAuth429RequestModelSupported(account, modelID, expected.Endpoint, expected.CompactModel) || ResolveOAuth429TargetModel(account, modelID, expected.Endpoint, expected.CompactModel) != expected.Model || account.IsCredentialShadow() || account.IsSIWCEnabled() || account.IsExcelBPSEnabled() || account.IsPrismBrowserEnabledForModel(modelID) || isOpenAIImageModel(expected.Model) {
 			return s.sendErrorAndEnd(c, "Independent test target route is unavailable")
 		}
 	}

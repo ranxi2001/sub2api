@@ -53,6 +53,14 @@ func isExplicitOpenAICompactRequest(c *gin.Context, body []byte) bool {
 // for the client-visible model. The process-wide fallback is used only when
 // that account has no matching compact rule.
 func (s *OpenAIGatewayService) resolveOpenAICompactFallbackModel(account *Account, requestedModel string) string {
+	globalModel := ""
+	if s != nil && s.cfg != nil {
+		globalModel = s.cfg.Gateway.OpenAICompactModel
+	}
+	return resolveOpenAICompactFallbackModel(account, requestedModel, globalModel)
+}
+
+func resolveOpenAICompactFallbackModel(account *Account, requestedModel, globalModel string) string {
 	requestedModel = strings.TrimSpace(requestedModel)
 	if account != nil {
 		if mapped, matched := account.ResolveCompactMappedModel(requestedModel); matched {
@@ -64,10 +72,7 @@ func (s *OpenAIGatewayService) resolveOpenAICompactFallbackModel(account *Accoun
 			}
 		}
 	}
-	if s == nil || s.cfg == nil {
-		return ""
-	}
-	fallback := strings.TrimSpace(s.cfg.Gateway.OpenAICompactModel)
+	fallback := strings.TrimSpace(globalModel)
 	if fallback == "" {
 		return ""
 	}
