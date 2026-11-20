@@ -206,7 +206,17 @@ func (w *probePenaltyResponse) finish(result *service.ForwardResult) error {
 			body, err = rewriteProbeUsage(body, result)
 		} else {
 			blocks := bytes.Split(bytes.ReplaceAll(body, []byte("\r\n"), []byte("\n")), []byte("\n\n"))
+			last := -1
 			for i, block := range blocks {
+				payload := probeEventData(block)
+				if gjson.GetBytes(payload, "usage").IsObject() || gjson.GetBytes(payload, "response.usage").IsObject() {
+					last = i
+				}
+			}
+			for i, block := range blocks {
+				if i != last {
+					continue
+				}
 				payload := probeEventData(block)
 				if !gjson.GetBytes(payload, "usage").IsObject() && !gjson.GetBytes(payload, "response.usage").IsObject() {
 					continue

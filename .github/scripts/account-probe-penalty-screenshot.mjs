@@ -8,7 +8,7 @@ const root = resolve('frontend'), output = process.env.SCREENSHOT_DIR
 if (!output || !process.env.PLAYWRIGHT_ROOT) throw Error('Missing screenshot configuration')
 mkdirSync(output, { recursive: true })
 const require = createRequire(join(root, 'package.json'))
-const { build, preview } = await import(pathToFileURL(require.resolve('vite')).href)
+const { build, preview } = await import(pathToFileURL(join(root, 'node_modules/vite/dist/node/index.js')).href)
 const vue = (await import(pathToFileURL(require.resolve('@vitejs/plugin-vue')).href)).default
 const { chromium } = await import(pathToFileURL(join(process.env.PLAYWRIGHT_ROOT, 'index.mjs')).href)
 const tailwind = (await import(pathToFileURL(join(root, 'tailwind.config.js')).href)).default

@@ -9,6 +9,14 @@ const close = (a: number, b: number) => Math.abs(a - b) <= 1e-10 + Math.abs(b) *
 
 export function customerCostSnapshot(row: UsageLog | null): CustomerCostDetails | null {
   const detail = row?.customer_cost_details
+  if (row && detail?.version === 4 && detail.probe_penalty) {
+    const penalty = detail.probe_penalty
+    if (![...components.map(key => detail[key]), detail.total_cost, detail.actual_cost, detail.multiplier, penalty.minimum_charge, penalty.adjustment].every(value => Number.isFinite(value) && value >= 0)) return null
+    if (!closeMoney(detail.actual_cost, row.actual_cost) || !closeMoney(penalty.actual_cost, row.actual_cost) ||
+        !closeMoney(detail.total_cost * detail.multiplier + penalty.adjustment, detail.actual_cost) ||
+        !closeMoney(penalty.minimum_charge, detail.actual_cost)) return null
+    return detail
+  }
   if (!row || !['priority', 'fast', 'ultrafast'].includes(row.service_tier ?? '') || !detail || ![1, 2, 3].includes(detail.version) || (row.service_tier === 'ultrafast' ? detail.free_ultrafast !== true : detail.free_fast !== true)) return null
   if (![...components.map(key => detail[key]), detail.total_cost, detail.actual_cost, detail.multiplier].every(value => Number.isFinite(value) && value >= 0)) return null
   const sum = components.reduce((total, key) => total + detail[key], 0)
