@@ -55,14 +55,12 @@ func oauth429Fixture(t *testing.T, history []string) (*accountRepository, *servi
 	c.DegradationAction.Upstream429Enabled = nil
 	c.DegradationAction.ProbeEnabled = &off
 	c.DegradationAction.ThresholdPercent = nil
-	c.DegradationAction.Independent429 = service.OAuth429TestConfig{Enabled: true, DailyTestBudget: 1000, MinSamples: 20}
+	c.DegradationAction.Independent429 = service.OAuth429TestConfig{Enabled: true, MinSamples: 20}
 	svc := service.ProvideAccountOpsService(NewSettingRepository(integrationEntClient), NewAccountOpsRepository(integrationDB), nil, repo, NewGroupRepository(integrationEntClient, integrationDB), &config.Config{Runtime: config.RuntimeConfig{Role: config.RuntimeRoleGateway}}, nil, nil, nil, nil, nil)
 	t.Cleanup(svc.Stop)
 	c, err := svc.SaveOAuthAutoConfig(t.Context(), c)
 	require.NoError(t, err)
 
-	_, err = integrationDB.ExecContext(t.Context(), `DELETE FROM oauth_429_daily_budget`)
-	require.NoError(t, err)
 	a := degradationAccountFixture(t, 50, map[string]any{"gpt-6-astra": "gpt-6-astra", "gpt-6-luna": "gpt-6-luna"}, history, time.Minute)
 	_, err = integrationDB.ExecContext(t.Context(), `UPDATE accounts SET credentials=credentials||'{"access_token":"fixture-only"}'::jsonb WHERE id=$1`, a.ID)
 	require.NoError(t, err)
@@ -146,7 +144,6 @@ func TestOAuth429WorkerIndependentPair(t *testing.T) {
 		{"four_then_correct", []string{"429", "429", "429", "429", "21"}, nil, false},
 		{"four_then_unconfirmed", []string{"429", "429", "429", "429", "wrapped_rate_limit"}, nil, false},
 		{"five_after_wrong", []string{"23", "429", "429", "429", "429", "429"}, nil, true},
-		{"four_budget_exhausted", []string{"429", "429", "429", "429"}, nil, false},
 		{"auth_is_inconclusive", []string{"401", "401"}, nil, false},
 		{"partial_integer_with_terminal_error", []string{"23", "incomplete_status"}, nil, false},
 		{"rate_limit_delivered_as_text", []string{"wrapped_rate_limit", "wrapped_rate_limit"}, nil, false},
@@ -158,10 +155,6 @@ func TestOAuth429WorkerIndependentPair(t *testing.T) {
 			repo, a, _ := oauth429Fixture(t, tc.history)
 			runner, calls, upstream := oauth429Runner(t, repo, tc.answers)
 			oauth429Prime(t, repo, a.ID, "gpt-6-astra")
-			if tc.name == "four_budget_exhausted" {
-				_, err := integrationDB.ExecContext(t.Context(), `UPDATE oauth_429_daily_budget SET reserved=998 WHERE day=(clock_timestamp() AT TIME ZONE 'UTC')::date`)
-				require.NoError(t, err)
-			}
 			before, err := repo.GetByID(t.Context(), a.ID)
 			require.NoError(t, err)
 			require.False(t, before.IsOAuth429ModelBlocked("gpt-6-astra"))
@@ -214,9 +207,6 @@ func TestOAuth429WorkerIndependentPair(t *testing.T) {
 			require.Equal(t, tc.blocked, logged.OAuth429.ModelBlocked)
 			if tc.name == "five_consecutive_429" || tc.name == "five_after_wrong" {
 				require.Equal(t, "five_consecutive_429", saved.Reason)
-			}
-			if tc.name == "four_budget_exhausted" {
-				require.Equal(t, "budget_exhausted", saved.Reason)
 			}
 			for i, answer := range tc.answers {
 				if answer == "429" {
@@ -334,23 +324,14 @@ func TestOAuth429PersistentClaimRestartAndFences(t *testing.T) {
 // Compile-time production repository contract.
 var _ service.OAuth429Repository = (*accountRepository)(nil)
 
-func TestOAuth429BudgetAndDuplicateAdmission(t *testing.T) {
-	repo, a, c := oauth429Fixture(t, nil)
-	c.DegradationAction.Independent429.DailyTestBudget = 2
-	raw, err := json.Marshal(c)
-	require.NoError(t, err)
-	_, err = integrationDB.ExecContext(t.Context(), `UPDATE settings SET value=$2 WHERE key=$1`, service.SettingKeyOAuthAutoConfig, string(raw))
-	require.NoError(t, err)
-	oauth429Prime(t, repo, a.ID, "gpt-6-astra")
-	for i := 0; i < 20; i++ {
-		require.False(t, oauth429Observe(t, repo, a.ID, "gpt-6-luna", i), "the first pair reserved the entire global budget")
+func TestOAuth429WorkerAdmitsEachModelIndependently(t *testing.T) {
+	repo, a, _ := oauth429Fixture(t, nil)
+	for _, model := range []string{"gpt-6-astra", "gpt-6-luna"} {
+		oauth429Prime(t, repo, a.ID, model)
 	}
-	var reserved int
-	require.NoError(t, integrationDB.QueryRowContext(t.Context(), `SELECT reserved FROM oauth_429_daily_budget WHERE day=(clock_timestamp() AT TIME ZONE 'UTC')::date`).Scan(&reserved))
-	require.Equal(t, 2, reserved)
 	var pending int
-	require.NoError(t, integrationDB.QueryRowContext(t.Context(), `SELECT count(*) FROM oauth_429_tasks WHERE state='pending'`).Scan(&pending))
-	require.Equal(t, 1, pending)
+	require.NoError(t, integrationDB.QueryRowContext(t.Context(), `SELECT count(*) FROM oauth_429_tasks WHERE state='pending' AND account_id=$1`, a.ID).Scan(&pending))
+	require.Equal(t, 2, pending)
 }
 
 // Business response ingress wakes the real durable observer without a quality plan.

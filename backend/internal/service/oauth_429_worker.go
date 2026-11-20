@@ -22,16 +22,14 @@ import (
 const OAuth429ModelBlocksKey = "oauth_429_model_blocks"
 const OAuth429Source = "upstream_429_independent"
 
-// Zero values never authorize paid work. The administrator must opt in and
-// explicitly choose the cluster-wide daily call budget and minimum sample size.
+// Independent reviews use the configured minimum number of business requests.
 type OAuth429TestConfig struct {
-	Enabled         bool `json:"enabled"`
-	DailyTestBudget int  `json:"daily_test_budget"`
-	MinSamples      int  `json:"min_samples"`
+	Enabled    bool `json:"enabled"`
+	MinSamples int  `json:"min_samples"`
 }
 
 func (c OAuth429TestConfig) Valid() bool {
-	return !c.Enabled || (c.DailyTestBudget >= 2 && c.DailyTestBudget <= 1000 && c.MinSamples >= 20 && c.MinSamples <= 200)
+	return !c.Enabled || (c.MinSamples >= 20 && c.MinSamples <= 200)
 }
 
 type OAuth429Sample struct {
@@ -231,9 +229,6 @@ func (task *OAuth429Task) consecutiveRateLimits() int {
 }
 
 func (task *OAuth429Task) NeedsAnotherRun() bool {
-	if task.Reason == "budget_exhausted" {
-		return false
-	}
 	if len(task.Runs) < 2 {
 		return true
 	}
@@ -281,7 +276,7 @@ func recordOAuth429TestStatus(req *http.Request, accountID int64, resp *http.Res
 	}
 }
 
-// RunOAuth429Task starts with two reserved calls. A crash after dispatch
+// RunOAuth429Task starts with two calls. A crash after dispatch
 // leaves an inconclusive slot, never permission to replay that billable call.
 func (s *ScheduledTestRunnerService) RunOAuth429Task(ctx context.Context, repo OAuth429Repository, task *OAuth429Task) error {
 	ctx, cancel := context.WithDeadline(ctx, task.ExpiresAt)

@@ -60,11 +60,10 @@ export default {
     errors: { accounts_unavailable: '账号状态读取失败。', metric_unavailable: '监控指标读取失败。', account_enable_failed: '部分兜底账号开启失败，请检查账号状态。' }
   },
  degradation: {
-  "independentScope": "每个账号和模型使用最近一小时内最多 200 个业务样本。首次预留两次调用，之后仅在测试持续返回 HTTP 429 时逐次占用预算。预算用尽即停止并记录。只对启用了模型限制且不在保留名单的被测模型执行处置。",
+  "independentScope": "每个账号和模型使用最近一小时内最多 200 个业务样本。只对启用了模型限制且不在保留名单的被测模型执行处置。",
   "independentSamples": "最少业务请求样本（20–200）",
-  "independentBudget": "集群每日测试调用预算（UTC，2–1000 次）",
-  "independentHint": "启用后，业务 429 达到阈值会对原账号和模型发起可能收费的测试。两次完整明确错答，或同一轮追加测试连续 5 次收到 HTTP 429，均可触发模型限制。超时、空答、截断和正文里的数字 429 都不能计入连续 429。",
-  "independentEnable": "授权达 429 阈值后主动复测并按预算追加调用",
+  "independentHint": "启用后，业务 429 达到阈值会对原账号和模型发起复测。两次完整明确错答，或同一轮追加测试连续 5 次收到 HTTP 429，均可触发模型限制。超时、空答、截断和正文里的数字 429 都不能计入连续 429。",
+  "independentEnable": "达到 429 阈值后自动复测",
   "title": "降智后处置",
   "hint": "普通探针分支保留原确认流程。HTTP 429 压力只触发下方独立测试，不代表答案错误，也不直接降低账号并发。",
   "conditions": "判断条件",
@@ -240,7 +239,7 @@ export default {
   "cooling": "冷却至 {time}",
   "logs": {
  oauth429Detail: '被测模型 {model}：{verdicts}',
- oauth429Reasons: { five_consecutive_429: '追加测试连续 5 次 429', two_wrong_answers: '连续两次完整错答', budget_exhausted: '测试预算已用尽' },
+ oauth429Reasons: { five_consecutive_429: '追加测试连续 5 次 429', two_wrong_answers: '连续两次完整错答' },
  oauth429ModelBlocked: '已限制该模型',
  oauth429Verdicts: { rate_limited: '上游 HTTP 429', correct: '正确', incorrect: '明确错答', inconclusive: '无法确定' },
     "title": "近期日志",

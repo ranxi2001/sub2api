@@ -81,7 +81,7 @@ func TestOAuth429HandlerPostgresWorkerLoopback(t *testing.T) {
 	off := false
 	cfg.DegradationAction.Enabled = true
 	cfg.DegradationAction.ProbeEnabled = &off
-	cfg.DegradationAction.Independent429 = service.OAuth429TestConfig{Enabled: true, DailyTestBudget: 2, MinSamples: 20}
+	cfg.DegradationAction.Independent429 = service.OAuth429TestConfig{Enabled: true, MinSamples: 20}
 	raw, err := json.Marshal(cfg)
 	require.NoError(t, err)
 	req := httptest.NewRequest(http.MethodPut, "/config", strings.NewReader(string(raw)))
@@ -92,7 +92,8 @@ func TestOAuth429HandlerPostgresWorkerLoopback(t *testing.T) {
 	read := httptest.NewRecorder()
 	router.ServeHTTP(read, httptest.NewRequest(http.MethodGet, "/config", nil))
 	require.Equal(t, 200, read.Code)
-	require.Contains(t, read.Body.String(), `"daily_test_budget":2`)
+	require.Contains(t, read.Body.String(), `"min_samples":20`)
+	require.NotContains(t, read.Body.String(), "daily_test_budget")
 	a := &service.Account{Name: "fixture-only", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true, Concurrency: 50, Credentials: map[string]any{"access_token": "loopback-fixture", "model_mapping": map[string]any{"gpt-6-astra": "gpt-6-astra", "gpt-6-luna": "gpt-6-luna"}}, Extra: map[string]any{}}
 	require.NoError(t, accounts.Create(ctx, a))
 	_, err = db.ExecContext(ctx, `UPDATE accounts SET rate_limit_reset_at=clock_timestamp()+INTERVAL '1 hour' WHERE id=$1`, a.ID)

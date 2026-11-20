@@ -133,7 +133,7 @@ func (r *accountRepository) ObserveOAuth429(ctx context.Context, observation ser
 	task, err := oauth429Load(ctx, tx, id, model)
 	if errors.Is(err, sql.ErrNoRows) {
 		// Only new account/model pairs compete for capacity. Existing windows
-		// serialize on their account row; the UTC budget has its own row lock.
+		// serialize on their account row.
 		if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(4299281)`); err != nil {
 			return false, err
 		}
@@ -221,45 +221,24 @@ func (r *accountRepository) ObserveOAuth429(ctx context.Context, observation ser
 	}
 	queued := false
 	if pressure && task.Armed && !duplicate {
-		if _, err = tx.ExecContext(ctx, `DELETE FROM oauth_429_daily_budget WHERE day < (clock_timestamp() AT TIME ZONE 'UTC')::date-7`); err != nil {
-			return false, err
-		}
-		reserved, err := reserveOAuth429Budget(ctx, tx, 2, cfg.DegradationAction.Independent429.DailyTestBudget)
-		if err != nil {
-			return false, err
-		}
-		if reserved {
-			task.RequestModel = oauth429RequestModel(a, model)
-			task.Reason = ""
-			task.ModelBlocked = false
-			task.TriggerID = uuid.NewString()
-			task.Generation++
-			task.TriggeredAt = now
-			task.ExpiresAt = now.Add(10 * time.Minute)
-			task.Lease = ""
-			task.LeaseUntil = time.Time{}
-			task.Runs = nil
-			task.State = "pending"
-			task.Armed = false
-			queued = true
-		}
+		task.RequestModel = oauth429RequestModel(a, model)
+		task.Reason = ""
+		task.ModelBlocked = false
+		task.TriggerID = uuid.NewString()
+		task.Generation++
+		task.TriggeredAt = now
+		task.ExpiresAt = now.Add(10 * time.Minute)
+		task.Lease = ""
+		task.LeaseUntil = time.Time{}
+		task.Runs = nil
+		task.State = "pending"
+		task.Armed = false
+		queued = true
 	}
 	if err = oauth429Save(ctx, tx, task); err != nil {
 		return false, err
 	}
 	return queued, tx.Commit()
-}
-
-func reserveOAuth429Budget(ctx context.Context, tx *sql.Tx, count, limit int) (bool, error) {
-	var reserved int
-	err := tx.QueryRowContext(ctx, `INSERT INTO oauth_429_daily_budget(day,reserved)
- SELECT (clock_timestamp() AT TIME ZONE 'UTC')::date,$1::integer WHERE $1<=$2
- ON CONFLICT(day) DO UPDATE SET reserved=oauth_429_daily_budget.reserved+EXCLUDED.reserved
- WHERE oauth_429_daily_budget.reserved+EXCLUDED.reserved<=$2 RETURNING reserved`, count, limit).Scan(&reserved)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	return err == nil, err
 }
 
 func (r *accountRepository) ClaimOAuth429(ctx context.Context) (*service.OAuth429Task, error) {
@@ -399,22 +378,12 @@ func (r *accountRepository) mutateOAuth429(ctx context.Context, claimed *service
 }
 func (r *accountRepository) StartOAuth429Run(ctx context.Context, task *service.OAuth429Task) (*service.OAuth429Run, error) {
 	var started *service.OAuth429Run
-	err := r.mutateOAuth429(ctx, task, func(tx *sql.Tx, cfg service.OAuthAutoConfig, _ *service.Account, current *service.OAuth429Task) error {
+	err := r.mutateOAuth429(ctx, task, func(_ *sql.Tx, _ service.OAuthAutoConfig, _ *service.Account, current *service.OAuth429Task) error {
 		if !current.NeedsAnotherRun() {
 			return nil
 		}
 		for _, run := range current.Runs {
 			if run.Verdict == "started" {
-				return nil
-			}
-		}
-		if len(current.Runs) >= 2 {
-			reserved, err := reserveOAuth429Budget(ctx, tx, 1, cfg.DegradationAction.Independent429.DailyTestBudget)
-			if err != nil {
-				return err
-			}
-			if !reserved {
-				current.Reason = "budget_exhausted"
 				return nil
 			}
 		}

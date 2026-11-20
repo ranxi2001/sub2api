@@ -60,11 +60,10 @@ export default {
     errors: { accounts_unavailable: 'Could not read account state.', metric_unavailable: 'Could not read the monitored metric.', account_enable_failed: 'Some fallback accounts could not be enabled. Check their state.' }
   },
  degradation: {
-  "independentScope": "Use up to 200 business samples per account and model in the last hour. Reserve two calls initially. Each further call after an HTTP 429 consumes one unit of the daily budget. When the budget runs out, the review stops and records the reason. Model restrictions apply only when enabled and the tested model is outside the retained list.",
+  "independentScope": "Use up to 200 business samples per account and model in the last hour. Model restrictions apply only when enabled and the tested model is outside the retained list.",
   "independentSamples": "Minimum business request samples (20–200)",
-  "independentBudget": "Cluster-wide daily test-call budget (UTC, 2–1000)",
-  "independentHint": "Business HTTP 429 pressure can trigger paid tests on the original account and model. Two complete wrong answers or five consecutive upstream HTTP 429 test responses can restrict the model. Timeouts, empty or truncated answers, and the text 429 do not count toward the streak.",
-  "independentEnable": "Authorize independent tests and budgeted follow-ups at the 429 threshold",
+  "independentHint": "Business HTTP 429 pressure can trigger tests on the original account and model. Two complete wrong answers or five consecutive upstream HTTP 429 test responses can restrict the model. Timeouts, empty or truncated answers, and the text 429 do not count toward the streak.",
+  "independentEnable": "Run independent tests at the 429 threshold",
   "title": "Degradation actions",
   "hint": "The probe branch retains its confirmation policy. HTTP 429 pressure only starts the independent tests below; it never proves a wrong answer or directly changes account concurrency.",
   "conditions": "Conditions",
@@ -240,7 +239,7 @@ export default {
   "cooling": "Cooling down until {time}",
   "logs": {
  oauth429Detail: 'Tested model {model}: {verdicts}',
- oauth429Reasons: { five_consecutive_429: 'Five consecutive HTTP 429 test responses', two_wrong_answers: 'Two complete wrong answers', budget_exhausted: 'Test budget exhausted' },
+ oauth429Reasons: { five_consecutive_429: 'Five consecutive HTTP 429 test responses', two_wrong_answers: 'Two complete wrong answers' },
  oauth429ModelBlocked: 'Model restricted',
  oauth429Verdicts: { rate_limited: 'Upstream HTTP 429', correct: 'Correct', incorrect: 'Confirmed wrong', inconclusive: 'Inconclusive' },
     "title": "Recent logs",

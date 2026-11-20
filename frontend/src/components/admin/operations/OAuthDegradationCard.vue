@@ -24,7 +24,6 @@
     <div class="flex flex-wrap items-center gap-2"><label class="flex items-center gap-2 text-sm"><input v-model="independent.enabled" type="checkbox" data-testid="independent-429-enabled" class="h-4 w-4 rounded text-primary-600" />{{ t('autoConfig.degradation.independentEnable') }}</label><NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.oauth429IndependentTests" :user-id="userId" /></div>
     <p class="text-xs leading-5 text-gray-500">{{ t('autoConfig.degradation.independentHint') }}</p>
     <div class="grid gap-3 sm:grid-cols-2">
-     <label class="block text-sm">{{ t('autoConfig.degradation.independentBudget') }}<input v-model.number="independent.daily_test_budget" data-testid="independent-429-budget" :disabled="!independent.enabled" type="number" min="2" max="1000" step="1" :required="independent.enabled" class="input mt-2 w-full" /></label>
      <label class="block text-sm">{{ t('autoConfig.degradation.independentSamples') }}<input v-model.number="independent.min_samples" data-testid="independent-429-samples" :disabled="!independent.enabled" type="number" min="20" max="200" step="1" :required="independent.enabled" class="input mt-2 w-full" /></label>
     </div>
     <p class="text-xs leading-5 text-gray-500">{{ t('autoConfig.degradation.independentScope') }}</p>
@@ -70,7 +69,7 @@ const props = withDefaults(defineProps<{ modelValue: OAuthDegradationConfig; gro
 const { t } = useI18n()
 const config = computed(() => props.modelValue)
 watch(() => props.modelValue, value => {
- if (!value.independent_429) value.independent_429 = { enabled: false, daily_test_budget: 0, min_samples: 20 }
+ if (!value.independent_429) value.independent_429 = { enabled: false, min_samples: 20 }
 }, { immediate: true })
 const independent = computed(() => config.value.independent_429!)
 const unavailableGroups = computed(() => (config.value.group_ids ?? []).filter(id => !props.groups.some(group => group.id === id)))
