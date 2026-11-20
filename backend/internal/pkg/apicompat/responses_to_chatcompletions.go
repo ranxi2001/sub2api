@@ -520,6 +520,9 @@ type bufferedFuncCall struct {
 // so that non-streaming handlers can reconstruct output when the terminal event
 // (response.completed / response.done) carries an empty output array.
 type BufferedResponseAccumulator struct {
+	// tool_search_call items arrive complete on output_item.done.
+	toolSearchCalls []ResponsesOutput
+
 	text                 strings.Builder
 	refusal              strings.Builder
 	reasoning            strings.Builder
@@ -530,8 +533,6 @@ type BufferedResponseAccumulator struct {
 	// custom_tool_call that IsServerSideSearchCall is then rebuilt as that item
 	// instead of as a client function_call.
 	XAIServerSideSearch bool
-	// tool_search_call items arrive complete on output_item.done.
-	toolSearchCalls []ResponsesOutput
 }
 
 // NewBufferedResponseAccumulator returns an initialised accumulator.
