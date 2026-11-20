@@ -175,9 +175,10 @@ describe('UpstreamBillingRateCell', () => {
     expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('0.1214x')
     await wrapper.setProps({ account: { ...account, platform: 'deepseek' } })
     expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('0.1214x')
-    account.extra.upstream_billing_probe.status = 'unsupported'
-    delete account.extra.upstream_billing_probe.data
-    await wrapper.setProps({ account })
+    const unsupported = JSON.parse(JSON.stringify(account))
+    unsupported.extra.upstream_billing_probe.status = 'unsupported'
+    delete unsupported.extra.upstream_billing_probe.data
+    await wrapper.setProps({ account: unsupported })
     expect(wrapper.get('[data-testid="upstream-billing-configure"]').text()).toBe('admin.accounts.upstreamBilling.unsupported')
     expect(wrapper.get('[data-testid="upstream-balance-value"]').text()).toBe('$12.34')
     regular.unmount()
