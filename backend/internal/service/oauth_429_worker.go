@@ -55,6 +55,7 @@ type OAuth429Task struct {
 	Reason       string           `json:"reason,omitempty"`
 	ModelBlocked bool             `json:"model_blocked,omitempty"`
 	RequestModel string           `json:"request_model"`
+	Endpoint     string           `json:"endpoint,omitempty"`
 	Revision     string           `json:"revision"`
 	TriggerID    string           `json:"trigger_id"`
 	Generation   int64            `json:"generation"`
@@ -88,6 +89,7 @@ type oauth429ExecutionKey struct{}
 type oauth429Execution struct {
 	AccountID      int64
 	Model          string
+	Endpoint       string
 	httpStatus     atomic.Int32
 	answerComplete atomic.Bool
 }
@@ -134,6 +136,7 @@ type OAuth429Observation struct {
 	Model        string
 	Revision     string
 	RequestModel string
+	Endpoint     string
 	// Request start fences a response spanning an account transition. At remains
 	// the response-header timestamp used by the statistical window.
 	StartedAt time.Time
@@ -227,6 +230,9 @@ func ObserveOAuth429HTTP(req *http.Request, accountID int64, status int, request
 	sample := OAuth429Observation{StartedAt: started, RequestModel: requestModel, AccountID: accountID, Model: model, Revision: cfg.Revision, OAuth429Sample: OAuth429Sample{
 		Request: hex.EncodeToString(digest[:]), Status: status, At: time.Now().UTC(),
 	}}
+	if req.URL != nil {
+		sample.Endpoint = req.URL.Path
+	}
 	select {
 	case observer.oauth429Samples[accountID%int64(len(observer.oauth429Samples))] <- sample:
 	default:
@@ -239,7 +245,7 @@ func (a *Account) IsOAuth429ModelBlocked(model string) bool {
 		return false
 	}
 	entries, _ := a.Extra[OAuth429ModelBlocksKey].(map[string]any)
-	return entries[model] != nil || entries[a.GetMappedModel(model)] != nil
+	return entries[model] != nil || entries[ResolveOAuth429TargetModel(a, model, "")] != nil
 }
 
 const OAuth429ConsecutiveLimit = 5
@@ -362,7 +368,7 @@ func (s *ScheduledTestRunnerService) RunOAuth429Task(ctx context.Context, repo O
 			return repo.CompleteOAuth429(ctx, task)
 		}
 		cfg := &PelicanTestConfig{QuestionKind: "candy", Prompt: CandyPrompt + "\n你可以凭手感选择每种形状取多少颗，不能选择口味。", ReasoningEffort: "high", ParallelCount: 1, ModelID: task.RequestModel, Quality: &QualityPolicy{Action: QualityActionObserveOnly}}
-		execution := &oauth429Execution{AccountID: task.AccountID, Model: task.Model}
+		execution := &oauth429Execution{AccountID: task.AccountID, Model: task.Model, Endpoint: task.Endpoint}
 		testCtx, stop := context.WithTimeout(context.WithValue(ctx, oauth429ExecutionKey{}, execution), 90*time.Second)
 		// This direct executor addresses the original account; no group selection,
 		// answer retry, scheduled plan, or qualityops switch is consulted.

@@ -401,7 +401,7 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 		return s.sendErrorAndEnd(c, "Account not found")
 	}
 	if expected, ok := ctx.Value(oauth429ExecutionKey{}).(*oauth429Execution); ok {
-		if account.ID != expected.AccountID || account.GetMappedModel(modelID) != expected.Model || account.IsCredentialShadow() || account.IsSIWCEnabled() || account.IsExcelBPSEnabled() || account.IsPrismBrowserEnabledForModel(modelID) || isOpenAIImageModel(expected.Model) {
+		if account.ID != expected.AccountID || !account.IsModelSupported(modelID) || ResolveOAuth429TargetModel(account, modelID, expected.Endpoint) != expected.Model || account.IsCredentialShadow() || account.IsSIWCEnabled() || account.IsExcelBPSEnabled() || account.IsPrismBrowserEnabledForModel(modelID) || isOpenAIImageModel(expected.Model) {
 			return s.sendErrorAndEnd(c, "Independent test target route is unavailable")
 		}
 	}
@@ -1059,6 +1059,12 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	upstreamTestModelID := testModelID
 	if isOAuth {
 		upstreamTestModelID = normalizeOpenAIModelForUpstream(credentialAccount, testModelID)
+	}
+	if expected, ok := ctx.Value(oauth429ExecutionKey{}).(*oauth429Execution); ok {
+		// The independent review pins the observed wire target, including a
+		// compact mapping or passthrough route. Public-input admission and the
+		// live resolver were checked above; transport verifies these exact bytes.
+		upstreamTestModelID = expected.Model
 	}
 	payload := createOpenAITestPayload(upstreamTestModelID, isOAuth)
 	if options, ok := pelicanTestOptionsFromContext(ctx); ok {

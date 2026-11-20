@@ -42,7 +42,10 @@ BEGIN
     NEW.expires_at IS DISTINCT FROM OLD.expires_at OR
     NEW.auto_pause_on_expired IS DISTINCT FROM OLD.auto_pause_on_expired OR
     NEW.credentials->'model_mapping' IS DISTINCT FROM OLD.credentials->'model_mapping' OR
-    NEW.credentials->'model_mapping_mode' IS DISTINCT FROM OLD.credentials->'model_mapping_mode' THEN
+    NEW.credentials->'model_mapping_mode' IS DISTINCT FROM OLD.credentials->'model_mapping_mode' OR
+    NEW.credentials->'compact_model_mapping' IS DISTINCT FROM OLD.credentials->'compact_model_mapping' OR
+    NEW.extra->'openai_passthrough' IS DISTINCT FROM OLD.extra->'openai_passthrough' OR
+    NEW.credentials->'api_protocol' IS DISTINCT FROM OLD.credentials->'api_protocol' THEN
   UPDATE oauth_429_account_epochs SET epoch=epoch+1,
    valid_since=GREATEST(clock_timestamp(),valid_since+interval '1 microsecond') WHERE account_id=NEW.id;
   -- Clear observing/completed windows as well. Preserve run evidence for audit;

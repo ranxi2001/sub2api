@@ -112,7 +112,45 @@ func TestOAuth429ImmediateWithoutQualityOpsBehaviorOracle(t *testing.T) {
 		_ = resp.Body.Close()
 	}
 	require.Eventually(t, func() bool { return upstream.calls.Load() == 2 }, 8*time.Second, 20*time.Millisecond, "threshold must immediately execute two independent provider tests with qualityops disabled and no plan")
-	time.Sleep(100 * time.Millisecond)
+	// SQL/JSON only: this oracle is copied unchanged to old production, which
+	// has neither the task Go type nor the worker API. Calls alone cannot prove
+	// that two complete answers were graded or that completion was committed.
+	var terminal struct {
+		AccountID int64  `json:"account_id"`
+		Model     string `json:"model"`
+		TriggerID string `json:"trigger_id"`
+		Runs      []struct {
+			ID             string    `json:"id"`
+			ResultID       string    `json:"result_id"`
+			Verdict        string    `json:"verdict"`
+			AnswerComplete bool      `json:"answer_complete"`
+			StartedAt      time.Time `json:"started_at"`
+			FinishedAt     time.Time `json:"finished_at"`
+		} `json:"runs"`
+	}
+	require.Eventually(t, func() bool {
+		var state string
+		var data []byte
+		if integrationDB.QueryRowContext(ctx, `SELECT state,data FROM oauth_429_tasks WHERE account_id=$1 AND model=$2`, a.ID, "gpt-6-astra").Scan(&state, &data) != nil || json.Unmarshal(data, &terminal) != nil {
+			return false
+		}
+		return state == "complete" && len(terminal.Runs) == 2
+	}, 8*time.Second, 20*time.Millisecond, "two complete correct tests must commit a terminal task with two persisted results")
+	require.Equal(t, a.ID, terminal.AccountID)
+	require.Equal(t, "gpt-6-astra", terminal.Model)
+	require.NotEmpty(t, terminal.TriggerID)
+	identities := map[string]bool{}
+	for _, run := range terminal.Runs {
+		require.Equal(t, "correct", run.Verdict)
+		require.True(t, run.AnswerComplete)
+		require.False(t, run.StartedAt.IsZero())
+		require.False(t, run.FinishedAt.Before(run.StartedAt))
+		for _, id := range []string{run.ID, run.ResultID} {
+			require.NotEmpty(t, id)
+			require.False(t, identities[id], "each execution and result must have a distinct persisted identity")
+			identities[id] = true
+		}
+	}
 	require.EqualValues(t, 2, upstream.calls.Load(), "exactly two complete correct tests terminate this trigger")
 	var plans int
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT count(*) FROM scheduled_test_plans WHERE account_id=$1`, a.ID).Scan(&plans))

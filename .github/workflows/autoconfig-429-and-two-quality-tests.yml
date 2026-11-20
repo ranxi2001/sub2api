@@ -14,6 +14,7 @@ on:
       - 'frontend/src/utils/oauthDegradation.ts'
       - 'frontend/src/i18n/locales/*/autoConfig.ts'
       - 'frontend/src/views/admin/__tests__/OAuthDegradationActions.spec.ts'
+      - 'frontend/src/views/admin/__tests__/OAuth429RealNoticeEntrypoints.spec.ts'
       - '.github/scripts/oauth-429-independent-browser.mjs'
       - 'backend/internal/pkg/upstreamstats/**'
       - '.github/workflows/autoconfig-429-and-two-quality-tests.yml'
@@ -91,6 +92,31 @@ jobs:
           ref: ee16421fb2d7e7ec87aabe18ffbcd90fa2281ec3
           path: repair-baseline
           persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          ref: 64082916cf88ef727f5772cb393ccb4655de0683
+          path: normalization-baseline
+          persist-credentials: false
+      - name: Same transport oracle rejects the reviewed normalization regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          oracle=backend/internal/repository/oauth_429_normalization_integration_test.go
+          cp "$oracle" "normalization-baseline/$oracle"
+          cmp "$oracle" "normalization-baseline/$oracle"
+          sha256sum "$oracle" "normalization-baseline/$oracle" > evidence/normalization-oracle-sha256.txt
+          git -C normalization-baseline rev-parse HEAD > evidence/normalization-baseline-head.txt
+          set +e
+          (cd normalization-baseline/backend && go test -tags=integration ./internal/repository -run '^TestOAuth429HTTPForwardNormalization$' -count=1 -v -timeout=10m) > evidence/normalization-red.log 2>&1
+          result=$?
+          set -e
+          cat evidence/normalization-red.log
+          test "$result" -ne 0
+          bash .github/scripts/assert-test-log-clean.sh red evidence/normalization-red.log
+          grep -F 'Forward-normalized model must complete both tests and block only its canonical target' evidence/normalization-red.log
+          grep -F -- '--- FAIL: TestOAuth429HTTPForwardNormalization/provider_prefix' evidence/normalization-red.log
+          grep -F -- '--- FAIL: TestOAuth429HTTPForwardNormalization/wildcard_to_prefix' evidence/normalization-red.log
       - name: Reviewed head deduplication and account transition behavioral RED
         shell: bash
         run: |
@@ -174,12 +200,15 @@ jobs:
           grep -F -- '--- PASS: TestOAuth429QueuedObservationCannotCrossAccountTransition' evidence/worker.log
           grep -F -- '--- PASS: TestOAuth429ImmediateWithoutQualityOpsBehaviorOracle' evidence/worker.log
           grep -F -- '--- PASS: TestOAuth429HTTPParsedModelSurvivesStreamingAndLargeBody' evidence/worker.log
+          grep -F -- '--- PASS: TestOAuth429HTTPForwardNormalization' evidence/worker.log
       - name: Real settings handler validation
         shell: bash
         run: |
           set -euo pipefail
           (cd backend && go test -race -tags=unit ./internal/service -run '^TestOAuth429' -count=1 -v) 2>&1 | tee evidence/classifier.log
           bash .github/scripts/assert-test-log-clean.sh green evidence/classifier.log
+          grep -F -- '--- PASS: TestOAuth429RealForwardNormalization' evidence/classifier.log
+          grep -F -- '--- PASS: TestOAuth429EndpointResolution' evidence/classifier.log
           (cd backend && go test -tags=unit ./internal/handler -run '^TestOAuth429ParsedInputModelAndIdentitySurviveHTTPContext$' -count=1 -v) 2>&1 | tee evidence/model-context.log
           bash .github/scripts/assert-test-log-clean.sh green evidence/model-context.log
           (cd backend && go test -tags=unit ./internal/handler/admin -run '^TestOAuthAutoConfig.*Degradation|^Test.*Degradation' -count=1 -v) 2>&1 | tee evidence/handler.log

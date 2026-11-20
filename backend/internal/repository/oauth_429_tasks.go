@@ -43,18 +43,18 @@ func oauth429PolicyAccount(ctx context.Context, tx *sql.Tx, id int64) (service.O
 	}
 	return cfg, a, nil
 }
-func oauth429EligibleRequest(c service.OAuthAutoConfig, a *service.Account, request, target string) bool {
-	return c.Revision != "" && c.DegradationAction.Enabled && c.DegradationAction.UsesUpstream429() && c.DegradationAction.Independent429.Enabled && c.DegradationAction.Validate() == nil && a != nil && a.Type == service.AccountTypeOAuth && a.Schedulable && a.Status == service.StatusActive && a.Concurrency > 0 && !(a.AutoPauseOnExpired && a.ExpiresAt != nil && !time.Now().Before(*a.ExpiresAt)) && !a.IsOAuth429ModelBlocked(target) && a.IsModelSupported(request) && a.GetMappedModel(request) == target
+func oauth429EligibleRequest(c service.OAuthAutoConfig, a *service.Account, request, target, endpoint string) bool {
+	return c.Revision != "" && c.DegradationAction.Enabled && c.DegradationAction.UsesUpstream429() && c.DegradationAction.Independent429.Enabled && c.DegradationAction.Validate() == nil && a != nil && a.Type == service.AccountTypeOAuth && a.Schedulable && a.Status == service.StatusActive && a.Concurrency > 0 && !(a.AutoPauseOnExpired && a.ExpiresAt != nil && !time.Now().Before(*a.ExpiresAt)) && !a.IsOAuth429ModelBlocked(target) && a.IsModelSupported(request) && service.ResolveOAuth429TargetModel(a, request, endpoint) == target
 }
 
 // The HTTP wire model may be reachable only through a public mapping alias.
 // Persist that input name separately; the test transport still fences the actual
 // target model and every alias of the blocked target observes the same action.
-func oauth429RequestModel(a *service.Account, target string) string {
+func oauth429RequestModel(a *service.Account, target, endpoint string) string {
 	if a == nil {
 		return ""
 	}
-	if a.GetMappedModel(target) == target && a.IsModelSupported(target) {
+	if service.ResolveOAuth429TargetModel(a, target, endpoint) == target && a.IsModelSupported(target) {
 		return target
 	}
 	mapping := a.GetModelMapping()
@@ -64,7 +64,7 @@ func oauth429RequestModel(a *service.Account, target string) string {
 	}
 	sort.Strings(keys)
 	for _, name := range keys {
-		if !strings.Contains(name, "*") && a.GetMappedModel(name) == target && a.IsModelSupported(name) {
+		if !strings.Contains(name, "*") && service.ResolveOAuth429TargetModel(a, name, endpoint) == target && a.IsModelSupported(name) {
 			return name
 		}
 	}
@@ -128,15 +128,15 @@ func (r *accountRepository) ObserveOAuth429(ctx context.Context, observation ser
 		if a == nil || !a.IsModelSupported(requestModel) {
 			return false, nil
 		}
-		target := a.GetMappedModel(requestModel)
+		target := service.ResolveOAuth429TargetModel(a, requestModel, observation.Endpoint)
 		if model != "" && model != target {
 			return false, nil
 		}
 		model = target
 	} else {
-		requestModel = oauth429RequestModel(a, model)
+		requestModel = oauth429RequestModel(a, model, observation.Endpoint)
 	}
-	if cfg.Revision != observation.Revision || requestModel == "" || !oauth429EligibleRequest(cfg, a, requestModel, model) {
+	if cfg.Revision != observation.Revision || requestModel == "" || !oauth429EligibleRequest(cfg, a, requestModel, model, observation.Endpoint) {
 		return false, nil
 	}
 	epoch, validSince, err := oauth429AccountEpoch(ctx, tx, id)
@@ -244,6 +244,7 @@ func (r *accountRepository) ObserveOAuth429(ctx context.Context, observation ser
 	queued := false
 	if pressure && task.Armed {
 		task.RequestModel = requestModel
+		task.Endpoint = observation.Endpoint
 		task.Reason = ""
 		task.ModelBlocked = false
 		task.TriggerID = uuid.NewString()
@@ -335,7 +336,7 @@ func (r *accountRepository) claimOAuth429(ctx context.Context, id int64, model s
 		return nil, err
 	}
 	now := time.Now().UTC()
-	if task.AccountEpoch != epoch || !oauth429EligibleRequest(cfg, a, task.RequestModel, model) || task.Revision != cfg.Revision || !now.Before(task.ExpiresAt) {
+	if task.AccountEpoch != epoch || !oauth429EligibleRequest(cfg, a, task.RequestModel, model, task.Endpoint) || task.Revision != cfg.Revision || !now.Before(task.ExpiresAt) {
 		task.State = "cancelled"
 		if err = oauth429Save(ctx, tx, task); err != nil {
 			return nil, err
@@ -396,7 +397,7 @@ func (r *accountRepository) mutateOAuth429(ctx context.Context, claimed *service
 	if err != nil {
 		return err
 	}
-	if task.AccountEpoch != epoch || task.AccountEpoch != claimed.AccountEpoch || !oauth429EligibleRequest(cfg, a, task.RequestModel, task.Model) || task.Revision != cfg.Revision || !now.Before(task.ExpiresAt) {
+	if task.AccountEpoch != epoch || task.AccountEpoch != claimed.AccountEpoch || !oauth429EligibleRequest(cfg, a, task.RequestModel, task.Model, task.Endpoint) || task.Revision != cfg.Revision || !now.Before(task.ExpiresAt) {
 		task.State = "cancelled"
 	} else if err = fn(tx, cfg, a, task); err != nil {
 		return err
