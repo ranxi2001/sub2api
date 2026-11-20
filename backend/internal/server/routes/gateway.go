@@ -150,7 +150,7 @@ func RegisterGatewayRoutes(
 	}
 	videoGenerationHandler := func(c *gin.Context) {
 		platform := getGroupPlatform(c)
-		if platform == service.PlatformOpenAI && strings.HasSuffix(c.FullPath(), "/videos") &&
+		if (platform == service.PlatformOpenAI || platform == service.PlatformQwen) && strings.HasSuffix(c.FullPath(), "/videos") &&
 			h.OpenAIGateway.TryOpenAIVideoGeneration(c) {
 			return
 		}
@@ -175,7 +175,7 @@ func RegisterGatewayRoutes(
 	}
 	videoStatusHandler := func(c *gin.Context) {
 		platform := getGroupPlatform(c)
-		if (platform == service.PlatformOpenAI || platform == service.PlatformComposite) &&
+		if (platform == service.PlatformOpenAI || platform == service.PlatformComposite || platform == service.PlatformQwen) &&
 			strings.HasSuffix(c.FullPath(), "/videos/:request_id") && service.IsOpenAIVideoTaskID(c.Param("request_id")) {
 			h.OpenAIGateway.OpenAIVideoLookup(c)
 			return
@@ -201,7 +201,7 @@ func RegisterGatewayRoutes(
 	}
 	videoContentHandler := func(c *gin.Context) {
 		platform := getGroupPlatform(c)
-		if (platform == service.PlatformOpenAI || platform == service.PlatformComposite) &&
+		if (platform == service.PlatformOpenAI || platform == service.PlatformComposite || platform == service.PlatformQwen) &&
 			strings.HasSuffix(c.FullPath(), "/videos/:request_id/content") && service.IsOpenAIVideoTaskID(c.Param("request_id")) {
 			h.OpenAIGateway.OpenAIVideoLookup(c)
 			return

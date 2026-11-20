@@ -621,6 +621,9 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 	pricingAt time.Time,
 ) (*CostBreakdown, error) {
 	billingModel := firstUsageBillingModel(billingModels)
+	if result != nil && result.WanBaseCost != nil && result.VideoCount > 0 {
+		return &CostBreakdown{TotalCost: *result.WanBaseCost, ActualCost: *result.WanBaseCost * videoMultiplier, BillingMode: string(BillingModeVideo)}, nil
+	}
 	if result != nil && result.MiniMaxH3BaseCost != nil && result.VideoCount > 0 {
 		return s.calculateOpenAIVideoCost(ctx, billingModel, apiKey, result, videoMultiplier), nil
 	}

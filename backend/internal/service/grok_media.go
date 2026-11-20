@@ -386,7 +386,8 @@ func (s *OpenAIGatewayService) SelectMediaVideoRequestAccount(
 // first observes a completed video URL. Status may omit model/duration; we fall
 // back to this snapshot, then defaults.
 type GrokVideoPendingBilling struct {
-	UpstreamTaskID string `json:"upstream_task_id,omitempty"`
+	WanUnitPrice   *float64 `json:"wan_unit_price,omitempty"`
+	UpstreamTaskID string   `json:"upstream_task_id,omitempty"`
 	// H3 prices requested seconds at submission; later edits cannot reprice a task.
 	MiniMaxH3BaseCost    *float64 `json:"minimax_h3_base_cost,omitempty"`
 	Model                string   `json:"model"`
