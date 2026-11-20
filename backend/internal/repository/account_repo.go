@@ -2487,6 +2487,9 @@ func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, gro
 // SetGroupAllowedModels 覆盖账号在各个已绑定分组内的模型限制：allowed 里没有的分组恢复为不限制，
 // 账号未绑定的分组被忽略。有变化时通知调度器刷新该账号的缓存。
 func (r *accountRepository) SetGroupAllowedModels(ctx context.Context, accountID int64, allowed map[int64][]string) error {
+	if scoped := r.accountTransactionScope(ctx); scoped != r {
+		return scoped.SetGroupAllowedModels(ctx, accountID, allowed)
+	}
 	tx, err := r.client.Tx(ctx)
 	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
 		return err

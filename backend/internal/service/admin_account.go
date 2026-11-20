@@ -664,7 +664,7 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 }
 
 func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *UpdateAccountInput) (*Account, error) {
-	if input.Platform != "" && s.entClient != nil && dbent.TxFromContext(ctx) == nil {
+	if input.Platform != "" && input.Platform != PlatformGateway && s.entClient != nil && dbent.TxFromContext(ctx) == nil {
 		return s.scopedAdminTransaction(ctx, id, false, func(txctx context.Context) (*Account, error) {
 			return s.UpdateAccount(txctx, id, input)
 		})
@@ -695,6 +695,18 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	}
 	if err := validateGatewayAccountGroups(ctx, account, s.groupRepo, gatewayGroupIDs); err != nil {
 		return nil, err
+	}
+	if account.IsGateway() && !gatewayAccountTransactionActive(ctx) {
+		var updated *Account
+		err := withinGatewayAccountTransaction(ctx, s.accountRepo, id, gatewayGroupIDs, func(txctx context.Context) error {
+			var err error
+			updated, err = s.UpdateAccount(txctx, id, input)
+			return err
+		})
+		if err != nil {
+			return nil, err
+		}
+		return updated, err
 	}
 	if err := prepareVertexAuthModeUpdate(account, input); err != nil {
 		return nil, err
@@ -1510,10 +1522,25 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	if s.excelOAuthReauth != nil && bpsChanged {
 		repoUpdates.ExcelBPSAuthorizationPending = pendingByAccount
 	}
-	if _, err := s.accountRepo.BulkUpdate(ctx, input.AccountIDs, repoUpdates); err != nil {
-		return nil, err
+	// A failed gateway binding must roll back its metadata too. Keep legacy
+	// accounts on the existing batch path; each gateway with a membership edit
+	// commits its own fields+groups atomically and reports its own result.
+	legacyIDs := make([]int64, 0, len(input.AccountIDs))
+	gatewayIDs := make(map[int64]bool)
+	for _, id := range input.AccountIDs {
+		if input.GroupIDs != nil && targetsByID[id] != nil && targetsByID[id].IsGateway() {
+			gatewayIDs[id] = true
+		} else {
+			legacyIDs = append(legacyIDs, id)
+		}
+	}
+	if len(legacyIDs) > 0 {
+		if _, err := s.accountRepo.BulkUpdate(ctx, legacyIDs, repoUpdates); err != nil {
+			return nil, err
+		}
 	}
 
+	gatewayWriteCtx := ctx
 	ctx = accounttimer.WithoutManualIntent(ctx)
 
 	// 将 proxy 变更传播到每个目标账号的 spark 影子账号
@@ -1522,7 +1549,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 		if *repoUpdates.ProxyID != 0 {
 			effectiveProxyID = repoUpdates.ProxyID
 		}
-		for _, accountID := range input.AccountIDs {
+		for _, accountID := range legacyIDs {
 			if err := s.propagateProxyToShadows(ctx, accountID, effectiveProxyID); err != nil {
 				return nil, err
 			}
@@ -1533,15 +1560,24 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	for _, accountID := range input.AccountIDs {
 		entry := BulkUpdateAccountResult{AccountID: accountID}
 
-		if input.GroupIDs != nil {
-			if err := s.accountRepo.BindGroups(ctx, accountID, *input.GroupIDs); err != nil {
-				entry.Success = false
-				entry.Error = err.Error()
-				result.Failed++
-				result.FailedIDs = append(result.FailedIDs, accountID)
-				result.Results = append(result.Results, entry)
-				continue
-			}
+		var bindingErr error
+		if gatewayIDs[accountID] {
+			bindingErr = withinGatewayAccountTransaction(gatewayWriteCtx, s.accountRepo, accountID, *input.GroupIDs, func(txctx context.Context) error {
+				if _, err := s.accountRepo.BulkUpdate(txctx, []int64{accountID}, repoUpdates); err != nil {
+					return err
+				}
+				return s.accountRepo.BindGroups(accounttimer.WithoutManualIntent(txctx), accountID, *input.GroupIDs)
+			})
+		} else if input.GroupIDs != nil {
+			bindingErr = s.accountRepo.BindGroups(ctx, accountID, *input.GroupIDs)
+		}
+		if bindingErr != nil {
+			entry.Success = false
+			entry.Error = bindingErr.Error()
+			result.Failed++
+			result.FailedIDs = append(result.FailedIDs, accountID)
+			result.Results = append(result.Results, entry)
+			continue
 		}
 
 		entry.Success = true

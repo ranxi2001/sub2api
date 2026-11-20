@@ -83,6 +83,7 @@ jobs:
           grep -F -- '--- PASS: TestUsagePlatformSnapshotsSelectedAccount' ../evidence/unit-race.log
           grep -F -- '--- PASS: TestGatewayManagementCreateValidatesBeforeWritesAndBindsExplicitGroups' ../evidence/unit-race.log
           grep -F -- '--- PASS: TestGatewayManagementForwardingRemainsClosed' ../evidence/unit-race.log
+          grep -F -- '--- PASS: TestGatewayManagementUpdateRequiresAtomicCapability' ../evidence/unit-race.log
           grep -F -- '--- PASS: TestGatewayManagementRepositoryBindingGuard' ../evidence/unit-race.log
           grep -F -- '--- PASS: TestGatewayDataImportIdentityValidation' ../evidence/unit-race.log
           grep -F -- '--- PASS: TestAccountGatewayDTORedactsCallingKey' ../evidence/unit-race.log
@@ -92,13 +93,17 @@ jobs:
         run: |
           set -euo pipefail
           go test -race -tags=integration ./internal/repository \
-            -run '^Test(ConcurrencyCacheSuite|AccountRepoSuite)$/^TestGateway(TargetsShareAccountConcurrency|ManagementAtomicMembershipAndOAuthExclusion)$' \
+            -run '^Test((ConcurrencyCacheSuite|AccountRepoSuite)$|GatewayAtomicUpdate)/^(TestGateway(TargetsShareAccountConcurrency|ManagementAtomicMembershipAndOAuthExclusion)|admin|account-service|bulk)$' \
             -count=1 -v -timeout=10m 2>&1 | tee ../evidence/concurrency-redis.log
           if grep -Eq -- 'no tests to run|--- SKIP:' ../evidence/concurrency-redis.log; then
             exit 1
           fi
           grep -F -- '--- PASS: TestConcurrencyCacheSuite/TestGatewayTargetsShareAccountConcurrency' ../evidence/concurrency-redis.log
           grep -F -- '--- PASS: TestAccountRepoSuite/TestGatewayManagementAtomicMembershipAndOAuthExclusion' ../evidence/concurrency-redis.log
+          grep -F -- '--- PASS: TestGatewayAtomicUpdateOAuthInterleaving' ../evidence/concurrency-redis.log
+          grep -F -- '--- PASS: TestGatewayAtomicUpdateRollbackAfterStagedFields' ../evidence/concurrency-redis.log
+          grep -F -- '--- PASS: TestGatewayAtomicUpdateSuccessfulCommit' ../evidence/concurrency-redis.log
+          grep -F -- '--- PASS: TestGatewayAtomicUpdateCallerTransactionRollback' ../evidence/concurrency-redis.log
       - uses: actions/upload-artifact@v7
         if: always()
         with:

@@ -149,6 +149,13 @@ type AccountDuplicateRepository interface {
 	CreateWithAccountGroups(ctx context.Context, account *Account, groups []AccountGroup) error
 }
 
+// GatewayAccountTransactionRepository keeps the new gateway's settings, exact
+// memberships and outbox writes in one transaction. Legacy accounts retain
+// their existing write paths. The callback receives the repository's tx context.
+type GatewayAccountTransactionRepository interface {
+	WithinGatewayAccountTransaction(ctx context.Context, accountID int64, groupIDs []int64, run func(context.Context) error) error
+}
+
 // AccountBillingSettingsRepository applies an admin edit without overwriting a
 // rate_multiplier that a successful upstream probe synchronized after the edit
 // form was loaded. A nil rateMultiplier means the request did not edit it.
@@ -381,6 +388,18 @@ func (s *AccountService) Update(ctx context.Context, id int64, req UpdateAccount
 		}
 		if err := validateGatewayAccountGroups(ctx, account, s.groupRepo, ids); err != nil {
 			return nil, err
+		}
+		if !gatewayAccountTransactionActive(ctx) {
+			var updated *Account
+			err := withinGatewayAccountTransaction(ctx, s.accountRepo, id, ids, func(txctx context.Context) error {
+				var err error
+				updated, err = s.Update(txctx, id, req)
+				return err
+			})
+			if err != nil {
+				return nil, err
+			}
+			return updated, err
 		}
 	}
 	if req.Name != nil {

@@ -17,6 +17,24 @@ const GatewayUpstreamKindCredentialKey = "upstream_kind"
 var ErrGatewayAccountIdentity = infraerrors.BadRequest("INVALID_GATEWAY_ACCOUNT", "gateway accounts require platform/type gateway, upstream_kind new_api or sub2api, a site URL and an API key")
 var ErrGatewayAccountGroup = infraerrors.BadRequest("INVALID_GATEWAY_GROUP", "gateway accounts require an existing concrete or composite group that does not require OAuth")
 var ErrGatewayProtocolsPending = infraerrors.BadRequest("GATEWAY_PROTOCOLS_PENDING", "gateway scheduling and forwarding are not available yet")
+var ErrGatewayAtomicUpdateRequired = infraerrors.BadRequest("GATEWAY_ATOMIC_UPDATE_REQUIRED", "gateway updates require transactional account and group writes")
+
+type gatewayAccountTransactionKey struct{}
+
+func gatewayAccountTransactionActive(ctx context.Context) bool {
+	active, _ := ctx.Value(gatewayAccountTransactionKey{}).(bool)
+	return active
+}
+
+func withinGatewayAccountTransaction(ctx context.Context, repo AccountRepository, id int64, groups []int64, run func(context.Context) error) error {
+	writer, ok := repo.(GatewayAccountTransactionRepository)
+	if !ok {
+		return ErrGatewayAtomicUpdateRequired
+	}
+	return writer.WithinGatewayAccountTransaction(ctx, id, groups, func(txctx context.Context) error {
+		return run(context.WithValue(txctx, gatewayAccountTransactionKey{}, true))
+	})
+}
 
 // ValidateGatewayAccountIdentity reserves an account-only identity. Legacy
 // records are neither reclassified nor subjected to new credential validation.

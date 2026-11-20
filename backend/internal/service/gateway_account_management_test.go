@@ -16,6 +16,20 @@ func gatewayManagementFixture() *Account {
 		Credentials: map[string]any{"upstream_kind": "new_api", "base_url": "https://gateway.example/tenant", "api_key": "synthetic-key"}}
 }
 
+type gatewayManagementAtomicRepo struct {
+	*accountRepoStubForBulkUpdate
+	transactions   int
+	transactionErr error
+}
+
+func (r *gatewayManagementAtomicRepo) WithinGatewayAccountTransaction(ctx context.Context, _ int64, _ []int64, run func(context.Context) error) error {
+	r.transactions++
+	if r.transactionErr != nil {
+		return r.transactionErr
+	}
+	return run(ctx)
+}
+
 func TestGatewayManagementIdentityIsAccountOnly(t *testing.T) {
 	a := gatewayManagementFixture()
 	require.NoError(t, ValidateGatewayAccountIdentity(a.Platform, a.Type, a.Credentials))
@@ -94,11 +108,12 @@ func TestGatewayManagementCreateValidatesBeforeWritesAndBindsExplicitGroups(t *t
 
 func TestGatewayManagementUpdatePreservesKeyAndRejectsIdentityConversion(t *testing.T) {
 	a := gatewayManagementFixture()
-	repo := &accountRepoStubForBulkUpdate{getByIDAccounts: map[int64]*Account{959: a}}
+	repo := &gatewayManagementAtomicRepo{accountRepoStubForBulkUpdate: &accountRepoStubForBulkUpdate{getByIDAccounts: map[int64]*Account{959: a}}}
 	svc := &adminServiceImpl{accountRepo: repo}
 	updated, err := svc.UpdateAccount(context.Background(), 959, &UpdateAccountInput{
 		Name: "Edited gateway", Credentials: map[string]any{"base_url": "https://edited.example"}})
 	require.NoError(t, err)
+	require.Equal(t, 1, repo.transactions)
 	require.Equal(t, "synthetic-key", updated.Credentials["api_key"])
 	require.Equal(t, "new_api", updated.Credentials["upstream_kind"])
 	for _, input := range []*UpdateAccountInput{{Platform: PlatformOpenAI}, {Type: AccountTypeAPIKey}, {Credentials: map[string]any{"upstream_kind": "unknown"}}} {
@@ -111,6 +126,49 @@ func TestGatewayManagementUpdatePreservesKeyAndRejectsIdentityConversion(t *test
 	_, err = legacy.UpdateAccount(context.Background(), 7, &UpdateAccountInput{Platform: PlatformGateway, Type: AccountTypeGateway, Credentials: a.Credentials})
 	require.Error(t, err)
 	require.Empty(t, legacyRepo.updatedAccounts)
+}
+
+func TestGatewayManagementUpdateRequiresAtomicCapability(t *testing.T) {
+	for _, route := range []string{"admin", "account-service", "bulk"} {
+		t.Run(route, func(t *testing.T) {
+			a := gatewayManagementFixture()
+			repo := &accountRepoStubForBulkUpdate{getByIDAccounts: map[int64]*Account{a.ID: a}, getByIDsAccounts: []*Account{a}}
+			groups := &groupRepoStubForAdmin{getByIDByID: map[int64]*Group{1: {ID: 1, Platform: PlatformOpenAI}}}
+			ids := []int64{1}
+			admin := &adminServiceImpl{accountRepo: repo, groupRepo: groups}
+			switch route {
+			case "admin":
+				_, err := admin.UpdateAccount(context.Background(), a.ID, &UpdateAccountInput{GroupIDs: &ids, Name: "must not save"})
+				require.ErrorIs(t, err, ErrGatewayAtomicUpdateRequired)
+			case "account-service":
+				_, err := NewAccountService(repo, groups).Update(context.Background(), a.ID, UpdateAccountRequest{GroupIDs: &ids})
+				require.ErrorIs(t, err, ErrGatewayAtomicUpdateRequired)
+			case "bulk":
+				result, err := admin.BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{AccountIDs: []int64{a.ID}, GroupIDs: &ids, Name: "must not save", SkipMixedChannelCheck: true})
+				require.NoError(t, err)
+				require.Equal(t, []int64{a.ID}, result.FailedIDs)
+			}
+			require.Empty(t, repo.updatedAccounts)
+			require.Zero(t, repo.bulkUpdateCalls)
+			require.Empty(t, repo.bindGroupsCalls)
+		})
+	}
+}
+
+func TestGatewayManagementMixedBulkRetainsLegacyWritePath(t *testing.T) {
+	gateway := gatewayManagementFixture()
+	legacy := &Account{ID: 7, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	repo := &gatewayManagementAtomicRepo{accountRepoStubForBulkUpdate: &accountRepoStubForBulkUpdate{getByIDsAccounts: []*Account{legacy, gateway}}, transactionErr: ErrGatewayAccountGroup}
+	groups := &groupRepoStubForAdmin{getByIDByID: map[int64]*Group{1: {ID: 1, Platform: PlatformOpenAI}}}
+	ids := []int64{1}
+	result, err := (&adminServiceImpl{accountRepo: repo, groupRepo: groups}).BulkUpdateAccounts(context.Background(), &BulkUpdateAccountsInput{
+		AccountIDs: []int64{legacy.ID, gateway.ID}, GroupIDs: &ids, Name: "fixture edit", SkipMixedChannelCheck: true})
+	require.NoError(t, err)
+	require.Equal(t, []int64{legacy.ID}, repo.bulkUpdateIDs, "gateway fields must never enter the legacy batch before membership validation")
+	require.Equal(t, []int64{legacy.ID}, repo.bindGroupsCalls)
+	require.Equal(t, []int64{legacy.ID}, result.SuccessIDs)
+	require.Equal(t, []int64{gateway.ID}, result.FailedIDs)
+	require.Equal(t, 1, repo.transactions)
 }
 
 func TestGatewayManagementAccountServiceRejectsOAuthGroupsBeforeCreate(t *testing.T) {
