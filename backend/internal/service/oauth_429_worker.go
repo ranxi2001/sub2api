@@ -114,7 +114,7 @@ func ValidateOAuth429Upstream(req *http.Request, accountID int64) error {
 	if err != nil {
 		return err
 	}
-	defer body.Close()
+	defer func() { _ = body.Close() }()
 	data, err := io.ReadAll(io.LimitReader(body, 1<<20))
 	if err != nil {
 		return err
@@ -173,7 +173,7 @@ func ObserveOAuth429HTTP(req *http.Request, accountID int64, status int) {
 	if observer == nil || accountID <= 0 || req == nil || req.GetBody == nil || status < 200 || status > 599 || req.Context().Value(qualityProbeContextKey{}) != nil {
 		return
 	}
-	cfg := observer.autoConfig.Load().(OAuthAutoConfig)
+	cfg, _ := observer.autoConfig.Load().(OAuthAutoConfig)
 	policy := cfg.DegradationAction
 	if !policy.Enabled || !policy.UsesUpstream429() || !policy.Independent429.Enabled || cfg.Revision == "" {
 		return

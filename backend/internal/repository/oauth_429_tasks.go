@@ -399,7 +399,13 @@ func (r *accountRepository) FinishOAuth429Run(ctx context.Context, task *service
 		if result.ResultID == "" || result.FinishedAt.Before(current.TriggeredAt) || result.FinishedAt.After(current.ExpiresAt) {
 			return nil
 		}
-		if result.Verdict != "correct" && result.Verdict != "incorrect" && result.Verdict != "inconclusive" && !(result.Verdict == "rate_limited" && result.HTTPStatus == 429) {
+		switch result.Verdict {
+		case "correct", "incorrect", "inconclusive":
+		case "rate_limited":
+			if result.HTTPStatus != 429 {
+				return nil
+			}
+		default:
 			return nil
 		}
 		for i, run := range current.Runs {

@@ -386,6 +386,10 @@ func TestOAuth429AliasAndLiveCancellation(t *testing.T) {
 		repo, a, c := oauth429Fixture(t, nil)
 		started, aborted := make(chan struct{}), make(chan struct{})
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// HTTP/1 detects the peer closing after the request body reaches EOF.
+			if _, err := io.Copy(io.Discard, r.Body); err != nil {
+				return
+			}
 			close(started)
 			select {
 			case <-r.Context().Done():
