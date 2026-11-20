@@ -36,7 +36,8 @@ jobs:
         run: |
           set -euo pipefail
           baseline=9227fee3866d7ad7628817771cdd208b406a166d
-          sources=(backend/internal/repository/account_repo.go backend/internal/service/admin_account.go)
+          # The OAuth rotation fixture requires the matching repository API.
+          sources=(backend/internal/repository/account_repo.go backend/internal/service/admin_account.go backend/internal/repository/account_repo_temp_unsched_test.go)
           for source in "${sources[@]}"; do cp "$source" "$RUNNER_TEMP/$(basename "$source")"; done
           trap 'for source in "${sources[@]}"; do cp "$RUNNER_TEMP/$(basename "$source")" "$source"; done' EXIT
           git fetch --no-tags --depth=1 origin "$baseline"
