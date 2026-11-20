@@ -34,7 +34,7 @@ type OAuthDegradationConfig struct {
 }
 
 func DefaultOAuthDegradationConfig() OAuthDegradationConfig {
-	return OAuthDegradationConfig{TargetConcurrency: 10, Models: []string{"gpt-5.6-luna", "gpt-5.6-terra", "gpt-6-luna", "gpt-6.1-terra"}}
+	return OAuthDegradationConfig{Independent429: OAuth429TestConfig{MinSamples: 20}, TargetConcurrency: 10, Models: []string{"gpt-5.6-luna", "gpt-5.6-terra", "gpt-6-luna", "gpt-6.1-terra"}}
 }
 
 // Missing action flags retain the original policy for existing settings.

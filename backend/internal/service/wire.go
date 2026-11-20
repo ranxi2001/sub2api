@@ -812,10 +812,6 @@ func ProvideScheduledTestRunnerService(
 		svc.oauth429Repo, _ = accountTestSvc.accountRepo.(OAuth429Repository)
 	}
 	svc.oauth429Slots = concurrency
-	svc.oauth429Wake = make(chan struct{}, 1)
-	if svc.oauth429Repo != nil {
-		oauth429HTTPObserver.Store(&oauth429Observer{repo: svc.oauth429Repo, wake: svc.oauth429Wake})
-	}
 	svc.judgeQuality = judge.Judge
 	svc.groupTests = groupTests
 	svc.candyMonitor = monitor.candy

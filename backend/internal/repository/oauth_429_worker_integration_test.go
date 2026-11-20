@@ -71,7 +71,9 @@ func oauth429Fixture(t *testing.T, history []string) (*accountRepository, *servi
 func oauth429Observe(t *testing.T, repo *accountRepository, id int64, model string, index int) bool {
 	t.Helper()
 	d := sha256.Sum256([]byte(fmt.Sprintf("business-%d-%s-%d", id, model, index)))
-	queued, err := repo.ObserveOAuth429(t.Context(), id, model, hex.EncodeToString(d[:]), 429)
+	var revision string
+	require.NoError(t, integrationDB.QueryRowContext(t.Context(), `SELECT value::jsonb->>'revision' FROM settings WHERE key=$1`, service.SettingKeyOAuthAutoConfig).Scan(&revision))
+	queued, err := repo.ObserveOAuth429(t.Context(), service.OAuth429Observation{AccountID: id, Model: model, Revision: revision, OAuth429Sample: service.OAuth429Sample{Request: hex.EncodeToString(d[:]), Status: 429, At: time.Now().UTC()}})
 	require.NoError(t, err)
 	return queued
 }
@@ -109,6 +111,13 @@ func oauth429Runner(t *testing.T, repo *accountRepository, answers []string) (*s
 			_, _ = io.WriteString(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"23\"}\n\n")
 			return
 		}
+		if answer == "incomplete_status" {
+			_, _ = io.WriteString(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"23\"}\n\ndata: {\"type\":\"response.done\",\"response\":{\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}}\n\n")
+			return
+		}
+		if answer == "wrapped_rate_limit" {
+			answer = "429"
+		}
 		text, _ := json.Marshal(answer)
 		_, _ = fmt.Fprintf(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":%s}\n\ndata: {\"type\":\"response.completed\"}\n\n", text)
 	}))
@@ -135,6 +144,9 @@ func TestOAuth429WorkerIndependentPair(t *testing.T) {
 		{"wrong_unknown_429", []string{"23", "429"}, nil, false},
 		{"two_rejections_terminate", []string{"429", "429"}, nil, false},
 		{"auth_is_inconclusive", []string{"401", "401"}, nil, false},
+		{"partial_integer_with_terminal_error", []string{"23", "incomplete_status"}, nil, false},
+		{"rate_limit_delivered_as_text", []string{"wrapped_rate_limit", "wrapped_rate_limit"}, nil, false},
+		{"formatted_correct", []string{"23", "答案是21颗糖果。"}, nil, false},
 		{"wrong_empty", []string{"23", ""}, nil, false},
 		{"wrong_truncated", []string{"23", "truncated"}, nil, false},
 	} {
@@ -166,6 +178,17 @@ func TestOAuth429WorkerIndependentPair(t *testing.T) {
 			require.True(t, after.IsModelSupported("gpt-6-luna"))
 			require.Equal(t, 50, after.Concurrency)
 			require.True(t, after.Schedulable)
+			require.Equal(t, service.StatusActive, after.Status)
+			if tc.blocked {
+				candidate := buildSchedulerMetadataAccount(*after)
+				require.False(t, candidate.IsModelSupported("gpt-6-astra"))
+				require.True(t, candidate.IsModelSupported("gpt-6-luna"))
+				// Save a form loaded before the worker committed its block.
+				require.NoError(t, repo.Update(t.Context(), before))
+				reloaded, err := repo.GetByID(t.Context(), a.ID)
+				require.NoError(t, err)
+				require.True(t, reloaded.IsOAuth429ModelBlocked("gpt-6-astra"))
+			}
 			require.Equal(t, before.Credentials, after.Credentials)
 			var data []byte
 			var state string
@@ -174,6 +197,16 @@ func TestOAuth429WorkerIndependentPair(t *testing.T) {
 			require.NoError(t, json.Unmarshal(data, &saved))
 			require.Equal(t, "complete", state)
 			require.Len(t, saved.Runs, 2)
+			switch tc.name {
+			case "auth_is_inconclusive", "two_rejections_terminate", "rate_limit_delivered_as_text":
+				for _, run := range saved.Runs {
+					require.Equal(t, "inconclusive", run.Verdict)
+				}
+			case "partial_integer_with_terminal_error", "wrong_truncated", "wrong_empty", "wrong_unknown_429":
+				require.Equal(t, "inconclusive", saved.Runs[1].Verdict)
+			case "formatted_correct", "wrong_pass":
+				require.Equal(t, "correct", saved.Runs[1].Verdict)
+			}
 			require.NotEqual(t, saved.Runs[0].ID, saved.Runs[1].ID)
 			require.NotEqual(t, saved.Runs[0].ResultID, saved.Runs[1].ResultID)
 			require.NoError(t, repo.CompleteOAuth429(t.Context(), &saved))
@@ -380,4 +413,33 @@ func TestOAuth429AliasAndLiveCancellation(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, got.IsOAuth429ModelBlocked("gpt-6-astra"))
 	})
+}
+
+func TestOAuth429WorkerRollingWindowAndCapacity(t *testing.T) {
+	repo, a, cfg := oauth429Fixture(t, nil)
+	ctx := t.Context()
+	// The cap includes live observations. Reclaim an expired tracker while a
+	// recent tracker and active jobs remain protected.
+	_, err := integrationDB.ExecContext(ctx, `INSERT INTO oauth_429_tasks(account_id,model,state,data,updated_at)
+ SELECT $1,'capacity-fixture-'||i,'observing','{}',clock_timestamp()-interval '2 hours'
+ FROM generate_series(1,$2::integer) i`, a.ID, oauth429QueueLimit)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = integrationDB.Exec(`DELETE FROM oauth_429_tasks WHERE account_id=$1 AND model LIKE 'capacity-fixture-%'`, a.ID)
+	})
+	for i := 0; i < 360; i++ {
+		status := 200
+		if i >= 200 {
+			status = 429
+		}
+		digest := sha256.Sum256([]byte(fmt.Sprintf("rolling-%d", i)))
+		queued, err := repo.ObserveOAuth429(ctx, service.OAuth429Observation{AccountID: a.ID, Model: "gpt-6-astra", Revision: cfg.Revision, OAuth429Sample: service.OAuth429Sample{Request: hex.EncodeToString(digest[:]), Status: status, At: time.Now().UTC()}})
+		require.NoError(t, err)
+		require.Equal(t, i == 359, queued, "observation %d", i)
+	}
+	var samples, fixtures int
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT jsonb_array_length(data->'samples') FROM oauth_429_tasks WHERE account_id=$1 AND model='gpt-6-astra'`, a.ID).Scan(&samples))
+	require.Equal(t, 200, samples)
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT count(*) FROM oauth_429_tasks WHERE account_id=$1 AND model LIKE 'capacity-fixture-%'`, a.ID).Scan(&fixtures))
+	require.Equal(t, oauth429QueueLimit-1, fixtures)
 }

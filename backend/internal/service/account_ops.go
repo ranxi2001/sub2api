@@ -109,6 +109,7 @@ type AccountOpsService struct {
 	robotLast          map[string]time.Time
 	degradationCursor  int64
 	autoSeen           map[int64]bool
+	oauth429Samples    [4]chan OAuth429Observation
 	autoConfigMu       sync.Mutex
 	autoGroups         GroupRepository
 	autoAccounts       AccountConcurrencyRepository
@@ -215,6 +216,9 @@ func (s *AccountOpsService) start(runSharedJobs bool) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
+	if repo, ok := s.accounts.(OAuth429Repository); ok {
+		s.startOAuth429Observations(ctx, repo)
+	}
 	s.fallbackSharedJobs.Store(runSharedJobs)
 	s.wg.Add(2)
 	go s.runAutoConfig(ctx)
@@ -255,6 +259,7 @@ func (s *AccountOpsService) start(runSharedJobs bool) {
 func (s *AccountOpsService) Stop() {
 	s.lifecycle.Lock()
 	cancel := s.cancel
+	oauth429HTTPObserver.CompareAndSwap(s, nil)
 	s.lifecycle.Unlock()
 	if cancel != nil {
 		cancel()
