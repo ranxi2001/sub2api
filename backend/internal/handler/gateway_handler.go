@@ -929,11 +929,23 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			var probeResponse *probePenaltyResponse
 			if account.ProbePenaltyMinimum() > 0 {
 				if !h.gatewayService.ProbePenaltySettlementEnabled() {
+					if queueRelease != nil {
+						queueRelease()
+					}
+					if accountReleaseFunc != nil {
+						accountReleaseFunc()
+					}
 					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Probe penalty requires durable settlement", streamStarted)
 					return
 				}
 				probeResponse, err = newProbePenaltyResponse(c.Writer, attemptParsedReq.Stream)
 				if err != nil {
+					if queueRelease != nil {
+						queueRelease()
+					}
+					if accountReleaseFunc != nil {
+						accountReleaseFunc()
+					}
 					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Probe penalty response unavailable", streamStarted)
 					return
 				}

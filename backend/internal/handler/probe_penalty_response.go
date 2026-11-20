@@ -142,9 +142,9 @@ func (w *probePenaltyResponse) validate() error {
 			usage = gjson.GetBytes(payload, "usage.output_tokens").Exists()
 		case "message_stop":
 			stop = true
-		case "response.completed":
+		case "response.completed", "response.incomplete":
 			usage, stop = gjson.GetBytes(payload, "response.usage").IsObject(), true
-		case "error", "response.failed", "response.incomplete":
+		case "error", "response.failed":
 			return errors.New("probe penalty response contains an error")
 		}
 		if gjson.GetBytes(payload, "usage.completion_tokens").Exists() {
@@ -165,7 +165,7 @@ func rewriteProbeUsage(body []byte, result *service.ForwardResult) ([]byte, erro
 		return body, nil
 	}
 	prefix := ""
-	if gjson.GetBytes(body, "type").String() == "response.completed" {
+	if kind := gjson.GetBytes(body, "type").String(); kind == "response.completed" || kind == "response.incomplete" {
 		prefix = "response."
 	}
 	original := gjson.GetBytes(body, prefix+"usage")

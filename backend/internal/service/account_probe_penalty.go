@@ -67,7 +67,7 @@ func calculateProbePenalty(cost *CostBreakdown, minimum, outputPrice float64, ou
 		return nil, fmt.Errorf("probe penalty has no finite positive output token price")
 	}
 	adjustment := QuantizeUsageBillingAmount(minimum - QuantizeUsageBillingAmount(cost.ActualCost))
-	extra := math.Ceil(adjustment / outputPrice)
+	extra := math.Ceil((minimum - cost.ActualCost) / outputPrice)
 	if extra > 1e9 || float64(outputTokens)+extra > 1e9 {
 		return nil, fmt.Errorf("probe penalty exceeds billing token limit")
 	}

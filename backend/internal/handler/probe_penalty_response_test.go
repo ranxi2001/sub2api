@@ -143,3 +143,16 @@ func TestProbePenaltyDownstreamSub2APIChargesEquivalentUsage(t *testing.T) {
 		})
 	}
 }
+
+func TestProbePenaltyProtocolUsageKeepsCacheDetails(t *testing.T) {
+	for _, body := range []string{
+		`{"object":"chat.completion","usage":{"prompt_tokens":120,"completion_tokens":13,"total_tokens":133,"prompt_tokens_details":{"cached_tokens":100}}}`,
+		`{"type":"response.incomplete","response":{"object":"response","usage":{"input_tokens":120,"output_tokens":13,"total_tokens":133,"input_tokens_details":{"cached_tokens":100}}}}`,
+	} {
+		out, err := rewriteProbeUsage([]byte(body), probeTestResult())
+		require.NoError(t, err)
+		require.Contains(t, string(out), `"cached_tokens":100`)
+		require.Contains(t, string(out), `"total_tokens":169`)
+		require.Contains(t, string(out), `"upstream_usage"`)
+	}
+}
