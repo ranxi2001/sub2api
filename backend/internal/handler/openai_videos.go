@@ -16,7 +16,11 @@ func (h *OpenAIGatewayHandler) TryOpenAIVideoGeneration(c *gin.Context) bool {
 	if !ok || key == nil || h == nil || h.gatewayService == nil || !service.GroupAllowsImageGeneration(key.Group) {
 		return false
 	}
-	enabled, err := h.gatewayService.HasOpenAIVideoAccount(c.Request.Context(), key.GroupID)
+	platform := service.PlatformOpenAI
+	if key.Group != nil && key.Group.Platform == service.PlatformQwen {
+		platform = service.PlatformQwen
+	}
+	enabled, err := h.gatewayService.HasOpenAIVideoAccount(c.Request.Context(), key.GroupID, platform)
 	if err != nil {
 		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Could not check video availability")
 		return true
@@ -36,7 +40,11 @@ func (h *OpenAIGatewayHandler) OpenAIVideoLookup(c *gin.Context) {
 	}
 	// Composite status/content calls have no model for the creation router to
 	// resolve. The task namespace identifies the quota platform.
-	c.Request = c.Request.WithContext(service.WithResolvedTargetPlatform(c.Request.Context(), service.PlatformOpenAI))
+	platform := service.PlatformOpenAI
+	if key, ok := middleware.GetAPIKeyFromContext(c); ok && key != nil && key.Group != nil && key.Group.Platform == service.PlatformQwen {
+		platform = service.PlatformQwen
+	}
+	c.Request = c.Request.WithContext(service.WithResolvedTargetPlatform(c.Request.Context(), platform))
 	setActualUpstreamEndpoint(c, "/v1/videos")
 	h.handleGrokMedia(c, endpoint, c.Param("request_id"))
 }
