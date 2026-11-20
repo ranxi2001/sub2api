@@ -75,6 +75,11 @@ type OAuth429Repository interface {
 	CompleteOAuth429(context.Context, *OAuth429Task) error
 }
 
+func isOAuth429Execution(ctx context.Context) bool {
+	_, ok := ctx.Value(oauth429ExecutionKey{}).(oauth429Execution)
+	return ok
+}
+
 type oauth429ExecutionKey struct{}
 type oauth429Execution struct {
 	AccountID int64

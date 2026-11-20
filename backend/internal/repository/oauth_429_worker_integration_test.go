@@ -134,6 +134,7 @@ func TestOAuth429WorkerIndependentPair(t *testing.T) {
 		{"wrong_pass", []string{"23", "21"}, nil, false},
 		{"wrong_unknown_429", []string{"23", "429"}, nil, false},
 		{"two_rejections_terminate", []string{"429", "429"}, nil, false},
+		{"auth_is_inconclusive", []string{"401", "401"}, nil, false},
 		{"wrong_empty", []string{"23", ""}, nil, false},
 		{"wrong_truncated", []string{"23", "truncated"}, nil, false},
 	} {

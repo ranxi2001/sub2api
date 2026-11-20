@@ -447,8 +447,12 @@ func (r *accountRepository) CompleteOAuth429(ctx context.Context, task *service.
 }
 
 func (r *accountRepository) OAuth429Current(ctx context.Context, task *service.OAuth429Task) (bool, error) {
+	db, err := r.oauth429DB()
+	if err != nil {
+		return false, err
+	}
 	var current bool
-	err := r.sql.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM oauth_429_tasks t JOIN accounts a ON a.id=t.account_id
+	err = db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM oauth_429_tasks t JOIN accounts a ON a.id=t.account_id
  JOIN settings s ON s.key=$1 WHERE t.account_id=$2 AND t.model=$3 AND t.state='running'
  AND t.data->>'trigger_id'=$4 AND t.data->>'lease'=$5
  AND (t.data->>'lease_until')::timestamptz>clock_timestamp()
