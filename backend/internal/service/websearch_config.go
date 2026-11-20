@@ -40,7 +40,7 @@ var validProviderTypes = map[string]bool{
 	websearch.ProviderTypeBrave:    true,
 	websearch.ProviderTypeTavily:   true,
 	websearch.ProviderTypeDeepSeek: true,
-	websearch.ProviderTypeExa: true,
+	websearch.ProviderTypeExa:      true,
 }
 
 func validateWebSearchConfig(cfg *WebSearchEmulationConfig) error {

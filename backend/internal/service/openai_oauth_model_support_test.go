@@ -27,10 +27,10 @@ func TestIsModelSupported_OpenAIOAuthEmptyMapping_ServableModels(t *testing.T) {
 		"gpt-5.1-codex-mini",
 		"gpt-5",
 		"codex-mini-latest",
-		"gpt5.3codexspark",  // 别名拼写
-		"gpt-image-1",     // 图像生成模型
-		"gpt-4o",          // 保守 fail-open：非黑名单模型保持允许
-		"my-custom-alias", // 自定义别名可能由渠道级映射在转发前改写，保持允许
+		"gpt5.3codexspark", // 别名拼写
+		"gpt-image-1",      // 图像生成模型
+		"gpt-4o",           // 保守 fail-open：非黑名单模型保持允许
+		"my-custom-alias",  // 自定义别名可能由渠道级映射在转发前改写，保持允许
 	}
 	for _, model := range servable {
 		require.True(t, account.IsModelSupported(model), "expected %q to be servable by empty-mapping OpenAI OAuth account", model)

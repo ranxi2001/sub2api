@@ -17,7 +17,10 @@ jobs:
   regression:
     runs-on: ubuntu-latest
     timeout-minutes: 35
-    env:
+    services:
+      postgres:
+        image: postgres:18.1-alpine3.23
+        env:
       CI: 'true'
       EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
@@ -86,6 +89,9 @@ jobs:
           test -z "$(git -C candidate status --porcelain)"
           (cd candidate/backend && go test -race -json -tags=unit ./internal/repository ./internal/service -run '^(TestIssue765|TestExtraImageModels)' -count=1 -timeout=10m) > evidence/green-unit.jsonl 2> evidence/green-unit.stderr
       - name: GREEN - real Redis publication, memo refresh and revocation
+        env:
+          SUB2API_TEST_POSTGRES_DSN: 'postgres://postgres:postgres@127.0.0.1:5432/sub2api_test?sslmode=disable&TimeZone=UTC'
+          SUB2API_TEST_REDIS_URL: 'redis://127.0.0.1:6379/0'
         shell: bash
         run: |
           set -euo pipefail
