@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -561,12 +562,16 @@ func prepareOpenAI409KnownReadableReplay(raw []byte) ([]byte, error) {
 // Protect the caller's available tools/schema and task instructions as well as
 // input. Model mappings and transport flags are independently account-specific.
 func openAI409ControlsDigest(raw []byte) [32]byte {
-	fields := []string{"tools", "tool_choice", "parallel_tool_calls", "instructions"}
+	fields := []string{"tools", "tool_choice", "parallel_tool_calls", "instructions", "functions", "function_call"}
 	selected := make(map[string]any, len(fields))
+	// Bind legacy inputs to the same immutable source before converting them.
+	// Keep the digest of requests without aliases byte-for-byte compatible.
 	for _, field := range fields {
 		value := gjson.GetBytes(raw, field)
 		if !value.Exists() {
-			selected[field] = nil
+			if field != "functions" && field != "function_call" {
+				selected[field] = nil
+			}
 			continue
 		}
 		decoder := json.NewDecoder(strings.NewReader(value.Raw))
@@ -685,6 +690,31 @@ func prepareOpenAI409OAuthReplay(ctx context.Context, c *gin.Context, body map[s
 		body["instructions"] = defaultCodexSynthInstructions(firstNonEmptyString(body["model"]))
 	}
 	extractSystemMessagesFromInput(body, false)
+	httpReplay := c != nil && c.Request != nil && c.Request.Method == http.MethodPost && GetOpenAIClientTransport(c) != OpenAIClientTransportWS
+	legacyCall, hasLegacyCall := body["function_call"]
+	if httpReplay {
+		_, functions := body["functions"]
+		_, tools := body["tools"]
+		_, choice := body["tool_choice"]
+		if (functions && tools) || (hasLegacyCall && choice) {
+			return openAIRecoveryWireRefusal(ctx, "oauth_projection_source")
+		}
+		if hasLegacyCall {
+			switch value := legacyCall.(type) {
+			case string:
+				if value != "none" && value != "auto" {
+					return openAIRecoveryWireRefusal(ctx, "oauth_projection_source")
+				}
+			case map[string]any:
+				if len(value) != 1 || strings.TrimSpace(firstNonEmptyString(value["name"])) == "" {
+					return openAIRecoveryWireRefusal(ctx, "oauth_projection_source")
+				}
+			default:
+				return openAIRecoveryWireRefusal(ctx, "oauth_projection_source")
+			}
+		}
+		convertCodexLegacyFunctionControls(body)
+	}
 	normalizeCodexTools(body)
 	reverse, _, err := aliasOpenAIOAuthReservedToolNames(body)
 	if err != nil {
@@ -692,6 +722,17 @@ func prepareOpenAI409OAuthReplay(ctx context.Context, c *gin.Context, body map[s
 	}
 	setCodexToolNameReverse(c, reverse)
 	normalizeCodexToolChoice(body)
+	if httpReplay {
+		// A forced legacy function must not fall back to auto during flattening.
+		if _, forced := legacyCall.(map[string]any); forced {
+			if choice, ok := body["tool_choice"].(map[string]any); !ok || choice["type"] != "function" {
+				return openAIRecoveryWireRefusal(ctx, "oauth_projection_source")
+			}
+		}
+		if !isOpenAIResponsesCompactPath(c) {
+			declareOpenAIWebSearchHistoryTool(body, isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader)), true)
+		}
+	}
 	prepared, err := json.Marshal(body)
 	if err != nil {
 		return err

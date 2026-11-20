@@ -68,7 +68,7 @@ jobs:
       - name: Trusted source and late mutation guards
         if: matrix.phase == 'GREEN'
         working-directory: backend
-        run: go test -race -tags=unit,httpprojection ./internal/service -run '^TestOpenAI409NativeControlsIntegrity$' -count=1 -v -timeout=3m
+        run: go test -race -tags=unit,httpprojection ./internal/service ./internal/handler -run '^TestOpenAI409(NativeControlsIntegrity|NativeControlsOAuthToolHistory|OAuthReplayDiagnosesWebSearchHistoryProjection|OAuthReplayToolPolicies)$' -count=1 -v -timeout=5m
       - uses: actions/upload-artifact@v7
         if: always()
         with:
