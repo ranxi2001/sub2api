@@ -111,6 +111,31 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
+      - name: Negative control rejects disconnected production worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          source=backend/internal/service/oauth_429_worker.go
+          cp "$source" "$RUNNER_TEMP/oauth429-worker.go"
+          trap 'cp "$RUNNER_TEMP/oauth429-worker.go" "$source"' EXIT
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('backend/internal/service/oauth_429_worker.go')
+          s=p.read_text()
+          needle='func (s *ScheduledTestRunnerService) startOAuth429() {'
+          assert s.count(needle)==1
+          p.write_text(s.replace(needle,needle+'\n if true { return }',1))
+          PY
+          set +e
+          (cd backend && go test -tags=integration ./internal/repository -run '^TestOAuth429HTTPTransportDeduplicatesAndWakesWorker$' -count=1 -v -timeout=10m) > evidence/disconnected-worker-red.log 2>&1
+          result=$?
+          set -e
+          cat evidence/disconnected-worker-red.log
+          test "$result" -ne 0
+          bash .github/scripts/assert-test-log-clean.sh red evidence/disconnected-worker-red.log
+          grep -F -- '--- FAIL: TestOAuth429HTTPTransportDeduplicatesAndWakesWorker' evidence/disconnected-worker-red.log
+          grep -F 'Condition never satisfied' evidence/disconnected-worker-red.log
       - name: Real PostgreSQL and loopback provider worker lifecycle
         shell: bash
         run: |
@@ -127,6 +152,8 @@ jobs:
           set -euo pipefail
           (cd backend && go test -tags=unit ./internal/handler/admin -run '^TestOAuthAutoConfig.*Degradation|^Test.*Degradation' -count=1 -v) 2>&1 | tee evidence/handler.log
           bash .github/scripts/assert-test-log-clean.sh green evidence/handler.log
+          (cd backend && go test -race -tags=integration ./internal/handler/admin -run '^TestOAuth429HandlerPostgresWorkerLoopback$' -count=1 -v -timeout=10m) 2>&1 | tee evidence/handler-worker.log
+          bash .github/scripts/assert-test-log-clean.sh green evidence/handler-worker.log
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -159,6 +186,15 @@ jobs:
           pnpm --dir frontend exec vitest run src/views/admin/__tests__/OAuthDegradationActions.spec.ts src/stores/__tests__/newFeatureNotices.spec.ts src/i18n/__tests__/localeKeyCompleteness.spec.ts --maxWorkers=1 --minWorkers=1 2>&1 | tee evidence/ui-tests.log
           pnpm --dir frontend typecheck 2>&1 | tee evidence/ui-types.log
           pnpm --dir frontend exec eslint src/components/admin/operations/OAuthDegradationCard.vue src/utils/oauthDegradation.ts 2>&1 | tee evidence/ui-lint.log
+      - name: Real desktop/mobile baseline and current rendering
+        env:
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/oauth-browser/node_modules/playwright
+          OAUTH_DEGRADATION_SCREENSHOT_DIR: ${{ github.workspace }}/evidence/screenshots
+        run: |
+          git fetch --no-tags --depth=1 origin 8678e88f4dfb6bfb718993db8a2a15b4a6af8282
+          npm install --prefix "$RUNNER_TEMP/oauth-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/oauth-browser/node_modules/.bin/playwright" install --with-deps chromium
+          node .github/scripts/oauth-429-independent-browser.mjs
       - uses: actions/upload-artifact@v7
         if: always()
         with:

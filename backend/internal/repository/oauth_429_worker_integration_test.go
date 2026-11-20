@@ -145,6 +145,11 @@ func TestOAuth429WorkerIndependentPair(t *testing.T) {
 			require.NoError(t, err)
 			require.False(t, before.IsOAuth429ModelBlocked("gpt-6-astra"))
 			require.Zero(t, calls.Load(), "history cannot stand in for an actual execution")
+			cfg := &config.Config{Runtime: config.RuntimeConfig{Role: config.RuntimeRoleGateway}}
+			secondTests := service.NewAccountTestService(repo, nil, nil, nil, nil, upstream, cfg, nil)
+			second := service.ProvideScheduledTestRunnerService(nil, nil, secondTests, nil, cfg, &service.QualityJudgeService{}, nil, nil, &service.ChannelMonitorV2Service{}, service.NewConcurrencyService(NewConcurrencyCache(testRedis(t), 15, 60)))
+			t.Cleanup(second.Stop)
+			second.StartOAuth429Worker()
 			runner.StartOAuth429Worker()
 			require.Eventually(t, func() bool {
 				var state string
@@ -152,6 +157,7 @@ func TestOAuth429WorkerIndependentPair(t *testing.T) {
 				return err == nil && state == "complete"
 			}, 8*time.Second, 20*time.Millisecond, "actual background worker must complete immediately without a quality plan or cooldown")
 			runner.Stop()
+			second.Stop()
 			require.EqualValues(t, 2, calls.Load(), "qualityops off must still actively execute two complete independent calls")
 			after, err := repo.GetByID(t.Context(), a.ID)
 			require.NoError(t, err)
