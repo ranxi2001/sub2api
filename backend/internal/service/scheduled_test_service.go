@@ -130,6 +130,15 @@ func nextPlanRun(plan *ScheduledTestPlan, now time.Time) (time.Time, error) {
 		cfg.QualityModelOutcomes = nil
 		cfg.QualityModelActions = nil
 		cfg.RandomQuestion = nil
+		cfg.Ciallo = nil
+		if cfg.QuestionKind == QualityCialloQuestionKind {
+			if cfg.Quality == nil {
+				return time.Time{}, fmt.Errorf("ciallo requires a quality rule")
+			}
+			cfg.Prompt = QualityCialloQuestionKind
+			cfg.Quality.ExpectedAnswer = ""
+			cfg.Quality.Judge = nil
+		}
 		cfg.QualityBatch = nil
 		cfg.PelicanQuestion = nil
 		cfg.ActualPrompt = ""

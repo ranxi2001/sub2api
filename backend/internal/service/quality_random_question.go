@@ -22,7 +22,7 @@ type QualityRandomQuestion struct {
 }
 
 func isQualityAnswerQuestion(kind string) bool {
-	return kind == "candy" || kind == QualityRandomQuestionKind
+	return kind == "candy" || kind == QualityRandomQuestionKind || kind == QualityCialloQuestionKind
 }
 
 // One fresh question per sample, shared by every model in that sample. A batch

@@ -168,6 +168,7 @@ type AccountTestService struct {
 	bpsProbeAccounts          map[int64]struct{}
 	stateProbeAccounts        sync.Map
 	modelTraceAccounts        sync.Map
+	cialloAccounts            sync.Map
 	agentIdentityTaskMu       sync.Mutex
 	agentIdentityWS           agentIdentityWSConnectionInvalidator
 	// grokWSDialer is optional; realtime account tests use the default OpenAI-style
@@ -1131,7 +1132,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	if isOAuth && s.accountRepo != nil && !IsAstraSourceAcquisition(ctx) {
+	if isOAuth && s.accountRepo != nil && !IsAstraSourceAcquisition(ctx) && !isCialloRequest(ctx) {
 		if updates, err := extractOpenAICodexProbeUpdates(resp); err == nil && len(updates) > 0 {
 			_ = s.accountRepo.UpdateExtra(ctx, account.ID, updates)
 			mergeAccountExtra(account, updates)
@@ -1139,6 +1140,9 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		if isCialloRequest(ctx) {
+			return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d:", resp.StatusCode))
+		}
 		body, _ := io.ReadAll(resp.Body)
 		body = redactAgentIdentitySensitiveBodyForAccount(ctx, s.accountRepo, credentialAccount, body)
 		if !agentIdentityTaskRecoveryWasTried(ctx) && credentialAccount.IsOpenAIAgentIdentity() && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, body) {
@@ -3397,7 +3401,16 @@ func (s *AccountTestService) processOpenAIStream(c *gin.Context, body io.Reader)
 				accountTestContent(c, delta)
 				s.sendEvent(c, TestEvent{Type: "content", Text: delta})
 			}
+		case "response.incomplete":
+			if isCialloRequest(c.Request.Context()) {
+				return s.sendErrorAndEnd(c, "Ciallo generation incomplete")
+			}
 		case "response.completed", "response.done":
+			if isCialloRequest(c.Request.Context()) {
+				if obj, ok := data["response"].(map[string]any); ok && (obj["incomplete_details"] != nil || (obj["status"] != nil && obj["status"] != "completed")) {
+					return s.sendErrorAndEnd(c, "Ciallo generation incomplete")
+				}
+			}
 			if modelTraceRequested(c.Request.Context()) {
 				if responseData, ok := data["response"].(map[string]any); ok {
 					if status, _ := responseData["status"].(string); status != "" && status != "completed" {

@@ -109,7 +109,7 @@ func validateQualityPolicy(plan *ScheduledTestPlan) error {
 		return fmt.Errorf("quality plans require a text answer question")
 	}
 	// 探针自带判定；随机题的参考答案由执行器生成，其他答题规则必须配置答案。
-	if plan.PelicanConfig.QuestionKind != OpenAICodexStateProbeQuestionKind && plan.PelicanConfig.QuestionKind != QualityRandomQuestionKind {
+	if plan.PelicanConfig.QuestionKind != OpenAICodexStateProbeQuestionKind && plan.PelicanConfig.QuestionKind != QualityRandomQuestionKind && plan.PelicanConfig.QuestionKind != QualityCialloQuestionKind {
 		if strings.TrimSpace(q.ExpectedAnswer) == "" || len(q.ExpectedAnswer) > 4000 {
 			return fmt.Errorf("expected answer must be 1–4000 bytes")
 		}

@@ -215,7 +215,11 @@ export function buildQualityRulePatch(
     config.parallel_count = probe ? 1 : source.parallel_count
     config.quality.expected_answer = probe || random ? '' : source.quality.expected_answer
     if (probe) { delete config.quality.judge; config.model_ids = [patch.model_id || plan.model_id] }
-    else {
+    else if (source.question_kind === 'ciallo') {
+      config.prompt = 'ciallo'
+      config.quality.expected_answer = ''
+      delete config.quality.judge
+    } else {
       const judge = copyQualityRuleConfig(source).quality.judge
       if (!qualityJudgeConfigured(judge)) throw new Error('qualityOps.configureJudge')
       if (!random && (!config.prompt.trim() || !config.quality.expected_answer.trim())) throw new Error('qualityOps.questionRequired')
@@ -252,7 +256,7 @@ export function buildQualityRulePatch(
     config.quality.bps.pass_threshold = from.pass_threshold
     config.quality.bps.hold_on_usage = from.hold_on_usage
   }
-  if (config.quality.action === 'isolate_models' && config.question_kind !== 'candy' && config.question_kind !== 'random_reasoning') throw new Error('qualityOps.isolationRequiresCandy')
+  if (config.quality.action === 'isolate_models' && config.question_kind !== 'candy' && config.question_kind !== 'random_reasoning' && config.question_kind !== 'ciallo') throw new Error('qualityOps.isolationRequiresCandy')
   if (config.question_kind === STATE_PROBE_QUESTION && (config.model_ids?.length || 0) > 1) throw new Error('qualityOps.probeSingleModel')
   const samples = (config.model_ids?.length || 1) * config.parallel_count
   if (samples > 100 || (config.model_ids?.length || 0) > 50) throw new Error('qualityOps.tooManyModelSamples')
