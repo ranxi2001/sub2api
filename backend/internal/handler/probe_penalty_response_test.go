@@ -120,3 +120,26 @@ func TestProbePenaltyActualGatewayProtocols(t *testing.T) {
 		}
 	}
 }
+
+func TestProbePenaltyDownstreamSub2APIChargesEquivalentUsage(t *testing.T) {
+	extra := map[string]any{service.AccountProbePenaltyExtraKey: map[string]any{"enabled": true, "minimum_charge": .001}}
+	supplier := &probeHandlerBilling{}
+	upstream := runCompatStreamUsageHandlerWithDelivery(t, "messages", compatStreamUsagePartialStream+compatStreamUsageCompletion, true, supplier, "", extra)
+	require.NotNil(t, supplier.event)
+	require.Contains(t, upstream.rec.Body.String(), `"usage_kind":"billing_equivalent"`)
+	for _, endpoint := range []string{"messages", "chat/completions", "responses"} {
+		t.Run(endpoint, func(t *testing.T) {
+			// A second real Sub2API handler consumes the supplier's standard usage
+			// with no penalty configuration. No custom receipt parser is required.
+			downstream := runCompatStreamUsageHandlerWithDelivery(t, endpoint, upstream.rec.Body.String(), true, nil, "")
+			downstream.billingRepo.mu.Lock()
+			defer downstream.billingRepo.mu.Unlock()
+			require.Len(t, downstream.billingRepo.commands, 1)
+			charge := downstream.billingRepo.commands[0].BalanceCost
+			require.GreaterOrEqual(t, charge, .001)
+			require.Less(t, charge, .001+supplier.event.Usage.CustomerCostDetails.ProbePenalty.OutputTokenPrice)
+			require.Greater(t, downstream.billingRepo.commands[0].OutputTokens, 7)
+			require.Equal(t, 7, supplier.event.Usage.OutputTokens, "supplier retains real model consumption")
+		})
+	}
+}

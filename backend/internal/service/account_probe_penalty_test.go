@@ -70,3 +70,17 @@ func TestAccountProbePenaltyCanonicalBilling(t *testing.T) {
 		}
 	}
 }
+
+func TestAccountProbePenaltySubscriptionAfterDiscount(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{}
+	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
+	svc := newGatewayRecordUsageServiceWithBillingRepoForTest(usageRepo, billingRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{})
+	gid := int64(9)
+	rate := .5
+	result := &ForwardResult{RequestID: "subscription-probe", Model: "claude-sonnet-4", Usage: ClaudeUsage{InputTokens: 10, OutputTokens: 13}, ProbePenaltyEligible: true}
+	err := svc.RecordUsage(context.Background(), &RecordUsageInput{Result: result, APIKey: &APIKey{ID: 501, GroupID: &gid, Group: &Group{ID: gid, RateMultiplier: .01, SubscriptionType: SubscriptionTypeSubscription}}, User: &User{ID: 601}, Subscription: &UserSubscription{ID: 17}, Account: &Account{ID: 701, Platform: PlatformAnthropic, GroupRateMultiplier: &rate, Extra: map[string]any{AccountProbePenaltyExtraKey: map[string]any{"enabled": true, "minimum_charge": .001}}}})
+	require.NoError(t, err)
+	require.Equal(t, .001, billingRepo.lastCmd.SubscriptionCost)
+	require.Zero(t, billingRepo.lastCmd.BalanceCost)
+	require.Equal(t, .001, usageRepo.lastLog.ActualCost)
+}

@@ -19,3 +19,6 @@ New API、Sub2API 等按标准 usage 计费的下游可读取增加后的输出�
 SSE 正文实时转发，末尾 usage 和成功结束事件在本站持久化结算完成后发送；结算结果未知时返回错误，不自动重新请求模型。响应没有完整 usage、定价不能换算为正的输出 Token 单价或等效输出超过 10 亿 Token 时不能生成等效回执，不声称结算成功。非流式响应使用受限临时文件暂存（最大 64 MiB），流式仅暂存末尾事件（最大 1 MiB）。
 
 管理员新功能提示 ID：`account-claude-probe-penalty-initial-announcement`。仅账号编辑设置显示；点击关闭后在当前浏览器当前管理员的本地存储中保留。
+
+
+源码对照：New API `8542c9d6490b4330fe18160930f81ae7428bc777` 的 [Claude 适配器](https://github.com/QuantumNous/new-api/blob/8542c9d6490b4330fe18160930f81ae7428bc777/relay/channel/claude/relay-claude.go) 按最终 `message_delta` 的累计用量覆盖，并在 JSON 路径使用 `usage.output_tokens`；这是源码证据，不代表所有部署版本已运行验证。`TestProbePenaltyDownstreamSub2APIChargesEquivalentUsage` 用两个实际 Sub2API handler 串接，核对本站补差后，下一级三个入口读取标准 usage 并按同价卡计费。
