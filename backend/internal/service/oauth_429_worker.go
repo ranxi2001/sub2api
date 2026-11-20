@@ -48,19 +48,20 @@ type OAuth429Run struct {
 	Digest     string    `json:"digest,omitempty"`
 }
 type OAuth429Task struct {
-	AccountID   int64            `json:"account_id"`
-	Model       string           `json:"model"`
-	Revision    string           `json:"revision"`
-	TriggerID   string           `json:"trigger_id"`
-	Generation  int64            `json:"generation"`
-	TriggeredAt time.Time        `json:"triggered_at"`
-	ExpiresAt   time.Time        `json:"expires_at"`
-	Lease       string           `json:"lease"`
-	LeaseUntil  time.Time        `json:"lease_until"`
-	State       string           `json:"state"`
-	Armed       bool             `json:"armed"`
-	Samples     []OAuth429Sample `json:"samples"`
-	Runs        []OAuth429Run    `json:"runs"`
+	AccountID    int64            `json:"account_id"`
+	Model        string           `json:"model"`
+	RequestModel string           `json:"request_model"`
+	Revision     string           `json:"revision"`
+	TriggerID    string           `json:"trigger_id"`
+	Generation   int64            `json:"generation"`
+	TriggeredAt  time.Time        `json:"triggered_at"`
+	ExpiresAt    time.Time        `json:"expires_at"`
+	Lease        string           `json:"lease"`
+	LeaseUntil   time.Time        `json:"lease_until"`
+	State        string           `json:"state"`
+	Armed        bool             `json:"armed"`
+	Samples      []OAuth429Sample `json:"samples"`
+	Runs         []OAuth429Run    `json:"runs"`
 }
 
 // The repository owns all transitions and live fences. No scheduled plan,
@@ -68,6 +69,7 @@ type OAuth429Task struct {
 type OAuth429Repository interface {
 	ObserveOAuth429(context.Context, int64, string, string, int) (bool, error)
 	ClaimOAuth429(context.Context) (*OAuth429Task, error)
+	OAuth429Current(context.Context, *OAuth429Task) (bool, error)
 	StartOAuth429Run(context.Context, *OAuth429Task) (*OAuth429Run, error)
 	FinishOAuth429Run(context.Context, *OAuth429Task, OAuth429Run) error
 	CompleteOAuth429(context.Context, *OAuth429Task) error
@@ -166,6 +168,22 @@ func (a *Account) IsOAuth429ModelBlocked(model string) bool {
 // leaves an inconclusive slot, never permission to replay that billable call.
 func (s *ScheduledTestRunnerService) RunOAuth429Task(ctx context.Context, repo OAuth429Repository, task *OAuth429Task) error {
 	ctx, cancel := context.WithDeadline(ctx, task.ExpiresAt)
+	go func() {
+		timer := time.NewTicker(100 * time.Millisecond)
+		defer timer.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-timer.C:
+				valid, err := repo.OAuth429Current(ctx, task)
+				if err != nil || !valid {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
 	defer cancel()
 	for len(task.Runs) < 2 {
 		account, err := s.accountTestSvc.accountRepo.GetByID(ctx, task.AccountID)
@@ -200,12 +218,12 @@ func (s *ScheduledTestRunnerService) RunOAuth429Task(ctx context.Context, repo O
 			}
 			return err
 		}
-		cfg := &PelicanTestConfig{QuestionKind: "candy", Prompt: CandyPrompt, ReasoningEffort: "high", ParallelCount: 1, ModelID: task.Model, Quality: &QualityPolicy{Action: QualityActionObserveOnly}}
+		cfg := &PelicanTestConfig{QuestionKind: "candy", Prompt: CandyPrompt, ReasoningEffort: "high", ParallelCount: 1, ModelID: task.RequestModel, Quality: &QualityPolicy{Action: QualityActionObserveOnly}}
 		testCtx, stop := context.WithTimeout(context.WithValue(ctx, oauth429ExecutionKey{}, oauth429Execution{AccountID: task.AccountID, Model: task.Model}), 90*time.Second)
 		// This direct executor addresses the original account; no group selection,
 		// answer retry, scheduled plan, or qualityops switch is consulted.
-		result, executeErr := s.runPelican(testCtx, task.AccountID, task.Model, cfg)
-		run.Verdict = oauth429Verdict(result, executeErr, testCtx.Err(), task.Model)
+		result, executeErr := s.runOAuth429Answer(testCtx, task, cfg)
+		run.Verdict = oauth429Verdict(result, executeErr, testCtx.Err(), task.RequestModel)
 		run.ResultID, run.FinishedAt = uuid.NewString(), time.Now().UTC()
 		if result != nil {
 			digest := sha256.Sum256([]byte(result.ResponseText))
@@ -221,6 +239,16 @@ func (s *ScheduledTestRunnerService) RunOAuth429Task(ctx context.Context, repo O
 		task.Runs = append(task.Runs, *run)
 	}
 	return repo.CompleteOAuth429(ctx, task)
+}
+
+func (s *ScheduledTestRunnerService) runOAuth429Answer(ctx context.Context, task *OAuth429Task, cfg *PelicanTestConfig) (result *ScheduledTestResult, err error) {
+	defer func() {
+		if recover() != nil {
+			result = nil
+			err = errors.New("independent answer executor interrupted")
+		}
+	}()
+	return s.runPelican(ctx, task.AccountID, task.RequestModel, cfg)
 }
 
 var oauth429Integer = regexp.MustCompile(`^[0-9]{1,6}$`)

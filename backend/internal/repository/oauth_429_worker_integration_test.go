@@ -330,3 +330,62 @@ func TestOAuth429HTTPTransportDeduplicatesAndWakesWorker(t *testing.T) {
 	}, 8*time.Second, 20*time.Millisecond)
 	require.EqualValues(t, 2, calls.Load())
 }
+
+func TestOAuth429AliasAndLiveCancellation(t *testing.T) {
+	t.Run("alias binds actual target", func(t *testing.T) {
+		repo, a, _ := oauth429Fixture(t, nil)
+		_, err := integrationDB.ExecContext(t.Context(), `UPDATE accounts SET credentials=jsonb_set(credentials,'{model_mapping}','{"alias":"gpt-6-astra","gpt-6-luna":"gpt-6-luna"}') WHERE id=$1`, a.ID)
+		require.NoError(t, err)
+		runner, calls, _ := oauth429Runner(t, repo, []string{"23", "27"})
+		oauth429Prime(t, repo, a.ID, "gpt-6-astra")
+		task, err := repo.ClaimOAuth429(t.Context())
+		require.NoError(t, err)
+		require.NotNil(t, task)
+		require.Equal(t, "alias", task.RequestModel)
+		require.NoError(t, runner.RunOAuth429Task(t.Context(), repo, task))
+		require.EqualValues(t, 2, calls.Load())
+		got, err := repo.GetByID(t.Context(), a.ID)
+		require.NoError(t, err)
+		require.False(t, got.IsModelSupported("alias"))
+		require.True(t, got.IsModelSupported("gpt-6-luna"))
+	})
+	t.Run("disable aborts in flight", func(t *testing.T) {
+		repo, a, c := oauth429Fixture(t, nil)
+		started, aborted := make(chan struct{}), make(chan struct{})
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			close(started)
+			select {
+			case <-r.Context().Done():
+				close(aborted)
+			case <-time.After(5 * time.Second):
+			}
+		}))
+		defer server.Close()
+		target, err := url.Parse(server.URL)
+		require.NoError(t, err)
+		cfg := &config.Config{Runtime: config.RuntimeConfig{Role: config.RuntimeRoleGateway}}
+		tests := service.NewAccountTestService(repo, nil, nil, nil, nil, &oauth429Loopback{target: target}, cfg, nil)
+		runner := service.ProvideScheduledTestRunnerService(nil, nil, tests, nil, cfg, &service.QualityJudgeService{}, nil, nil, &service.ChannelMonitorV2Service{}, service.NewConcurrencyService(NewConcurrencyCache(testRedis(t), 15, 60)))
+		defer runner.Stop()
+		oauth429Prime(t, repo, a.ID, "gpt-6-astra")
+		runner.StartOAuth429Worker()
+		select {
+		case <-started:
+		case <-time.After(3 * time.Second):
+			t.Fatal("worker did not dispatch")
+		}
+		c.DegradationAction.Independent429.Enabled = false
+		raw, err := json.Marshal(c)
+		require.NoError(t, err)
+		_, err = integrationDB.ExecContext(t.Context(), `UPDATE settings SET value=$2 WHERE key=$1`, service.SettingKeyOAuthAutoConfig, string(raw))
+		require.NoError(t, err)
+		select {
+		case <-aborted:
+		case <-time.After(2 * time.Second):
+			t.Fatal("disabled task did not cancel the in-flight provider call")
+		}
+		got, err := repo.GetByID(t.Context(), a.ID)
+		require.NoError(t, err)
+		require.False(t, got.IsOAuth429ModelBlocked("gpt-6-astra"))
+	})
+}

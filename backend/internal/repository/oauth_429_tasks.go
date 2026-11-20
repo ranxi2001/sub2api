@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"sort"
 	"strings"
 	"time"
 
@@ -42,8 +43,33 @@ func oauth429PolicyAccount(ctx context.Context, tx *sql.Tx, id int64) (service.O
 	return cfg, a, nil
 }
 func oauth429Eligible(c service.OAuthAutoConfig, a *service.Account, model string) bool {
-	return c.Revision != "" && c.DegradationAction.Enabled && c.DegradationAction.UsesUpstream429() && c.DegradationAction.Independent429.Enabled && c.DegradationAction.Validate() == nil && a != nil && a.Type == service.AccountTypeOAuth && a.Schedulable && a.Status == service.StatusActive && a.Concurrency > 0 && !a.IsOAuth429ModelBlocked(model) && a.GetMappedModel(model) == model && a.IsModelSupported(model)
+	return c.Revision != "" && c.DegradationAction.Enabled && c.DegradationAction.UsesUpstream429() && c.DegradationAction.Independent429.Enabled && c.DegradationAction.Validate() == nil && a != nil && a.Type == service.AccountTypeOAuth && a.Schedulable && a.Status == service.StatusActive && a.Concurrency > 0 && !a.IsOAuth429ModelBlocked(model) && oauth429RequestModel(a, model) != ""
 }
+
+// The HTTP wire model may be reachable only through a public mapping alias.
+// Persist that input name separately; the test transport still fences the actual
+// target model and every alias of the blocked target observes the same action.
+func oauth429RequestModel(a *service.Account, target string) string {
+	if a == nil {
+		return ""
+	}
+	if a.GetMappedModel(target) == target && a.IsModelSupported(target) {
+		return target
+	}
+	mapping := a.GetModelMapping()
+	keys := make([]string, 0, len(mapping))
+	for name := range mapping {
+		keys = append(keys, name)
+	}
+	sort.Strings(keys)
+	for _, name := range keys {
+		if !strings.Contains(name, "*") && a.GetMappedModel(name) == target && a.IsModelSupported(name) {
+			return name
+		}
+	}
+	return ""
+}
+
 func oauth429Save(ctx context.Context, tx *sql.Tx, task *service.OAuth429Task) error {
 	raw, err := json.Marshal(task)
 	if err != nil {
@@ -171,6 +197,7 @@ func (r *accountRepository) ObserveOAuth429(ctx context.Context, id int64, model
 			return false, err
 		}
 		if err == nil {
+			task.RequestModel = oauth429RequestModel(a, model)
 			task.TriggerID = uuid.NewString()
 			task.Generation++
 			task.TriggeredAt = now
@@ -417,4 +444,18 @@ func (r *accountRepository) CompleteOAuth429(ctx context.Context, task *service.
 		r.syncSchedulerAccountSnapshotDetached(ctx, task.AccountID)
 	}
 	return err
+}
+
+func (r *accountRepository) OAuth429Current(ctx context.Context, task *service.OAuth429Task) (bool, error) {
+	var current bool
+	err := r.sql.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM oauth_429_tasks t JOIN accounts a ON a.id=t.account_id
+ JOIN settings s ON s.key=$1 WHERE t.account_id=$2 AND t.model=$3 AND t.state='running'
+ AND t.data->>'trigger_id'=$4 AND t.data->>'lease'=$5
+ AND (t.data->>'lease_until')::timestamptz>clock_timestamp()
+ AND (t.data->>'expires_at')::timestamptz>clock_timestamp()
+ AND a.deleted_at IS NULL AND a.schedulable AND a.status='active'
+ AND s.value::jsonb->>'revision'=t.data->>'revision'
+ AND s.value::jsonb->'degradation_action'->>'enabled'='true'
+ AND s.value::jsonb->'degradation_action'->'independent_429'->>'enabled'='true')`, service.SettingKeyOAuthAutoConfig, task.AccountID, task.Model, task.TriggerID, task.Lease).Scan(&current)
+	return current, err
 }
