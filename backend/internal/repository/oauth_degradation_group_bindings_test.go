@@ -10,7 +10,7 @@ import (
 
 func expectOAuthDegradationGroupBindingsAccount(mock sqlmock.Sqlmock, id int64, extra string) {
 	mock.ExpectQuery(`SELECT COALESCE\(extra,.*FROM accounts.*FOR NO KEY UPDATE`).WithArgs(id).
-		WillReturnRows(sqlmock.NewRows([]string{"extra"}).AddRow(extra))
+		WillReturnRows(sqlmock.NewRows([]string{"extra", "platform", "type"}).AddRow(extra, "", ""))
 }
 
 func TestOAuthDegradationAuditDoesNotBlockQualityGroupRestore(t *testing.T) {

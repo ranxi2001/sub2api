@@ -179,6 +179,12 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 	if account == nil {
 		return service.ErrAccountNilInput
 	}
+	if err := service.ValidateGatewayAccountIdentity(account.Platform, account.Type, account.Credentials); err != nil {
+		return err
+	}
+	if account.IsGateway() {
+		account.Schedulable = false
+	}
 
 	account.Extra = copyJSONMap(account.Extra)
 	delete(account.Extra, service.OAuthDegradationActionExtraKey)
@@ -344,6 +350,9 @@ func (r *accountRepository) CreateWithAccountGroups(ctx context.Context, account
 		return err
 	}
 
+	if err := validateGatewayGroupBindings(ctx, txClient, account, groupIDs); err != nil {
+		return err
+	}
 	if err := createAccountRecord(ctx, txClient, account); err != nil {
 		return err
 	}
@@ -656,6 +665,9 @@ func (r *accountRepository) updateLockedAccount(
 	explicitRateSyncEnabled *bool,
 	explicitRateMultiplier *float64,
 ) (*dbent.Account, error) {
+	if err := service.ValidateGatewayAccountIdentity(account.Platform, account.Type, account.Credentials); err != nil {
+		return nil, err
+	}
 	extra, err := lockAndMergeAccountProbeExtra(ctx, client, account, explicitProbeEnabled, explicitRateSyncEnabled)
 	if err != nil {
 		return nil, err
@@ -694,6 +706,9 @@ func (r *accountRepository) updateLockedAccount(
 	}
 	if !preserveOAuthErrorScheduling && (!accounttimer.PreserveSchedulable(ctx) || account.Status == service.StatusError) {
 		builder.SetSchedulable(schedulable)
+	}
+	if account.IsGateway() {
+		builder.SetSchedulable(false)
 	}
 
 	if explicitRateMultiplier != nil {
@@ -2594,6 +2609,8 @@ func (r *accountRepository) schedulableAccountsQuery(now time.Time) *dbent.Accou
 		Where(
 			dbaccount.StatusEQ(service.StatusActive),
 			dbaccount.SchedulableEQ(true),
+			dbaccount.TypeNEQ(service.AccountTypeGateway),
+			dbaccount.PlatformNEQ(service.PlatformGateway),
 			tempUnschedulablePredicate(),
 			notExpiredPredicate(now),
 			dbaccount.Or(dbaccount.OverloadUntilIsNil(), dbaccount.OverloadUntilLTE(now)),
@@ -2652,6 +2669,7 @@ func (r *accountRepository) ListSchedulableCapacityByGroupIDs(ctx context.Contex
 			AND a.deleted_at IS NULL
 			AND a.status = $2
 			AND a.schedulable = TRUE
+			AND a.type <> 'gateway' AND a.platform <> 'gateway'
 			AND (a.temp_unschedulable_until IS NULL OR a.temp_unschedulable_until <= $3)
 			AND (a.expires_at IS NULL OR a.expires_at > $3 OR a.auto_pause_on_expired = FALSE)
 			AND (a.overload_until IS NULL OR a.overload_until <= $3)
@@ -2700,6 +2718,8 @@ func (r *accountRepository) ListSchedulableByPlatform(ctx context.Context, platf
 			dbaccount.PlatformEQ(platform),
 			dbaccount.StatusEQ(service.StatusActive),
 			dbaccount.SchedulableEQ(true),
+			dbaccount.TypeNEQ(service.AccountTypeGateway),
+			dbaccount.PlatformNEQ(service.PlatformGateway),
 			tempUnschedulablePredicate(),
 			notExpiredPredicate(now),
 			dbaccount.Or(dbaccount.OverloadUntilIsNil(), dbaccount.OverloadUntilLTE(now)),
@@ -2734,6 +2754,8 @@ func (r *accountRepository) ListSchedulableByPlatforms(ctx context.Context, plat
 			dbaccount.PlatformIn(platforms...),
 			dbaccount.StatusEQ(service.StatusActive),
 			dbaccount.SchedulableEQ(true),
+			dbaccount.TypeNEQ(service.AccountTypeGateway),
+			dbaccount.PlatformNEQ(service.PlatformGateway),
 			tempUnschedulablePredicate(),
 			notExpiredPredicate(now),
 			dbaccount.Or(dbaccount.OverloadUntilIsNil(), dbaccount.OverloadUntilLTE(now)),
@@ -2754,6 +2776,8 @@ func (r *accountRepository) ListSchedulableUngroupedByPlatform(ctx context.Conte
 			dbaccount.PlatformEQ(platform),
 			dbaccount.StatusEQ(service.StatusActive),
 			dbaccount.SchedulableEQ(true),
+			dbaccount.TypeNEQ(service.AccountTypeGateway),
+			dbaccount.PlatformNEQ(service.PlatformGateway),
 			dbaccount.Not(dbaccount.HasAccountGroups()),
 			tempUnschedulablePredicate(),
 			notExpiredPredicate(now),
@@ -2778,6 +2802,8 @@ func (r *accountRepository) ListSchedulableUngroupedByPlatforms(ctx context.Cont
 			dbaccount.PlatformIn(platforms...),
 			dbaccount.StatusEQ(service.StatusActive),
 			dbaccount.SchedulableEQ(true),
+			dbaccount.TypeNEQ(service.AccountTypeGateway),
+			dbaccount.PlatformNEQ(service.PlatformGateway),
 			dbaccount.Not(dbaccount.HasAccountGroups()),
 			tempUnschedulablePredicate(),
 			notExpiredPredicate(now),
@@ -2829,6 +2855,8 @@ func (r *accountRepository) ListModelAvailabilityCandidates(
 	preds := []dbpredicate.Account{
 		dbaccount.StatusEQ(service.StatusActive),
 		dbaccount.SchedulableEQ(true),
+		dbaccount.TypeNEQ(service.AccountTypeGateway),
+		dbaccount.PlatformNEQ(service.PlatformGateway),
 		dbaccount.PlatformIn(platforms...),
 	}
 	if !includeGrouped {
@@ -4047,7 +4075,7 @@ func (r *accountRepository) queryAccountsByGroup(ctx context.Context, groupID in
 		preds = append(preds, dbaccount.PlatformIn(opts.platforms...))
 	}
 	if opts.schedulable {
-		preds = append(preds, dbaccount.SchedulableEQ(true))
+		preds = append(preds, dbaccount.SchedulableEQ(true), dbaccount.TypeNEQ(service.AccountTypeGateway), dbaccount.PlatformNEQ(service.PlatformGateway))
 		if !opts.ignoreTransientState {
 			now := time.Now()
 			preds = append(preds,

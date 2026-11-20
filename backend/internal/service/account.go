@@ -276,6 +276,11 @@ func accountLoadPreferenceRate(account *Account, loadRate int) int {
 }
 
 func (a *Account) IsSchedulable() bool {
+	// Fail closed until the four gateway protocols and their final admission
+	// checks are implemented together. Manual switches cannot bypass this gate.
+	if a.IsGateway() || a.Platform == PlatformGateway {
+		return false
+	}
 	if !a.IsActive() || !a.Schedulable || a.PerformancePaused {
 		return false
 	}

@@ -243,6 +243,12 @@ func NewAccountService(accountRepo AccountRepository, groupRepo GroupRepository)
 
 // Create 创建账号
 func (s *AccountService) Create(ctx context.Context, req CreateAccountRequest) (*Account, error) {
+	if err := ValidateGatewayAccountIdentity(req.Platform, req.Type, req.Credentials); err != nil {
+		return nil, err
+	}
+	if err := validateGatewayAccountGroups(ctx, &Account{Platform: req.Platform, Type: req.Type}, s.groupRepo, req.GroupIDs); err != nil {
+		return nil, err
+	}
 	if err := ValidateModelMappingMode(req.Credentials); err != nil {
 		return nil, err
 	}
@@ -276,6 +282,18 @@ func (s *AccountService) Create(ctx context.Context, req CreateAccountRequest) (
 		account.AutoPauseOnExpired = true
 	}
 
+	if account.IsGateway() {
+		if creator, ok := s.accountRepo.(AccountDuplicateRepository); ok {
+			groups := make([]AccountGroup, 0, len(req.GroupIDs))
+			for i, id := range req.GroupIDs {
+				groups = append(groups, AccountGroup{GroupID: id, Priority: i + 1})
+			}
+			if err := creator.CreateWithAccountGroups(ctx, account, groups); err != nil {
+				return nil, err
+			}
+			return account, nil
+		}
+	}
 	if err := s.accountRepo.Create(ctx, account); err != nil {
 		return nil, fmt.Errorf("create account: %w", err)
 	}
@@ -348,6 +366,23 @@ func (s *AccountService) Update(ctx context.Context, id int64, req UpdateAccount
 	}
 
 	// 更新字段
+	if account.IsGateway() || account.Platform == PlatformGateway {
+		credentials := account.Credentials
+		if req.Credentials != nil {
+			credentials = mergeGatewayCredentials(account.Credentials, *req.Credentials)
+			req.Credentials = &credentials
+		}
+		if err := ValidateGatewayAccountIdentity(account.Platform, account.Type, credentials); err != nil {
+			return nil, err
+		}
+		ids := account.GroupIDs
+		if req.GroupIDs != nil {
+			ids = *req.GroupIDs
+		}
+		if err := validateGatewayAccountGroups(ctx, account, s.groupRepo, ids); err != nil {
+			return nil, err
+		}
+	}
 	if req.Name != nil {
 		account.Name = *req.Name
 	}

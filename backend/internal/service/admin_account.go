@@ -431,6 +431,9 @@ func normalizeOpenAILongContextBillingUpdateExtra(account *Account, input *Updat
 // Grok media eligibility helpers live in account_grok_media_eligibility.go.
 
 func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]any) (*Account, error) {
+	if err := ValidateGatewayAccountIdentity(input.Platform, input.Type, input.Credentials); err != nil {
+		return nil, err
+	}
 	if err := ValidateOpenAIRequestTimezoneExtra(input.Platform, accountExtra); err != nil {
 		return nil, err
 	}
@@ -467,7 +470,7 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 		Concurrency:              normalizeAccountConcurrency(input.Platform, input.Type, input.Concurrency),
 		Priority:                 input.Priority,
 		Status:                   StatusActive,
-		Schedulable:              input.InitialAdmissionPlan == nil,
+		Schedulable:              input.InitialAdmissionPlan == nil && input.Type != AccountTypeGateway,
 	}
 	if input.ProbeEnabled != nil && *input.ProbeEnabled {
 		if !isUpstreamBillingProbeAccount(account) {
@@ -517,6 +520,15 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 }
 
 func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccountInput) (*Account, error) {
+	if input == nil {
+		return nil, ErrAccountNilInput
+	}
+	if err := ValidateGatewayAccountIdentity(input.Platform, input.Type, input.Credentials); err != nil {
+		return nil, err
+	}
+	if err := validateGatewayAccountGroups(ctx, &Account{Platform: input.Platform, Type: input.Type}, s.groupRepo, input.GroupIDs); err != nil {
+		return nil, err
+	}
 	if err := ValidateAccountCostMultiplierExtra(input.Extra); err != nil {
 		return nil, err
 	}
@@ -548,7 +560,7 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	// 绑定分组
 	groupIDs := input.GroupIDs
 	// 如果没有指定分组,自动绑定对应平台的默认分组
-	if len(groupIDs) == 0 && !input.SkipDefaultGroupBind {
+	if len(groupIDs) == 0 && !input.SkipDefaultGroupBind && input.Type != AccountTypeGateway {
 		defaultGroupName := input.Platform + "-default"
 		groups, err := s.groupRepo.ListActiveByPlatform(ctx, input.Platform)
 		if err == nil {
@@ -595,14 +607,18 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err := s.ValidateAccountGroupBindings(ctx, groupIDs); err != nil {
 		return nil, err
 	}
-	if (account.InitialAdmissionPlan != nil || account.InitialAPIKeyDisposition != nil) && s.accountDuplicateRepo != nil {
+	atomicCreator := s.accountDuplicateRepo
+	if account.IsGateway() && atomicCreator == nil {
+		atomicCreator, _ = s.accountRepo.(AccountDuplicateRepository)
+	}
+	if (account.IsGateway() || account.InitialAdmissionPlan != nil || account.InitialAPIKeyDisposition != nil) && atomicCreator != nil {
 		// Publish the initially blocked account, its groups and both background
 		// plans atomically; the worker cannot race a partially bound import.
 		groups := make([]AccountGroup, 0, len(groupIDs))
 		for _, id := range groupIDs {
 			groups = append(groups, AccountGroup{GroupID: id, Priority: 50})
 		}
-		if err := s.accountDuplicateRepo.CreateWithAccountGroups(ctx, account, groups); err != nil {
+		if err := atomicCreator.CreateWithAccountGroups(ctx, account, groups); err != nil {
 			return nil, err
 		}
 	} else {
@@ -668,6 +684,16 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	}
 	account, err := s.accountRepo.GetByID(ctx, id)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateGatewayAccountUpdate(account, input); err != nil {
+		return nil, err
+	}
+	gatewayGroupIDs := account.GroupIDs
+	if input.GroupIDs != nil {
+		gatewayGroupIDs = *input.GroupIDs
+	}
+	if err := validateGatewayAccountGroups(ctx, account, s.groupRepo, gatewayGroupIDs); err != nil {
 		return nil, err
 	}
 	if err := prepareVertexAuthModeUpdate(account, input); err != nil {
@@ -756,7 +782,11 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	} else if len(input.Credentials) > 0 {
 		// 敏感子键采用"incoming 没提供就保留"的合并语义：前端响应已脱敏，
 		// 全对象 PUT 编辑时不会再带回 token，避免覆盖时清空已有凭证。
-		account.Credentials = MergePreservingSensitiveCreds(account.Credentials, input.Credentials)
+		if account.IsGateway() {
+			account.Credentials = mergeGatewayCredentials(account.Credentials, input.Credentials)
+		} else {
+			account.Credentials = MergePreservingSensitiveCreds(account.Credentials, input.Credentials)
+		}
 		if err := validateQwenCacheCredentials(account.Credentials); err != nil {
 			return nil, err
 		}
@@ -1227,12 +1257,25 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	// 预取所有目标账号，供凭据守卫/代理守卫/混合渠道检查共用，避免多次 DB 查询。
 	var cachedTargets []*Account
-	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil || hasExcelBPSProxyUpdates(input.Extra) {
+	if len(input.Credentials) > 0 || input.ProxyID != nil || input.GroupIDs != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil || hasExcelBPSProxyUpdates(input.Extra) {
 		loaded, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
 		}
 		cachedTargets = loaded
+	}
+	for _, account := range cachedTargets {
+		if account == nil || (!account.IsGateway() && account.Platform != PlatformGateway) {
+			continue
+		}
+		if err := ValidateGatewayAccountIdentity(account.Platform, account.Type, mergeGatewayCredentials(account.Credentials, input.Credentials)); err != nil {
+			return nil, err
+		}
+		if input.GroupIDs != nil {
+			if err := validateGatewayAccountGroups(ctx, account, s.groupRepo, *input.GroupIDs); err != nil {
+				return nil, err
+			}
+		}
 	}
 	targetsByID := make(map[int64]*Account, len(cachedTargets))
 	for _, account := range cachedTargets {
@@ -1511,7 +1554,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 }
 
 func updatesUpstreamBillingProbeIdentity(credentials map[string]any) bool {
-	for _, key := range []string{"api_key", "base_url", credKeyHeaderOverrideEnabled, credKeyHeaderOverrides} {
+	for _, key := range []string{"api_key", "base_url", GatewayUpstreamKindCredentialKey, credKeyHeaderOverrideEnabled, credKeyHeaderOverrides} {
 		if _, ok := credentials[key]; ok {
 			return true
 		}
@@ -1527,7 +1570,7 @@ func upstreamBillingProbeIdentity(account *Account) map[string]any {
 	if account.ProxyID != nil {
 		identity["proxy_id"] = *account.ProxyID
 	}
-	for _, key := range []string{"api_key", "base_url", credKeyHeaderOverrideEnabled, credKeyHeaderOverrides} {
+	for _, key := range []string{"api_key", "base_url", GatewayUpstreamKindCredentialKey, credKeyHeaderOverrideEnabled, credKeyHeaderOverrides} {
 		if value, ok := account.Credentials[key]; ok {
 			identity[key] = value
 		}
