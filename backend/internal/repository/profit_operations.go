@@ -389,13 +389,17 @@ func (r *channelRepository) ReadProfitOperations(ctx context.Context, f service.
  'gross_margin',CASE WHEN $14::bool AND NOT $15::bool THEN CASE WHEN NOT (w.blocked OR w.estimate_incomplete) AND w.requests>0 AND s.request_income>0 THEN to_jsonb((s.request_income-(w.wallet_sum+w.estimate_sum))/s.request_income) ELSE 'null'::jsonb END ELSE to_jsonb(s.gross_margin) END
  ) FROM summary s CROSS JOIN wallet_total w),'total',(SELECT count(*) FROM grouped),
  'rows',COALESCE((SELECT jsonb_agg(merged ORDER BY ord) FROM (` + rowQuery + ` LIMIT $9 OFFSET $10) page),'[]'::jsonb),
- 'accounts',COALESCE((SELECT jsonb_agg(to_jsonb(c)) FROM (SELECT id,name,key,attribution,updated_at,deleted,multiplier,cost_basis,url_key,channel_id,channel_name,channel_code,channel_remark,channel_revision,assignment FROM accounts_config WHERE id IN (SELECT account_id FROM scoped) OR ($5::bigint>0 AND id IN (SELECT id FROM cohort)) ORDER BY id LIMIT 100)c),'[]'::jsonb),
+ 'accounts',COALESCE((SELECT jsonb_agg(to_jsonb(c)) FROM (SELECT id,name,key,attribution,updated_at,deleted,multiplier,cost_basis,url_key,channel_id,channel_name,channel_code,channel_remark,channel_revision,assignment FROM accounts_config JOIN (
+   SELECT DISTINCT account_id AS id FROM priced
+   UNION
+   SELECT id FROM cohort WHERE $5::bigint>0
+ ) report_accounts USING (id) ORDER BY id LIMIT 100)c),'[]'::jsonb),
  'members',COALESCE((SELECT jsonb_agg(to_jsonb(m)) FROM (SELECT id,name,key,attribution,updated_at,deleted,multiplier,cost_basis,url_key,channel_id,channel_name,channel_code,channel_remark,channel_revision,assignment,schedulable,concurrency,status FROM cohort c WHERE ($6::bigint=0 OR EXISTS(SELECT 1 FROM account_groups ag WHERE ag.account_id=c.id AND ag.group_id=$6)) ORDER BY id LIMIT $9 OFFSET $10)m),'[]'::jsonb),
  'member_total',(SELECT count(*) FROM cohort c WHERE ($6::bigint=0 OR EXISTS(SELECT 1 FROM account_groups ag WHERE ag.account_id=c.id AND ag.group_id=$6))),
  'catalog',COALESCE((SELECT jsonb_agg(to_jsonb(g)) FROM (SELECT key AS key,COALESCE(NULLIF(max(channel_name),''),key) AS name,max(channel_id) AS channel_id,max(channel_code) AS channel_code,max(channel_remark) AS channel_remark,max(channel_revision) AS channel_revision,max(assignment) AS assignment,count(*) AS accounts FROM cohort c WHERE NOT deleted AND ($6::bigint=0 OR EXISTS(SELECT 1 FROM account_groups ag WHERE ag.account_id=c.id AND ag.group_id=$6)) GROUP BY key ORDER BY key LIMIT $9 OFFSET $10)g),'[]'::jsonb),
  'capacity',(SELECT jsonb_build_object('accounts',count(*),'schedulable',count(*) FILTER(WHERE schedulable AND status='active'),'configured_concurrency',COALESCE(sum(concurrency),0)) FROM cohort c WHERE NOT deleted AND ($6::bigint=0 OR EXISTS(SELECT 1 FROM account_groups ag WHERE ag.account_id=c.id AND ag.group_id=$6))),
  'catalog_total',(SELECT count(DISTINCT key) FROM cohort c WHERE NOT deleted AND ($6::bigint=0 OR EXISTS(SELECT 1 FROM account_groups ag WHERE ag.account_id=c.id AND ag.group_id=$6))),
- 'account_details_limit',100,'historical_upstream_snapshot_requests',(SELECT count(*) FROM scoped WHERE attribution='historical_channel'),'historical_cost_multiplier_snapshot_requests',0,
+ 'account_details_limit',100,'historical_upstream_snapshot_requests',(SELECT count(*) FROM priced WHERE attribution='historical_channel'),'historical_cost_multiplier_snapshot_requests',0,
  'wallet_synced_at',(SELECT to_jsonb(max(observed_at)) FROM provider_spend_snapshots WHERE window_from=$1 AND window_until=$2 AND amount IS NOT NULL),
  'cost_formula','bound channel: provider_spend_snapshots for this exact window (today also falls back to channel-operations today_spend); wallet total is not split by account or model; unbound channel: usage_logs.total_cost * current extra.cost_multiplier (default 0.1)',
  'income_source','persisted usage_logs.actual_cost; subscription usage valuation, not cash receipts; no guarantee of debit in simple mode',
