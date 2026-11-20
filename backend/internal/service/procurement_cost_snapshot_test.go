@@ -81,7 +81,7 @@ func TestProcurementSnapshotUnknownAndLegacySemantics(t *testing.T) {
 func TestProcurementSnapshotZeroDisabledConversionAndUnresolvedTarget(t *testing.T) {
 	a := &Account{Platform: PlatformGateway, Type: AccountTypeGateway,
 		Credentials: map[string]any{GatewayUpstreamKindCredentialKey: "new_api"},
-		Extra: map[string]any{UpstreamBillingProviderExtraKey: "new_api", NewAPIApplyUSDRateExtraKey: false}}
+		Extra:       map[string]any{UpstreamBillingProviderExtraKey: "new_api", NewAPIApplyUSDRateExtraKey: false}}
 	for _, rate := range []float64{0, .1} {
 		a.Extra[UpstreamBillingProbeExtraKey] = newAPISnapshot(a, NewAPIToken{Group: "fixed"}, &newAPIData{wallet: 12, ratios: map[string]float64{"fixed": rate}}, 30, time.Now())
 		log := &UsageLog{Platform: PlatformOpenAI}
