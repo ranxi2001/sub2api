@@ -69,7 +69,9 @@ jobs:
           go test -race -tags=unit ./internal/service \
             -run '^Test(GatewayIdentity|GatewayUsage|NewAPIGateway|NewAPICostRequest|NewAPICostScale|UsagePlatformSnapshots)' \
             -count=1 -v -timeout=10m 2>&1 | tee ../evidence/unit-race.log
-          ! grep -Eq -- 'no tests to run|--- SKIP:' ../evidence/unit-race.log
+          if grep -Eq -- 'no tests to run|--- SKIP:' ../evidence/unit-race.log; then
+            exit 1
+          fi
           grep -F -- '--- PASS: TestGatewayUsageWritersSnapshotRequestTarget' ../evidence/unit-race.log
           grep -F -- '--- PASS: TestNewAPIGatewayCostsFollowRequestTargetWithoutSharedWrites' ../evidence/unit-race.log
           grep -F -- '--- PASS: TestUsagePlatformSnapshotsSelectedAccount' ../evidence/unit-race.log
@@ -81,7 +83,9 @@ jobs:
           go test -race -tags=integration ./internal/repository \
             -run '^TestConcurrencyCacheSuite$/^TestGatewayTargetsShareAccountConcurrency$' \
             -count=1 -v -timeout=10m 2>&1 | tee ../evidence/concurrency-redis.log
-          ! grep -Eq -- 'no tests to run|--- SKIP:' ../evidence/concurrency-redis.log
+          if grep -Eq -- 'no tests to run|--- SKIP:' ../evidence/concurrency-redis.log; then
+            exit 1
+          fi
           grep -F -- '--- PASS: TestConcurrencyCacheSuite/TestGatewayTargetsShareAccountConcurrency' ../evidence/concurrency-redis.log
       - uses: actions/upload-artifact@v7
         if: always()
