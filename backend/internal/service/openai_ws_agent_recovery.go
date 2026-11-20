@@ -1371,28 +1371,27 @@ func acceptedOpenAIWSToolHistory(source []byte, account *Account, model string) 
 	// Bound the tool data we normalize and fingerprint, after validating the
 	// entire original frame (including ambiguous keys and encrypted items).
 	if len(source) > 8<<20 {
-		var tools bytes.Buffer
-		tools.WriteString(`{"input":[`)
+		const prefix = `{"input":[`
+		tools := []byte(prefix)
 		fits := true
 		gjson.GetBytes(source, "input").ForEach(func(_, item gjson.Result) bool {
 			switch item.Get("type").String() {
 			case "function_call", "custom_tool_call", "tool_search_call", "function_call_output", "custom_tool_call_output", "tool_search_output":
-				if tools.Len()+len(item.Raw)+3 > 8<<20 {
+				if len(tools)+len(item.Raw)+3 > 8<<20 {
 					fits = false
 					return false
 				}
-				if tools.Len() > len(`{"input":[`) {
-					tools.WriteByte(',')
+				if len(tools) > len(prefix) {
+					tools = append(tools, ',')
 				}
-				tools.WriteString(item.Raw)
+				tools = append(tools, item.Raw...)
 			}
 			return true
 		})
 		if !fits {
 			return nil
 		}
-		tools.WriteString("]}")
-		source = tools.Bytes()
+		source = append(tools, ']', '}')
 	}
 	if _, reason := inspectOpenAIWSCompletedTools(source); reason != "" {
 		return nil
