@@ -29,8 +29,8 @@ func oauth429PolicyAccount(ctx context.Context, tx *sql.Tx, id int64) (service.O
 	}
 	var credentials, extra []byte
 	a := &service.Account{ID: id}
-	err := tx.QueryRowContext(ctx, `SELECT name,platform,type,status,schedulable,concurrency,credentials,COALESCE(extra,'{}') FROM accounts
- WHERE id=$1 AND deleted_at IS NULL AND parent_account_id IS NULL FOR UPDATE`, id).Scan(&a.Name, &a.Platform, &a.Type, &a.Status, &a.Schedulable, &a.Concurrency, &credentials, &extra)
+	err := tx.QueryRowContext(ctx, `SELECT name,platform,type,status,schedulable,concurrency,expires_at,auto_pause_on_expired,credentials,COALESCE(extra,'{}') FROM accounts
+ WHERE id=$1 AND deleted_at IS NULL AND parent_account_id IS NULL FOR UPDATE`, id).Scan(&a.Name, &a.Platform, &a.Type, &a.Status, &a.Schedulable, &a.Concurrency, &a.ExpiresAt, &a.AutoPauseOnExpired, &credentials, &extra)
 	if err != nil {
 		return cfg, nil, err
 	}
@@ -43,7 +43,7 @@ func oauth429PolicyAccount(ctx context.Context, tx *sql.Tx, id int64) (service.O
 	return cfg, a, nil
 }
 func oauth429Eligible(c service.OAuthAutoConfig, a *service.Account, model string) bool {
-	return c.Revision != "" && c.DegradationAction.Enabled && c.DegradationAction.UsesUpstream429() && c.DegradationAction.Independent429.Enabled && c.DegradationAction.Validate() == nil && a != nil && a.Type == service.AccountTypeOAuth && a.Schedulable && a.Status == service.StatusActive && a.Concurrency > 0 && !a.IsOAuth429ModelBlocked(model) && oauth429RequestModel(a, model) != ""
+	return c.Revision != "" && c.DegradationAction.Enabled && c.DegradationAction.UsesUpstream429() && c.DegradationAction.Independent429.Enabled && c.DegradationAction.Validate() == nil && a != nil && a.Type == service.AccountTypeOAuth && a.Schedulable && a.Status == service.StatusActive && a.Concurrency > 0 && !(a.AutoPauseOnExpired && a.ExpiresAt != nil && !time.Now().Before(*a.ExpiresAt)) && !a.IsOAuth429ModelBlocked(model) && oauth429RequestModel(a, model) != ""
 }
 
 // The HTTP wire model may be reachable only through a public mapping alias.
@@ -223,7 +223,7 @@ func (r *accountRepository) ClaimOAuth429(ctx context.Context) (*service.OAuth42
 	}
 	// Select without taking task locks; all mutations follow settings/account/task
 	// order, also used by cancellation triggers and account administration.
-	rows, err := db.QueryContext(ctx, `SELECT account_id,model FROM oauth_429_tasks WHERE state IN ('pending','running') ORDER BY updated_at LIMIT 100`)
+	rows, err := db.QueryContext(ctx, `SELECT account_id,model FROM oauth_429_tasks WHERE state='pending' OR (state='running' AND (data->>'lease_until')::timestamptz<=clock_timestamp()) ORDER BY updated_at LIMIT 100`)
 	if err != nil {
 		return nil, err
 	}
@@ -458,6 +458,7 @@ func (r *accountRepository) OAuth429Current(ctx context.Context, task *service.O
  AND (t.data->>'lease_until')::timestamptz>clock_timestamp()
  AND (t.data->>'expires_at')::timestamptz>clock_timestamp()
  AND a.deleted_at IS NULL AND a.schedulable AND a.status='active'
+ AND NOT(a.auto_pause_on_expired AND a.expires_at IS NOT NULL AND a.expires_at<=clock_timestamp())
  AND s.value::jsonb->>'revision'=t.data->>'revision'
  AND s.value::jsonb->'degradation_action'->>'enabled'='true'
  AND s.value::jsonb->'degradation_action'->'independent_429'->>'enabled'='true')`, service.SettingKeyOAuthAutoConfig, task.AccountID, task.Model, task.TriggerID, task.Lease).Scan(&current)

@@ -150,6 +150,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          (cd backend && go test -race -tags=unit ./internal/service -run '^TestOAuth429' -count=1 -v) 2>&1 | tee evidence/classifier.log
+          bash .github/scripts/assert-test-log-clean.sh green evidence/classifier.log
           (cd backend && go test -tags=unit ./internal/handler/admin -run '^TestOAuthAutoConfig.*Degradation|^Test.*Degradation' -count=1 -v) 2>&1 | tee evidence/handler.log
           bash .github/scripts/assert-test-log-clean.sh green evidence/handler.log
           (cd backend && go test -race -tags=integration ./internal/handler/admin -run '^TestOAuth429HandlerPostgresWorkerLoopback$' -count=1 -v -timeout=10m) 2>&1 | tee evidence/handler-worker.log
