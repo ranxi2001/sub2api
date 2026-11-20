@@ -28,10 +28,13 @@ func prepareConfirmedProbeFixture(t *testing.T, id int64) {
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=$1`, service.SettingKeyOAuthAutoConfig).Scan(&raw))
 	var cfg service.OAuthAutoConfig
 	require.NoError(t, json.Unmarshal([]byte(raw), &cfg))
+	if !cfg.DegradationAction.UsesCandyRetest() {
+		return
+	}
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	review := service.OAuthDegradationCandyReview{ModelID: "gpt-6-luna", LeaseUntil: now.Add(10 * time.Minute), StartedAt: now, Incorrect: 2, Revision: cfg.Revision}
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO scheduled_test_plans(account_id,model_id,cron_expression,enabled,pelican_config,updated_at,running_until)
- VALUES($1,$2,'*/30 * * * *',true,'{"quality":{}}',$3,$4) RETURNING id,updated_at`, id, review.ModelID, now.Add(-time.Minute), review.LeaseUntil).Scan(&review.PlanID, &review.PlanUpdatedAt))
+ VALUES($1,$2,'*/30 * * * *',true,'{"quality":{"action":"observe_only"}}',$3,$4) RETURNING id,updated_at`, id, review.ModelID, now.Add(-time.Minute), review.LeaseUntil).Scan(&review.PlanID, &review.PlanUpdatedAt))
 	// Keep the separate action-confirmation fixture out of the performance sample
 	// denominator; these tests supply their own precise quality-window samples.
 	_, err := integrationDB.ExecContext(ctx, `INSERT INTO scheduled_test_results(plan_id,status,started_at,finished_at,created_at,pelican_config,quality_round_id,quality_action,quality_judgment,error_message)
