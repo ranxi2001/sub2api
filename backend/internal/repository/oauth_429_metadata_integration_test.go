@@ -86,7 +86,7 @@ func (oauth429TransportFailure) RoundTrip(*http.Request) (*http.Response, error)
 	return nil, fmt.Errorf("fixture transport failed before headers")
 }
 func TestOAuth429HTTPWithoutResponseDoesNotSample(t *testing.T) {
-	repo, a, _ := oauth429Fixture(t, nil)
+	_, a, _ := oauth429Fixture(t, nil)
 	transport := &accountResponseTransport{base: oauth429TransportFailure{}}
 	for i := 0; i < 20; i++ {
 		ctx := context.WithValue(t.Context(), ctxkey.Model, "gpt-6-astra")
