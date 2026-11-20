@@ -133,7 +133,7 @@ func nextPlanRun(plan *ScheduledTestPlan, now time.Time) (time.Time, error) {
 		cfg.Ciallo = nil
 		if cfg.QuestionKind == QualityCialloQuestionKind {
 			if cfg.Quality == nil {
-				return time.Time{}, fmt.Errorf("Ciallo requires a quality rule")
+				return time.Time{}, fmt.Errorf("ciallo requires a quality rule")
 			}
 			cfg.Prompt = QualityCialloQuestionKind
 			cfg.Quality.ExpectedAnswer = ""
