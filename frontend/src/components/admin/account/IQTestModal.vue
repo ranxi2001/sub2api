@@ -18,7 +18,7 @@
         </span>
       </div>
 
-      <div class="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1 dark:border-dark-600 dark:bg-dark-800" role="group">
+      <div class="inline-flex flex-wrap rounded-lg border border-gray-200 bg-gray-50 p-1 dark:border-dark-600 dark:bg-dark-800" role="group">
         <button
           v-for="mode in testModes"
           :key="mode"
@@ -30,8 +30,9 @@
           :class="testMode === mode ? 'bg-white text-primary-700 shadow-sm dark:bg-dark-700 dark:text-primary-300' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'"
           @click="selectMode(mode)"
         >
-          {{ t(mode === 'modeltrace' ? 'modelTrace.tab' : mode === 'probe' ? 'admin.accounts.pelicanTest.modeProbe' : 'admin.accounts.pelicanTest.modeQuestion') }}
+          {{ t(mode === 'ciallo' ? 'qualityOps.ciallo.title' : mode === 'modeltrace' ? 'modelTrace.tab' : mode === 'probe' ? 'admin.accounts.pelicanTest.modeProbe' : 'admin.accounts.pelicanTest.modeQuestion') }}
         </button>
+        <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.ciallo" :user-id="auth.user?.id" />
       </div>
 
       <div v-if="testMode === 'probe'" class="space-y-4" data-testid="probe-panel">
@@ -118,6 +119,10 @@
         </div>
       </div>
 
+      <template v-else-if="testMode === 'ciallo'">
+        <CialloPanel v-if="show && account" :key="account.id" v-model:model-id="modelId" :account="account"
+          :model-options="modelOptions" :reasoning-levels="reasoningLevels" @running="running = $event" />
+      </template>
       <template v-else-if="testMode === 'modeltrace'">
         <ModelTracePanel v-if="show && account" :key="account.id" v-model:model-id="modelId" :account="account"
           :model-options="modelOptions" :reasoning-levels="reasoningLevels" @running="running = $event" />
@@ -315,6 +320,9 @@ import type { Account, AccountListItem, PelicanQuestion, PelicanTestConfig, Sche
 import ScheduledTestsPanel from './ScheduledTestsPanel.vue'
 import PelicanRecordsDashboard from './PelicanRecordsDashboard.vue'
 import TestModelSelect from './TestModelSelect.vue'
+import CialloPanel from './CialloPanel.vue'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import ModelTracePanel from './ModelTracePanel.vue'
 
 const { t } = useI18n()
@@ -325,8 +333,8 @@ const PROBE_CONTROLLER_KEY = 'state-probe'
 const PROBE_RESULT_LIMIT = 5
 const PROBE_FAILURE_KINDS = new Set(['unsupported', 'account_error', 'rate_limited', 'model_unsupported', 'upstream_error', 'network_error', 'stream_error', 'no_ticket', 'cancelled'])
 
-type TestMode = 'question' | 'probe' | 'modeltrace'
-const testModes: TestMode[] = ['question', 'probe', 'modeltrace']
+type TestMode = 'question' | 'probe' | 'modeltrace' | 'ciallo'
+const testModes: TestMode[] = ['question', 'probe', 'modeltrace', 'ciallo']
 
 type RunStatus = 'running' | 'success' | 'error'
 interface TestRun {
@@ -357,7 +365,7 @@ interface TestRecord {
   runs: TestRun[]
 }
 
-const props = defineProps<{ show: boolean; account: Account | null; accounts?: AccountListItem[] }>()
+const props = defineProps<{ show: boolean; initialMode?: 'ciallo'; account: Account | null; accounts?: AccountListItem[] }>()
 const emit = defineEmits<{ (event: 'close'): void }>()
 
 const questionKind = ref<IntelligenceQuestion>('candy')
@@ -784,7 +792,7 @@ watch(() => [props.show, props.account?.id] as const, ([show]) => {
     parallelCount.value = 1
     runs.value = []
     controllers.get(PROBE_CONTROLLER_KEY)?.abort()
-    testMode.value = 'question'
+    testMode.value = props.initialMode || 'question'
     probeResults.value = []
     probeError.value = ''
     void loadModels()

@@ -45,6 +45,7 @@ export const NEW_FEATURE_NOTICES = {
   oauthDegradationActions: 'oauth-degradation-actions-initial-announcement',
   openaiAPIKeyFallback: 'openai-apikey-fallback-initial-announcement',
   dashboardAccountConcurrency: 'dashboard-account-concurrency-initial-announcement',
+  ciallo: 'account-quality-ciallo-v1',
   qualityRetestRest: 'quality-retest-rest-initial-announcement',
   qualityOAuth401Cleanup: 'quality-oauth-401-cleanup-initial-announcement',
   keyRisk: 'key-risk-notices-acknowledgement-initial-announcement',

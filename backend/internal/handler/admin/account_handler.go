@@ -1507,6 +1507,26 @@ func (h *AccountHandler) PelicanTest(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
+	if req.PromptMode == "ciallo" {
+		model := strings.TrimSpace(req.ModelID)
+		if model == "" || len(model) > 100 || accountID <= 0 {
+			response.BadRequest(c, "Invalid account or model")
+			return
+		}
+		switch req.ReasoningEffort {
+		case "", "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra":
+		default:
+			response.BadRequest(c, "Invalid reasoning effort")
+			return
+		}
+		result, err := h.accountTestService.RunCiallo(c.Request.Context(), accountID, model, req.ReasoningEffort)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		response.Success(c, result)
+		return
+	}
 	if req.PromptMode == service.PelicanPromptModeRandom {
 		cfg, err := service.ResolveManualPelicanQuestion(req.PelicanQuestion)
 		if err != nil {
