@@ -138,27 +138,30 @@ func (w *probePenaltyResponse) validate() error {
 		}
 		return nil
 	}
-	usage, stop := w.observedUsage, false
+	usage, stop, terminal := w.observedUsage, false, false
 	for _, block := range bytes.Split(bytes.ReplaceAll(body, []byte("\r\n"), []byte("\n")), []byte("\n\n")) {
 		payload := probeEventData(block)
 		switch gjson.GetBytes(payload, "type").String() {
 		case "message_delta":
+			terminal = true
 			usage = usage || gjson.GetBytes(payload, "usage").IsObject()
 		case "message_stop":
 			stop = true
 		case "response.completed", "response.incomplete":
+			terminal = true
 			usage, stop = gjson.GetBytes(payload, "response.usage").IsObject(), true
 		case "error", "response.failed":
 			return errors.New("probe penalty response contains an error")
 		}
 		if gjson.GetBytes(payload, "usage.completion_tokens").Exists() {
+			terminal = true
 			usage = true
 		}
 		if bytes.Equal(payload, []byte("[DONE]")) {
 			stop = true
 		}
 	}
-	if !usage || !stop {
+	if !usage || !stop || !terminal {
 		return errors.New("probe penalty requires completed Claude stream usage")
 	}
 	return nil

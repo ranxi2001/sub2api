@@ -206,3 +206,10 @@ func TestProbePenaltySparseTerminalUsageAcrossGateways(t *testing.T) {
 		}
 	}
 }
+
+func TestProbePenaltyRequiresTerminalUsageCarrier(t *testing.T) {
+	w, _ := probeTestWriter(t, true)
+	_, err := w.WriteString("event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10}}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+	require.NoError(t, err)
+	require.Error(t, w.validate(), "a malformed stream cannot settle without a terminal frame to carry the equivalent usage")
+}
