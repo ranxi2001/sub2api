@@ -11,12 +11,23 @@ import (
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 )
 
 // ciallo-v1 recognizes the three greeting forms in the field examples published
 // in narutoFyy/sub2-fwq2@48e1184. Require the whole greeting at the start;
 // a quoted word, plain emoji, or an unfinished face is insufficient.
-var cialloGreeting = regexp.MustCompile(`(?i)^ciallo[!！~～[:blank:]]*(?:[(（]∠・ω[<＜][[:blank:]]*[)）]⌒[☆★]|[(（]≧▽≦[)）]|[(（]\\^_\\^[)）])`)
+var cialloGreeting = regexp.MustCompile(`(?i)^ciallo[!！~～[:blank:]]*(?:[(（]∠・ω[<＜][[:blank:]]*[)）]⌒[☆★]|[(（]≧▽≦[)）]|[(（]\^_\^[)）])`)
+
+const (
+	QualityCialloQuestionKind = "ciallo"
+	cialloTemplateVersion     = "ciallo-v1"
+	cialloJudgeVersion        = "greeting-v1"
+)
+
+func matchedCialloGreeting(answer string) string {
+	return cialloGreeting.FindString(strings.TrimSpace(answer))
+}
 
 type CialloResult struct {
 	Model           string    `json:"model"`
@@ -31,6 +42,47 @@ type CialloResult struct {
 	Reason          string    `json:"reason,omitempty"`
 	// Return only the recognized greeting. Never retain arbitrary upstream text.
 	Greeting string `json:"greeting,omitempty"`
+}
+
+// Result-only, owned by one scheduled sample. Adapters that cannot confirm a
+// normal upstream finish leave the sample unassessable.
+type CialloEvidence struct {
+	TemplateVersion                string `json:"template_version"`
+	JudgeVersion                   string `json:"judge_version"`
+	Protocol                       string `json:"protocol,omitempty"`
+	complete, interrupted, endTurn bool
+}
+type cialloEvidenceKey struct{}
+
+func (e *CialloEvidence) observe(data gjson.Result, eventType string) {
+	switch e.Protocol {
+	case "openai":
+		switch eventType {
+		case "response.completed", "response.done":
+			status := data.Get("response.status").String()
+			e.complete = status == "" || status == "completed"
+			e.interrupted = e.interrupted || !e.complete || data.Get("response.incomplete_details").IsObject()
+		case "response.incomplete", "response.failed", "error":
+			e.interrupted = true
+		}
+	case "anthropic":
+		if reason := data.Get("delta.stop_reason").String(); reason != "" {
+			e.endTurn = reason == "end_turn" || reason == "stop_sequence"
+		}
+		if eventType == "message_stop" {
+			e.complete = e.endTurn
+		}
+	case "chat":
+		if reason := data.Get("choices.0.finish_reason").String(); reason != "" {
+			e.complete = reason == "stop"
+			e.interrupted = e.interrupted || !e.complete
+		}
+	case "gemini":
+		if reason := data.Get("candidates.0.finishReason").String(); reason != "" {
+			e.complete = reason == "STOP"
+			e.interrupted = e.interrupted || !e.complete
+		}
+	}
 }
 
 type cialloContextKey struct{}
@@ -54,7 +106,7 @@ func (s *AccountTestService) RunCiallo(ctx context.Context, accountID int64, mod
 	}
 	defer s.cialloAccounts.Delete(accountID)
 	result := &CialloResult{Model: model, MappedModel: account.GetMappedModel(model), Protocol: env.Protocol, ReasoningEffort: effort,
-		TemplateVersion: "ciallo-v1", JudgeVersion: "greeting-v1", StartedAt: time.Now(), Outcome: "unassessable"}
+		TemplateVersion: cialloTemplateVersion, JudgeVersion: cialloJudgeVersion, StartedAt: time.Now(), Outcome: "unassessable"}
 	ctx, cancel := context.WithTimeout(ctx, 150*time.Second)
 	defer cancel()
 	ctx = context.WithValue(ctx, cialloContextKey{}, true)
@@ -79,7 +131,7 @@ func (s *AccountTestService) RunCiallo(ctx context.Context, accountID int64, mod
 	case strings.TrimSpace(output) == "":
 		result.Reason = "empty"
 	default:
-		result.Greeting = cialloGreeting.FindString(strings.TrimSpace(output))
+		result.Greeting = matchedCialloGreeting(output)
 		result.Outcome = "unmatched"
 		if result.Greeting != "" {
 			result.Outcome = "matched"

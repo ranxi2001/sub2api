@@ -1060,7 +1060,20 @@ describe('quality operations', () => {
     saved.unmount()
   })
 
-  it.each(['state_probe', 'candy'] as const)('preserves the saved 5xx trigger when editing a %s rule', async questionKind => {
+  it('saves Ciallo as the scheduled question with its built-in judge', async () => {
+    const wrapper = mountView(); await flushPromises()
+    await wrapper.get('[data-testid="quality-rule-edit"]').trigger('click'); await flushPromises()
+    await wrapper.get('[data-testid="quality-question-kind"]').setValue('ciallo')
+    expect(wrapper.find('[data-testid="quality-judge-kind"]').exists()).toBe(false)
+    await wrapper.get('#quality-rule-form').trigger('submit'); await flushPromises()
+    const patch = vi.mocked(scheduledTests.update).mock.calls.at(-1)?.[1].pelican_config
+    expect(patch?.question_kind).toBe('ciallo')
+    expect(patch?.prompt).toBe('ciallo')
+    expect(patch?.quality?.judge).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it.each(['state_probe', 'candy', 'ciallo'] as const)('preserves the saved 5xx trigger when editing a %s rule', async questionKind => {
     const plan = rules()[0]
     plan.pelican_config!.question_kind = questionKind
     plan.pelican_config!.quality!.trigger_on_upstream_5xx = true
@@ -1815,7 +1828,7 @@ describe('quality operations', () => {
     expect(wrapper.find('[role="alert"]').text()).toContain('qualityOps.configureJudge')
     wrapper.unmount()
   })
-  it.each(['state_probe', 'candy'] as const)('shows unsupported %s models as neutral skips without a fabricated answer', async kind => {
+  it.each(['state_probe', 'candy', 'ciallo'] as const)('shows unsupported %s models as neutral skips without a fabricated answer', async kind => {
     const plan = rules()[0]
     plan.pelican_config!.question_kind = kind
     if (kind === 'candy') plan.pelican_config!.quality!.judge = { group_id: 21, model_id: 'test-judge', prompt: 'Compare answers' }

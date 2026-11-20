@@ -88,6 +88,17 @@ describe('IQTestModal', () => {
     vi.restoreAllMocks()
   })
 
+  it('selects Ciallo in the question bank without generating a sample on selection', async () => {
+    const wrapper = mountModal()
+    const vm = wrapper.vm as any
+    expect(vm.questionOptions.some((option: { value: string }) => option.value === 'ciallo')).toBe(true)
+    vm.selectQuestion('ciallo')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="ciallo-panel"]').exists()).toBe(true)
+    expect(vi.mocked(global.fetch).mock.calls.filter(([url]) => String(url).includes('/pelican-test'))).toHaveLength(0)
+    wrapper.unmount()
+  })
+
   it('freezes one random question across samples and stores its version with the actual prompt', async () => {
     const question = { id: 'pelican-bicycle', version: 'svg-motion-v1', round_id: 'manual:00000000000000000000000000000000', source: 'builtin:svg-motion', prompt: 'Draw fixture', criteria: ['Fixture rubric'] }
     vi.spyOn(apiClient, 'get').mockResolvedValue({ data: { prompt: question.prompt, actual_prompt: 'Draw fixture\n\nHTML only', pelican_question: question } })

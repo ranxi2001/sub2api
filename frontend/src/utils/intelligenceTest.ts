@@ -18,7 +18,7 @@ export type StateProbeVerdict = 'healthy' | 'degraded' | 'inconclusive'
 
 // 结果是纯文本（不是 HTML 动画）的题型。
 export function isTextAnswerKind(kind?: string): boolean {
-  return kind === 'candy' || kind === 'random_reasoning' || kind === STATE_PROBE_QUESTION
+  return kind === 'candy' || kind === 'ciallo' || kind === 'random_reasoning' || kind === STATE_PROBE_QUESTION
 }
 
 // 与后端约定：满血 = success；降智 = failed + state_degraded；其余失败都是无法判断。

@@ -48,6 +48,11 @@ func (s *AccountTestService) RunPelicanBackground(ctx context.Context, accountID
 		cfg = &copy
 
 	}
+	var ciallo *CialloEvidence
+	if cfg.QuestionKind == QualityCialloQuestionKind {
+		ciallo = &CialloEvidence{TemplateVersion: cialloTemplateVersion, JudgeVersion: cialloJudgeVersion}
+		ctx = context.WithValue(ctx, cialloEvidenceKey{}, ciallo)
+	}
 	started := time.Now()
 	directOAuth401, directOAuthRevoked401, nativeOAuthTransport := false, false, false
 	ctx = withPelicanTestOptions(ctx, pelicanTestOptions{
@@ -80,12 +85,16 @@ func (s *AccountTestService) RunPelicanBackground(ctx context.Context, accountID
 		output = ""
 		message = pelicanErrHistoryLimit
 	}
+	if ciallo != nil && message == "" && (!ciallo.complete || ciallo.interrupted || ctx.Err() != nil) {
+		message = "ciallo_incomplete"
+	}
 	status := "success"
 	if message != "" {
 		status = "failed"
 	}
 	finished := time.Now()
 	snapshot := *cfg
+	snapshot.Ciallo = ciallo
 	snapshot.ModelID = model
 	snapshot.ActualPrompt = intelligenceTestPrompt(cfg)
 	return &ScheduledTestResult{DirectOAuth401: directOAuth401, DirectOAuthRevoked401: directOAuthRevoked401, Status: status, ResponseText: output, ErrorMessage: message, LatencyMs: finished.Sub(started).Milliseconds(), StartedAt: started, FinishedAt: finished, PelicanConfig: &snapshot}, nil
@@ -454,6 +463,14 @@ func (s *ScheduledTestRunnerService) runPelicanSample(ctx context.Context, plan 
 			if CandyAnswerCorrect(result.ResponseText) {
 				judgment.Verdict = "correct"
 			}
+		} else if plan.PelicanConfig.QuestionKind == QualityCialloQuestionKind {
+			judgment = &QualityJudgment{Kind: QualityCialloQuestionKind, RulesVersion: cialloJudgeVersion, Verdict: "unknown", Reason: "incomplete"}
+			if evidence := snapshot.Ciallo; evidence != nil && evidence.complete && !evidence.interrupted && strings.TrimSpace(result.ResponseText) != "" {
+				judgment.Verdict, judgment.Reason = "incorrect", "unmatched"
+				if matchedCialloGreeting(result.ResponseText) != "" {
+					judgment.Verdict, judgment.Reason = "correct", "matched"
+				}
+			}
 		} else if s.judgeQuality != nil {
 			judgment = s.judgeQuality(ctx, plan.AccountID, plan.PelicanConfig, result.ResponseText)
 		}
@@ -513,6 +530,9 @@ func isBuiltinCandyPlan(cfg *PelicanTestConfig) bool {
 
 // Missing kind preserves HTML validation for saved plans from older versions.
 func intelligenceTestPrompt(cfg *PelicanTestConfig) string {
+	if cfg.QuestionKind == QualityCialloQuestionKind {
+		return QualityCialloQuestionKind
+	}
 	if cfg.Quality != nil {
 		return cfg.Prompt + "\n\n只输出最终答案，不要解释。"
 	}

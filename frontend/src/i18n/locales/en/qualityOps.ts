@@ -1,5 +1,6 @@
 export default {
   "ciallo": {
+    "ruleHint": "Run ciallo on the configured models, effort and schedule. The built-in judge matches a complete reply starting with a recognized greeting and emoticon. Outcomes feed the configured action. Select observation only to collect results without applying an action.",
     "title": "Ciallo test",
     "hint": "Send ciallo once to a native OpenAI Responses text account. Usage charges may apply. Completed replies are checked for an opening greeting and emoticon. The last five results are stored in this browser. A match cannot identify the underlying model.",
     "start": "Run once",

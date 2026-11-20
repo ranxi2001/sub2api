@@ -13,12 +13,12 @@
             <div class="text-xs text-gray-500 dark:text-gray-400">{{ account.platform }} · {{ t('admin.accounts.pelicanTest.subtitle') }}</div>
           </div>
         </div>
-        <span v-if="testMode === 'question'" class="whitespace-nowrap rounded-full bg-white px-2.5 py-1 text-xs font-medium text-amber-700 shadow-sm dark:bg-dark-800 dark:text-amber-300">
+        <span v-if="testMode === 'question' && questionKind !== 'ciallo'" class="whitespace-nowrap rounded-full bg-white px-2.5 py-1 text-xs font-medium text-amber-700 shadow-sm dark:bg-dark-800 dark:text-amber-300">
           {{ t('admin.accounts.pelicanTest.noScoring') }}
         </span>
       </div>
 
-      <div class="inline-flex flex-wrap rounded-lg border border-gray-200 bg-gray-50 p-1 dark:border-dark-600 dark:bg-dark-800" role="group">
+      <div class="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1 dark:border-dark-600 dark:bg-dark-800" role="group">
         <button
           v-for="mode in testModes"
           :key="mode"
@@ -30,9 +30,8 @@
           :class="testMode === mode ? 'bg-white text-primary-700 shadow-sm dark:bg-dark-700 dark:text-primary-300' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'"
           @click="selectMode(mode)"
         >
-          {{ t(mode === 'ciallo' ? 'qualityOps.ciallo.title' : mode === 'modeltrace' ? 'modelTrace.tab' : mode === 'probe' ? 'admin.accounts.pelicanTest.modeProbe' : 'admin.accounts.pelicanTest.modeQuestion') }}
+          {{ t(mode === 'modeltrace' ? 'modelTrace.tab' : mode === 'probe' ? 'admin.accounts.pelicanTest.modeProbe' : 'admin.accounts.pelicanTest.modeQuestion') }}
         </button>
-        <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.ciallo" :user-id="auth.user?.id" />
       </div>
 
       <div v-if="testMode === 'probe'" class="space-y-4" data-testid="probe-panel">
@@ -119,20 +118,19 @@
         </div>
       </div>
 
-      <template v-else-if="testMode === 'ciallo'">
-        <CialloPanel v-if="show && account" :key="account.id" v-model:model-id="modelId" :account="account"
-          :model-options="modelOptions" :reasoning-levels="reasoningLevels" @running="running = $event" />
-      </template>
       <template v-else-if="testMode === 'modeltrace'">
         <ModelTracePanel v-if="show && account" :key="account.id" v-model:model-id="modelId" :account="account"
           :model-options="modelOptions" :reasoning-levels="reasoningLevels" @running="running = $event" />
       </template>
       <template v-else>
       <div>
-        <label class="input-label mb-1.5 block">{{ t('admin.accounts.pelicanTest.question') }}</label>
+        <label class="input-label mb-1.5 block">{{ t('admin.accounts.pelicanTest.question') }} <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.ciallo" :user-id="auth.user?.id" /></label>
         <Select data-testid="question-select" :model-value="questionKind" :options="questionOptions" :disabled="running" @update:model-value="selectQuestion" />
         <p v-if="questionKind === 'candy'" class="mt-2 text-xs text-gray-500">{{ t('admin.accounts.pelicanTest.candyHint') }}</p>
       </div>
+      <CialloPanel v-if="questionKind === 'ciallo' && show && account" :key="account.id" v-model:model-id="modelId" :account="account"
+        :model-options="modelOptions" :reasoning-levels="reasoningLevels" @running="running = $event" />
+      <template v-if="questionKind !== 'ciallo'">
       <template v-if="questionKind === 'pelican'">
         <PelicanPromptMode :model-value="promptMode" @update:model-value="selectPromptMode" :disabled="running || preparingQuestion" />
         <template v-if="promptMode === 'random'">
@@ -272,11 +270,12 @@
         </div>
       </div>
       </template>
+      </template>
     </div>
 
     <template #footer>
       <div class="flex w-full items-center justify-between gap-3">
-        <button v-if="testMode === 'question'" type="button" class="btn btn-secondary" :disabled="running || !hasDownloadable" @click="downloadAll">
+        <button v-if="testMode === 'question' && questionKind !== 'ciallo'" type="button" class="btn btn-secondary" :disabled="running || !hasDownloadable" @click="downloadAll">
           <Icon name="download" size="sm" />
           {{ t('admin.accounts.pelicanTest.downloadAll') }}
         </button>
@@ -288,7 +287,7 @@
             <Icon v-else name="play" size="sm" />
             {{ running ? t('admin.accounts.pelicanTest.probe.probing') : t('admin.accounts.pelicanTest.probe.start') }}
           </button>
-          <button v-else-if="testMode === 'question' && activeTab !== 'schedule'" type="button" class="btn btn-primary flex items-center gap-2" :disabled="running || !canStart" @click="startTest">
+          <button v-else-if="testMode === 'question' && questionKind !== 'ciallo' && activeTab !== 'schedule'" type="button" class="btn btn-primary flex items-center gap-2" :disabled="running || !canStart" @click="startTest">
             <Icon v-if="running" name="refresh" size="sm" class="animate-spin" />
             <Icon v-else name="play" size="sm" />
             {{ running ? t('admin.accounts.pelicanTest.generating') : t('admin.accounts.pelicanTest.start') }}
@@ -333,8 +332,8 @@ const PROBE_CONTROLLER_KEY = 'state-probe'
 const PROBE_RESULT_LIMIT = 5
 const PROBE_FAILURE_KINDS = new Set(['unsupported', 'account_error', 'rate_limited', 'model_unsupported', 'upstream_error', 'network_error', 'stream_error', 'no_ticket', 'cancelled'])
 
-type TestMode = 'question' | 'probe' | 'modeltrace' | 'ciallo'
-const testModes: TestMode[] = ['question', 'probe', 'modeltrace', 'ciallo']
+type TestMode = 'question' | 'probe' | 'modeltrace'
+const testModes: TestMode[] = ['question', 'probe', 'modeltrace']
 
 type RunStatus = 'running' | 'success' | 'error'
 interface TestRun {
@@ -365,10 +364,10 @@ interface TestRecord {
   runs: TestRun[]
 }
 
-const props = defineProps<{ show: boolean; initialMode?: 'ciallo'; account: Account | null; accounts?: AccountListItem[] }>()
+const props = defineProps<{ show: boolean; account: Account | null; accounts?: AccountListItem[] }>()
 const emit = defineEmits<{ (event: 'close'): void }>()
 
-const questionKind = ref<IntelligenceQuestion>('candy')
+const questionKind = ref<IntelligenceQuestion | 'ciallo'>('candy')
 const prompt = ref(questionPrompt('candy'))
 const promptMode = ref<'custom' | 'random'>('custom')
 const questionSnapshot = ref<PelicanTestConfig | null>(null)
@@ -427,13 +426,13 @@ const testMode = ref<TestMode>('question')
 const probeResults = ref<OpenAICodexStateProbeResult[]>([])
 const probeError = ref('')
 
-const deliveryContract = computed(() => questionContract(questionKind.value))
-const questionOptions = computed(() => ['candy', 'pelican'].map(value => ({ value, label: t(`admin.accounts.pelicanTest.${value}Question`) })))
+const deliveryContract = computed(() => questionKind.value === 'ciallo' ? '' : questionContract(questionKind.value))
+const questionOptions = computed(() => ['candy', 'pelican', 'ciallo'].map(value => ({ value, label: value === 'ciallo' ? t('qualityOps.ciallo.title') : t(`admin.accounts.pelicanTest.${value}Question`) })))
 function selectQuestion(value: string | number | boolean | null) {
-  if (running.value || (value !== 'candy' && value !== 'pelican')) return
+  if (running.value || (value !== 'candy' && value !== 'pelican' && value !== 'ciallo')) return
   questionKind.value = value
   promptMode.value = 'custom'
-  prompt.value = questionPrompt(value)
+  prompt.value = value === 'ciallo' ? value : questionPrompt(value)
 }
 const reasoningOptions = computed(() => reasoningLevels.value.map((value) => ({
   value,
@@ -556,7 +555,7 @@ function editSchedule(config: PelicanTestConfig, model: string) {
   if (running.value) return
   modelId.value = model
   // Server-generated questions belong to quality rules, not manual test inputs.
-  if (config.question_kind === STATE_PROBE_QUESTION || config.question_kind === 'random_reasoning') return
+  if (config.question_kind === STATE_PROBE_QUESTION || config.question_kind === 'random_reasoning' || config.question_kind === 'ciallo') return
   questionKind.value = config.question_kind || 'pelican'
   prompt.value = config.prompt
   promptMode.value = config.prompt_mode || 'custom'
@@ -690,7 +689,7 @@ async function startOne(run: TestRun, round: ManualRound) {
 }
 
 async function startTest() {
-  if (running.value || !props.account || !canStart.value) return
+  if (running.value || !props.account || !canStart.value || questionKind.value === 'ciallo') return
   viewingScheduled.value = false
   const question = promptMode.value === 'random' ? questionSnapshot.value?.pelican_question : undefined
   const round: ManualRound = {
@@ -792,7 +791,7 @@ watch(() => [props.show, props.account?.id] as const, ([show]) => {
     parallelCount.value = 1
     runs.value = []
     controllers.get(PROBE_CONTROLLER_KEY)?.abort()
-    testMode.value = props.initialMode || 'question'
+    testMode.value = 'question'
     probeResults.value = []
     probeError.value = ''
     void loadModels()

@@ -81,6 +81,19 @@ try {
   await grading.screenshot({ path: path.join(output, 'en-jev.png') })
   await page.setViewportSize({ width: 440, height: 1000 })
   await grading.screenshot({ path: path.join(output, 'en-jev-mobile.png') })
+  await page.evaluate(() => { window.qualityI18n.global.locale.value = 'zh' })
+  const question = page.getByTestId('quality-question-kind')
+  for (const [device, width] of [['mobile', 390], ['desktop', 1280]]) {
+    await page.setViewportSize({ width, height: 1000 })
+    await question.selectOption('candy')
+    await question.scrollIntoViewIfNeeded()
+    await page.screenshot({ path: path.join(output, `zh-quality-candy-${device}.png`) })
+    await question.selectOption('ciallo')
+    await page.getByTestId('quality-ciallo-hint').waitFor()
+    if (await kind.count()) throw new Error('ciallo_requires_external_judge')
+    await question.scrollIntoViewIfNeeded()
+    await page.screenshot({ path: path.join(output, `zh-quality-ciallo-${device}.png`) })
+  }
   if (failures.length || blocked.length) throw new Error('offline_render_failed')
   await fs.writeFile(path.join(output, 'verification.json'), JSON.stringify({ commit: process.env.QUALITY_HEAD_SHA, component: 'AccountQualityView.vue', synthetic: true, paidRequests: 0, applicationApiCalls: 0, failures, blocked }, null, 2))
 } catch (err) {

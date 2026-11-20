@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
@@ -57,6 +58,40 @@ func TestCialloOnlyScoresCompletedText(t *testing.T) {
 			require.NotContains(t, payload, "instructions")
 			require.NotContains(t, payload, "tools")
 			require.Zero(t, repo.mutations)
+		})
+	}
+}
+
+func TestCialloScheduledQualityRule(t *testing.T) {
+	const delta = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Ciallo！(^_^) follow-up\"}\n\n"
+	for _, tc := range []struct{ name, terminal, verdict string }{
+		{"complete", "data: {\"type\":\"response.completed\"}\n\n", "correct"},
+		{"truncated", "data: {\"type\":\"response.done\",\"response\":{\"status\":\"incomplete\"}}\n\n", ""},
+		{"disconnected", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			upstream := &queuedHTTPUpstream{responses: []*http.Response{newJSONResponse(200, delta+tc.terminal)}}
+			repo := &modelTraceRepo{account: &Account{ID: 77, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "mock-only", "base_url": "https://example.com"}}}
+			tests := &AccountTestService{accountRepo: repo, httpUpstream: upstream, cfg: &config.Config{}}
+			cfg := &PelicanTestConfig{QuestionKind: QualityCialloQuestionKind, Prompt: "stale candy prompt", ReasoningEffort: "medium", ParallelCount: 1, Quality: &QualityPolicy{Action: QualityActionObserveOnly, Judge: &QualityJudgeConfig{Kind: "llm"}, ExpectedAnswer: "21"}}
+			plan := &ScheduledTestPlan{AccountID: 77, ModelID: "sample-model", CronExpression: "*/30 * * * *", MaxResults: 10, PelicanConfig: cfg}
+			_, err := nextPlanRun(plan, time.Now())
+			require.NoError(t, err)
+			require.Nil(t, cfg.Quality.Judge)
+			require.Equal(t, "ciallo", cfg.Prompt)
+			runner := &ScheduledTestRunnerService{runPelican: tests.RunPelicanBackground}
+			result := runner.runPelicanSample(ctx, plan)
+			require.Len(t, upstream.requests, 1)
+			require.Equal(t, "ciallo", result.PelicanConfig.ActualPrompt)
+			require.Equal(t, "openai", result.PelicanConfig.Ciallo.Protocol)
+			if tc.verdict == "" {
+				require.Equal(t, "failed", result.Status)
+				require.Nil(t, result.QualityJudgment)
+			} else {
+				require.Equal(t, tc.verdict, result.QualityJudgment.Verdict)
+				require.Equal(t, cialloJudgeVersion, result.QualityJudgment.RulesVersion)
+			}
 		})
 	}
 }

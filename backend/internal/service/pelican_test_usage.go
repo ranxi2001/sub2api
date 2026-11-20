@@ -19,6 +19,7 @@ type pelicanTestUsageCollector struct {
 }
 
 type pelicanTestUsage struct {
+	ciallo      *CialloEvidence
 	protocol    string
 	model       string
 	serviceTier string
@@ -59,10 +60,20 @@ func pelicanUsageFromContext(ctx context.Context) *pelicanTestUsageCollector {
 
 func startPelicanTestUsage(ctx context.Context, protocol string) *pelicanTestUsage {
 	collector := pelicanUsageFromContext(ctx)
-	if collector == nil {
-		return nil
+	evidence, _ := ctx.Value(cialloEvidenceKey{}).(*CialloEvidence)
+	if evidence != nil {
+		evidence.Protocol = protocol
+		evidence.complete = false
+		evidence.interrupted = false
+		evidence.endTurn = false
 	}
-	u := &pelicanTestUsage{protocol: protocol, model: collector.model}
+	if collector == nil {
+		if evidence == nil {
+			return nil
+		}
+		return &pelicanTestUsage{protocol: protocol, ciallo: evidence}
+	}
+	u := &pelicanTestUsage{protocol: protocol, model: collector.model, ciallo: evidence}
 	collector.requests = append(collector.requests, u)
 	return u
 }
@@ -73,6 +84,9 @@ func (u *pelicanTestUsage) read(raw string) {
 	}
 	data := gjson.Parse(raw)
 	eventType := data.Get("type").String()
+	if u.ciallo != nil {
+		u.ciallo.observe(data, eventType)
+	}
 	if eventType == "message_stop" || eventType == "response.completed" || eventType == "response.done" || eventType == "response.failed" || eventType == "response.incomplete" {
 		u.complete = true
 	}
