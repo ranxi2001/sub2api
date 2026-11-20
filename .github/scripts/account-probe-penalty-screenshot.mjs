@@ -18,10 +18,10 @@ let server, browser
 try {
   const html = create(prefix + '.html', `<html lang="zh"><meta charset="utf-8"><div id="app"></div><script type="module" src="./${prefix}.js"></script></html>`)
   create(prefix + '.js', `
-import {createApp,defineComponent,ref} from 'vue'; import {createPinia} from 'pinia'; import {createI18n} from 'vue-i18n';
+import {createApp,defineComponent,ref,h} from 'vue'; import {createPinia} from 'pinia'; import {createI18n} from 'vue-i18n';
 import {useAuthStore} from '/src/stores/auth.ts'; import Setting from '/src/components/account/ProbePenaltySettings.vue';
 import zh from '/src/i18n/locales/zh/index.ts'; import '/src/style.css';
-const app=createApp(defineComponent({components:{Setting},setup(){return{enabled:ref(false),minimum:ref(.001)}},template:'<main class="p-6 bg-white dark:bg-dark-900"><h1 class="text-lg mb-4 dark:text-white">账号管理 / 编辑虚构 Claude 账号</h1><Setting v-model:enabled="enabled" v-model:minimum="minimum" /></main>'}));
+const app=createApp(defineComponent({setup(){const enabled=ref(false),minimum=ref(.001);return()=>h('main',{class:'p-6 bg-white dark:bg-dark-900'},[h('h1',{class:'text-lg mb-4 dark:text-white'},'账号管理 / 编辑虚构 Claude 账号'),h(Setting,{enabled:enabled.value,minimum:minimum.value,'onUpdate:enabled':v=>enabled.value=v,'onUpdate:minimum':v=>minimum.value=v})])}}));
 const pinia=createPinia();app.use(pinia);useAuthStore().user={id:41,role:'admin',email:'admin@example.invalid'};
 app.use(createI18n({legacy:false,locale:'zh-CN',messages:{'zh-CN':zh}})).mount('#app');
 `)
