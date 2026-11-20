@@ -802,10 +802,19 @@ func ProvideScheduledTestRunnerService(
 	rdb *redis.Client,
 	groupTests *PelicanGroupTestService,
 	monitor *ChannelMonitorV2Service,
+	concurrency *ConcurrencyService,
 ) *ScheduledTestRunnerService {
 	svc := NewScheduledTestRunnerService(planRepo, scheduledSvc, accountTestSvc, rateLimitSvc, cfg)
 	if rdb != nil {
 		svc.qualityTrigger = &quality5xxTrigger{queue: qualityqueue.NewRedis(rdb)}
+	}
+	if accountTestSvc != nil {
+		svc.oauth429Repo, _ = accountTestSvc.accountRepo.(OAuth429Repository)
+	}
+	svc.oauth429Slots = concurrency
+	svc.oauth429Wake = make(chan struct{}, 1)
+	if svc.oauth429Repo != nil {
+		oauth429HTTPObserver.Store(&oauth429Observer{repo: svc.oauth429Repo, wake: svc.oauth429Wake})
 	}
 	svc.judgeQuality = judge.Judge
 	svc.groupTests = groupTests

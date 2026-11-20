@@ -16,7 +16,7 @@ func TestGatewayRoleDoesNotStartGlobalMonitorOrSchedule(t *testing.T) {
 	monitor := ProvideChannelMonitorRunner(&ChannelMonitorService{}, &SettingService{}, nil, cfg)
 	require.False(t, monitor.started)
 	monitor.Stop()
-	runner := ProvideScheduledTestRunnerService(nil, nil, nil, nil, cfg, &QualityJudgeService{}, nil, &PelicanGroupTestService{}, &ChannelMonitorV2Service{})
+	runner := ProvideScheduledTestRunnerService(nil, nil, nil, nil, cfg, &QualityJudgeService{}, nil, &PelicanGroupTestService{}, &ChannelMonitorV2Service{}, nil)
 	require.Nil(t, runner.cron)
 	runner.Stop()
 	expiry := ProvideAccountExpiryService(nil, cfg)

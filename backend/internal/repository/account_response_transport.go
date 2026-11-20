@@ -7,6 +7,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/upstreamstats"
 	"github.com/Wei-Shaw/sub2api/internal/requestcapture"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
 // Passive header-only observation shared by native HTTP transports (including
@@ -17,6 +18,7 @@ func (t *accountResponseTransport) RoundTrip(req *http.Request) (*http.Response,
 	resp, err := t.base.RoundTrip(req)
 	if err == nil && resp != nil && req.Context().Err() == nil && isAccountInferenceRequest(req) {
 		upstreamstats.Default.Record(requestcapture.AccountFromContext(req.Context()), resp.StatusCode, time.Now())
+		service.ObserveOAuth429HTTP(req, requestcapture.AccountFromContext(req.Context()), resp.StatusCode)
 	}
 	return resp, err
 }

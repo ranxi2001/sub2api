@@ -328,5 +328,5 @@ func (a *Account) IsQualityModelIsolated(model string) bool {
 // Only trusted internal account tests may probe through their own isolation.
 // Normal scheduler selection and every later WebSocket turn share this gate.
 func (a *Account) qualityModelBlocked(ctx context.Context, model string) bool {
-	return ctx.Value(qualityProbeContextKey{}) != true && (a.IsQualityModelIsolated(model) || a.hasQualityModelCooldown(model))
+	return ctx.Value(qualityProbeContextKey{}) != true && (a.IsQualityModelIsolated(model) || a.hasQualityModelCooldown(model) || a.IsOAuth429ModelBlocked(model))
 }

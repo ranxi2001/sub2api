@@ -17,19 +17,20 @@ const OAuthDegradationMinHTTPResponses int64 = 20
 
 // Nil fields preserve default-on conditions for saved configurations.
 type OAuthDegradationConfig struct {
-	ProbeEnabled                     *bool    `json:"probe_enabled"`
-	CandyRetestEnabled               *bool    `json:"candy_retest_enabled"`
-	Upstream429Enabled               *bool    `json:"upstream_429_enabled"`
-	UpstreamErrorThresholdPercent    *float64 `json:"upstream_error_threshold_percent"`
-	Upstream429ShareThresholdPercent *float64 `json:"upstream_429_share_threshold_percent"`
-	Enabled                          bool     `json:"enabled"`
-	LimitConcurrency                 *bool    `json:"limit_concurrency"`
-	LimitModels                      *bool    `json:"limit_models"`
-	LimitGroups                      bool     `json:"limit_groups"`
-	GroupIDs                         []int64  `json:"group_ids"`
-	ThresholdPercent                 *float64 `json:"threshold_percent"`
-	TargetConcurrency                int      `json:"target_concurrency"`
-	Models                           []string `json:"models"`
+	Independent429                   OAuth429TestConfig `json:"independent_429"`
+	ProbeEnabled                     *bool              `json:"probe_enabled"`
+	CandyRetestEnabled               *bool              `json:"candy_retest_enabled"`
+	Upstream429Enabled               *bool              `json:"upstream_429_enabled"`
+	UpstreamErrorThresholdPercent    *float64           `json:"upstream_error_threshold_percent"`
+	Upstream429ShareThresholdPercent *float64           `json:"upstream_429_share_threshold_percent"`
+	Enabled                          bool               `json:"enabled"`
+	LimitConcurrency                 *bool              `json:"limit_concurrency"`
+	LimitModels                      *bool              `json:"limit_models"`
+	LimitGroups                      bool               `json:"limit_groups"`
+	GroupIDs                         []int64            `json:"group_ids"`
+	ThresholdPercent                 *float64           `json:"threshold_percent"`
+	TargetConcurrency                int                `json:"target_concurrency"`
+	Models                           []string           `json:"models"`
 }
 
 func DefaultOAuthDegradationConfig() OAuthDegradationConfig {
@@ -68,6 +69,9 @@ func (c OAuthDegradationConfig) HTTP429ShareThreshold() float64 {
 func (c OAuthDegradationConfig) Validate() error {
 	bad := func() error {
 		return infraerrors.BadRequest("OAUTH_DEGRADATION_INVALID", "select at least one condition and action; probe threshold must be 0–100 and HTTP thresholds greater than 0 and at most 100")
+	}
+	if !c.Independent429.Valid() {
+		return bad()
 	}
 	if c.Enabled && ((c.UsesProbe() && c.ThresholdPercent == nil) || (!c.UsesCandyRetest() && !c.UsesUpstream429()) || !c.HasActions()) {
 		return bad()

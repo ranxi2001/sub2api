@@ -400,6 +400,11 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Account not found")
 	}
+	if expected, ok := ctx.Value(oauth429ExecutionKey{}).(oauth429Execution); ok {
+		if account.ID != expected.AccountID || account.GetMappedModel(modelID) != expected.Model || account.IsCredentialShadow() || account.IsSIWCEnabled() || account.IsExcelBPSEnabled() || account.IsPrismBrowserEnabledForModel(modelID) || isOpenAIImageModel(expected.Model) {
+			return s.sendErrorAndEnd(c, "Independent test target route is unavailable")
+		}
+	}
 	bindAccountTestPlatform(c, account)
 	recordQualityBatchRoute(c, account, modelID, account.Platform+":"+account.GetAPIProtocol())
 	if expected, ok := ctx.Value(modelTraceContextKey{}).(modelTraceEnvironment); ok {
