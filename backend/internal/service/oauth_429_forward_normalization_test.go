@@ -82,7 +82,7 @@ func TestOAuth429RealForwardNormalization(t *testing.T) {
 
 func TestOAuth429EndpointResolution(t *testing.T) {
 	a := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{
-		"model_mapping": map[string]any{"alias-*": "openai/gpt-6-astra"},
+		"model_mapping":         map[string]any{"alias-*": "openai/gpt-6-astra"},
 		"compact_model_mapping": map[string]any{"alias-one": "gpt-6-luna"},
 	}}
 	require.Equal(t, "gpt-6-astra", ResolveOAuth429TargetModel(a, "alias-one", "/v1/responses"))

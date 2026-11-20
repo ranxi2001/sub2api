@@ -32,7 +32,7 @@ func (u *compactForwardHTTP) Do(req *http.Request, _ string, id int64, _ int) (*
 	target := *u.target
 	target.Path = req.URL.Path
 	next.URL, next.Host = &target, ""
-	return (&http.Client{Transport: &accountResponseTransport{base: http.DefaultTransport}, Timeout: 3*time.Second}).Do(next)
+	return (&http.Client{Transport: &accountResponseTransport{base: http.DefaultTransport}, Timeout: 3 * time.Second}).Do(next)
 }
 func (u *compactForwardHTTP) DoWithTLS(req *http.Request, p string, id int64, n int, _ *tlsfingerprint.Profile) (*http.Response, error) {
 	return u.Do(req, p, id, n)
@@ -72,7 +72,9 @@ func TestOAuth429CompactGlobalForwardWorker(t *testing.T) {
 				business := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					var body map[string]any
 					expected := ordinary
-					if strings.HasSuffix(r.URL.Path, "/compact") { expected = target }
+					if strings.HasSuffix(r.URL.Path, "/compact") {
+						expected = target
+					}
 					if json.NewDecoder(r.Body).Decode(&body) != nil || body["model"] != expected {
 						http.Error(w, "wrong actual compact wire", 400)
 						return
@@ -94,7 +96,9 @@ func TestOAuth429CompactGlobalForwardWorker(t *testing.T) {
 					_, err := gateway.Forward(ctx, c, a, []byte(`{"model":"alias-one","stream":false,"instructions":"fixture","input":[]}`))
 					return err
 				}
-				for i := 0; i < 20; i++ { _ = forward(i, "/v1/responses/compact") }
+				for i := 0; i < 20; i++ {
+					_ = forward(i, "/v1/responses/compact")
+				}
 				require.EqualValues(t, 20, calls.Load())
 				var task service.OAuth429Task
 				require.Eventually(t, func() bool {
@@ -172,20 +176,26 @@ func TestOAuth429CompactRoutingChangeFencesEveryStage(t *testing.T) {
 		require.False(t, observe(i, first, "illegal-input", "gpt-6-luna"))
 		require.False(t, observe(i+20, first, "gpt-6-astra", "gpt-6-astra"), "allowed original must not authorize arbitrary wire")
 	}
-	for i := 0; i < 20; i++ { require.Equal(t, i == 19, observe(i+40, first, "gpt-6-astra", "gpt-6-luna")) }
+	for i := 0; i < 20; i++ {
+		require.Equal(t, i == 19, observe(i+40, first, "gpt-6-astra", "gpt-6-luna"))
+	}
 	claimed, err := repo.claimOAuth429(t.Context(), a.ID, "gpt-6-luna")
-	require.NoError(t, err); require.NotNil(t, claimed)
+	require.NoError(t, err)
+	require.NotNil(t, claimed)
 	started, err := repo.StartOAuth429Run(t.Context(), claimed)
-	require.NoError(t, err); require.NotNil(t, started)
+	require.NoError(t, err)
+	require.NotNil(t, started)
 	_, err = repo.ConfigureOAuth429Routing(t.Context(), "gpt-6-astra")
 	require.NoError(t, err)
 	restored, err := repo.ConfigureOAuth429Routing(t.Context(), "gpt-6-luna")
 	require.NoError(t, err)
 	require.NotEqual(t, first.Revision, restored.Revision)
 	valid, err := repo.OAuth429Current(t.Context(), claimed)
-	require.NoError(t, err); require.False(t, valid)
+	require.NoError(t, err)
+	require.False(t, valid)
 	restarted, err := repo.StartOAuth429Run(t.Context(), claimed)
-	require.NoError(t, err); require.Nil(t, restarted)
+	require.NoError(t, err)
+	require.Nil(t, restarted)
 	started.ResultID, started.Verdict, started.FinishedAt, started.AnswerComplete = "stale-result", "incorrect", time.Now(), true
 	require.NoError(t, repo.FinishOAuth429Run(t.Context(), claimed, *started))
 	require.NoError(t, repo.CompleteOAuth429(t.Context(), claimed))
@@ -196,9 +206,12 @@ func TestOAuth429CompactRoutingChangeFencesEveryStage(t *testing.T) {
 	queued, err := repo.ObserveOAuth429(t.Context(), inflight)
 	require.NoError(t, err)
 	require.False(t, queued, "request started before global change must not inherit the new observer revision")
-	for i := 0; i < 20; i++ { require.Equal(t, i == 19, observe(i+100, restored, "gpt-6-astra", "gpt-6-luna")) }
+	for i := 0; i < 20; i++ {
+		require.Equal(t, i == 19, observe(i+100, restored, "gpt-6-astra", "gpt-6-luna"))
+	}
 	fresh, err := repo.claimOAuth429(t.Context(), a.ID, "gpt-6-luna")
-	require.NoError(t, err); require.NotNil(t, fresh)
+	require.NoError(t, err)
+	require.NotNil(t, fresh)
 	require.NoError(t, repo.CompleteOAuth429(t.Context(), claimed))
 	var state string
 	require.NoError(t, integrationDB.QueryRowContext(t.Context(), `SELECT state FROM oauth_429_tasks WHERE account_id=$1 AND model=$2`, a.ID, fresh.Model).Scan(&state))
@@ -206,5 +219,6 @@ func TestOAuth429CompactRoutingChangeFencesEveryStage(t *testing.T) {
 	_, err = repo.ConfigureOAuth429Routing(t.Context(), "gpt-6-astra")
 	require.NoError(t, err)
 	recovered, err := repo.claimOAuth429(t.Context(), a.ID, fresh.Model)
-	require.NoError(t, err); require.Nil(t, recovered)
+	require.NoError(t, err)
+	require.Nil(t, recovered)
 }
