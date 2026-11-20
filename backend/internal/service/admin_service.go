@@ -811,8 +811,12 @@ func NewAdminService(
 	compositeRouteRepo CompositeModelRouteRepository,
 	compositeResolver *CompositeRouteResolver,
 	channelCacheInvalidator ChannelCacheInvalidator,
-	userPlatformQuotaRepo UserPlatformQuotaRepository,
+	quotaRepos ...UserPlatformQuotaRepository,
 ) AdminService {
+	var userPlatformQuotaRepo UserPlatformQuotaRepository
+	if len(quotaRepos) > 0 {
+		userPlatformQuotaRepo = quotaRepos[0]
+	}
 	return &adminServiceImpl{
 		cfg:                  cfg,
 		userRepo:             userRepo,

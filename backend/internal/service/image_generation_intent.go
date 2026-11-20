@@ -117,7 +117,7 @@ func openAIImageGenerationIntent(endpoint string, requestedModel string, body []
 	if IsImageGenerationEndpoint(endpoint) || isOpenAIImageGenerationModel(requestedModel) {
 		return true
 	}
-	if !openAIBodyMayDeclareImageGeneration(body) {
+	if (explicit && !mayContainExplicitImageGenerationIntent(body)) || (!explicit && !openAIBodyMayDeclareImageGeneration(body)) {
 		return false
 	}
 	if validate && !gjson.ValidBytes(body) {
@@ -555,4 +555,22 @@ func openAIJSONString(value gjson.Result) string {
 		return ""
 	}
 	return strings.TrimSpace(value.String())
+}
+
+// A false result rules out the markers used by the explicit intent checks.
+// Escaped Unicode and native tool declarations use the full validator and
+// parser, as do model or tool-choice candidates.
+// Keep this filter aligned with the recognized tool types and tool choices
+// whenever those rules gain new forms.
+func mayContainExplicitImageGenerationIntent(body []byte) bool {
+	if bytes.Contains(body, []byte("_generation")) || bytes.Contains(body, []byte(`\u`)) {
+		return true
+	}
+	if isOpenAIImageGenerationModel(gjson.GetBytes(body, "model").String()) {
+		return true
+	}
+	if !bytes.Contains(body, []byte("_gen")) || !bytes.Contains(body, []byte("_choice")) {
+		return false
+	}
+	return strings.Contains(gjson.GetBytes(body, "tool_choice").Raw, "image_gen")
 }

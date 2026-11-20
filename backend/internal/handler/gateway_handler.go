@@ -150,11 +150,12 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		if middleware2.RejectRequestBodyReadError(c, err) {
 			return
 		}
-		if maxErr, ok := extractMaxBytesError(err); ok {
-			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
+		status, message := requestBodyReadFailure(reqLog, c.Request, err)
+		if status == 499 {
+			c.Status(status)
 			return
 		}
-		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		h.errorResponse(c, status, "invalid_request_error", message)
 		return
 	}
 
@@ -2140,11 +2141,12 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		if middleware2.RejectRequestBodyReadError(c, err) {
 			return
 		}
-		if maxErr, ok := extractMaxBytesError(err); ok {
-			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
+		status, message := requestBodyReadFailure(reqLog, c.Request, err)
+		if status == 499 {
+			c.Status(status)
 			return
 		}
-		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		h.errorResponse(c, status, "invalid_request_error", message)
 		return
 	}
 

@@ -206,7 +206,8 @@ type UsageInfo struct {
 	GeminiFlashMinute  *UsageProgress `json:"gemini_flash_minute,omitempty"`  // Gemini Flash RPM
 
 	// Antigravity 多模型配额
-	AntigravityQuota map[string]*AntigravityModelQuota `json:"antigravity_quota,omitempty"`
+	AntigravityQuota       map[string]*AntigravityModelQuota `json:"antigravity_quota,omitempty"`
+	AntigravityQuotaGroups []*AntigravityQuotaGroup          `json:"antigravity_quota_groups,omitempty"`
 
 	// Grok / xAI 被动额度快照
 	GrokRequestQuota       *xai.QuotaWindow `json:"grok_request_quota,omitempty"`
@@ -1918,4 +1919,19 @@ func buildGeminiUsageProgress(used, limit int64, resetAt time.Time, tokens int64
 // 用于账号列表页面显示当前窗口费用
 func (s *AccountUsageService) GetAccountWindowStats(ctx context.Context, accountID int64, startTime time.Time) (*usagestats.AccountStats, error) {
 	return s.usageLogRepo.GetAccountWindowStats(ctx, accountID, startTime)
+}
+
+// AntigravityQuotaGroup is a group of Antigravity models that share their quota windows.
+type AntigravityQuotaGroup struct {
+	Key         string                    `json:"key"` // bucket prefix, e.g. "gemini" or "3p"
+	Name        string                    `json:"name"`
+	Description string                    `json:"description,omitempty"`
+	Windows     []*AntigravityQuotaWindow `json:"windows"`
+}
+
+// AntigravityQuotaWindow is one window ("5h" or "weekly") of an Antigravity quota group.
+type AntigravityQuotaWindow struct {
+	Window      string     `json:"window"`
+	Utilization float64    `json:"utilization"` // used percentage, 0-100
+	ResetsAt    *time.Time `json:"resets_at"`
 }

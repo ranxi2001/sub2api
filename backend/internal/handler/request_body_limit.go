@@ -26,3 +26,5 @@ func gatewayMaxBodySize(cfg *config.Config) int64 {
 	}
 	return cfg.Gateway.MaxBodySize
 }
+
+func buildBodyTooLargeMessage(limit int64) string { return pkghttputil.BodyTooLargeMessage(limit) }
