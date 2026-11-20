@@ -27,20 +27,27 @@ def prepare(tree, baseline):
     path = tree / TARGET
     if path.read_bytes() != original:
         raise ValueError('historical usage source is not the exact baseline blob')
-    match = re.search(rb'^type OpenAIUsage struct \{\n(.*?)^\}', original, re.M | re.S)
-    if not match:
-        raise ValueError('historical OpenAIUsage layout not found')
-    additions = b''
-    for name, declaration in FIELDS:
-        if not re.search(rb'^\s*' + name.encode() + rb'\s', match[1], re.M):
-            additions += ('\t' + name + ' ' + declaration + '\n').encode()
-    position = match.start(1)
-    result = original[:position] + additions + original[position:]
-    if result[:position] + result[position + len(additions):] != original:
+    result = original
+    layers = []
+    for struct, fields in [('OpenAIUsage', FIELDS), ('OpenAIForwardResult', (
+            ('WanBilledSeconds', 'float64'), ('WanBaseCost', '*float64')))]:
+        match = re.search(rb'^type ' + struct.encode() + rb' struct \{\n(.*?)^\}', result, re.M | re.S)
+        if not match:
+            raise ValueError('historical layout not found: ' + struct)
+        additions = b''.join(('\t' + name + ' ' + declaration + '\n').encode()
+            for name, declaration in fields if not re.search(rb'^\s*' + name.encode() + rb'\s', match[1], re.M))
+        position = match.start(1)
+        result = result[:position] + additions + result[position:]
+        layers.append(additions.decode())
+    restored = result
+    for layer in reversed(layers):
+        if layer:
+            restored = restored.replace(layer.encode(), b'', 1)
+    if restored != original:
         raise ValueError('historical executable bytes changed')
     path.write_bytes(result)
     return {'baseline': baseline, 'path': TARGET, 'baseline_blob': blob(original),
-            'overlay_blob': blob(result), 'added_storage': additions.decode(),
+            'overlay_blob': blob(result), 'added_storage': layers,
             'historical_bytes_preserved': True}
 
 

@@ -28,7 +28,11 @@ class UsageCompatibilityTest(unittest.TestCase):
                 target.parent.mkdir(parents=True)
                 target.write_bytes(original)
                 result = COMPAT.prepare(tree, baseline)
-                self.assertEqual(original, target.read_bytes().replace(result['added_storage'].encode(), b'', 1))
+                restored = target.read_bytes()
+                for layer in reversed(result['added_storage']):
+                    if layer:
+                        restored = restored.replace(layer.encode(), b'', 1)
+                self.assertEqual(original, restored)
                 self.assertTrue(result['historical_bytes_preserved'])
                 for name, _ in COMPAT.FIELDS:
                     self.assertEqual(1, target.read_text().count(name))

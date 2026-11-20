@@ -1628,7 +1628,7 @@ func filterSchedulerCredentials(credentials map[string]any) map[string]any {
 		// capability_mismatch，而 Seedance 分支直接读该键、不走「未配置即放行」。
 		// 裁掉后 Seedance 账号在选号阶段必然被剔除，表现为 /v1/models 能列出模型、
 		// 建任务恒定 503 seedance_no_eligible_account。
-		"openai_capabilities",
+		"openai_capabilities", "qwen_video_protocol",
 		// Gemini 显式缓存的候选过滤（GeminiExplicitCacheExclusions）读本投影判定账号是否支持显式缓存：
 		// 官方地址、Vertex 认证方式与上游网关的显式缓存声明。缺这几个键时只能按类型粗筛，
 		// 不支持的账号要逐个选中后才被剔除。
