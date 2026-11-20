@@ -156,3 +156,14 @@ func TestProbePenaltyProtocolUsageKeepsCacheDetails(t *testing.T) {
 		require.Contains(t, string(out), `"upstream_usage"`)
 	}
 }
+
+func TestProbePenaltyStreamingRequestJSONFallback(t *testing.T) {
+	w, r := probeTestWriter(t, true)
+	_, err := w.WriteString(`{"type":"message","usage":{"input_tokens":10,"output_tokens":13}}`)
+	require.NoError(t, err)
+	require.NoError(t, w.validate())
+	require.Empty(t, r.Body.String())
+	require.NoError(t, w.finish(probeTestResult()))
+	require.Equal(t, "application/json", r.Header().Get("Content-Type"))
+	require.Equal(t, int64(49), gjson.Get(r.Body.String(), "usage.output_tokens").Int())
+}

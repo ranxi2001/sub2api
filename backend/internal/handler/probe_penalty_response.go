@@ -241,6 +241,9 @@ func (w *probePenaltyResponse) finish(result *service.ForwardResult) error {
 	if err != nil {
 		return err
 	}
+	if w.jsonMode {
+		w.header.Set("Content-Type", "application/json")
+	}
 	if !w.live {
 		w.commitHeaders()
 		w.live = true
