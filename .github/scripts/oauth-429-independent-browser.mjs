@@ -10,7 +10,7 @@ const {createServer}=requireFrontend('vite')
 const vueModule=requireFrontend('@vitejs/plugin-vue'),vue=vueModule.default||vueModule
 const {chromium}=createRequire(path.join(process.env.PLAYWRIGHT_ROOT,'package.json'))('playwright')
 const output=path.resolve(process.env.OAUTH_DEGRADATION_SCREENSHOT_DIR)
-const baseline='8678e88f4dfb6bfb718993db8a2a15b4a6af8282' // Before the independent HTTP trigger and condition switches.
+const baseline='8678e88f4dfb6bfb718993db8a2a15b4a6af8282' // Fixed baseline before independent 429 test ownership.
 const component='frontend/src/components/admin/operations/OAuthDegradationCard.vue'
 const baselineLocale=path.join(frontend,'src/i18n/locales/zh/oauth429Before.ts')
 await fs.writeFile(baselineLocale,execFileSync('git',['show',`${baseline}:frontend/src/i18n/locales/zh/autoConfig.ts`],{cwd:root}))

@@ -91,7 +91,7 @@ export default {
   "groupsHint": "Select up to 100 groups. Affected accounts leave these groups; you can reattach them in the account editor. Other bindings remain; the groups themselves and other accounts are unaffected.",
   "groupsRequired": "Select at least one group binding to remove.",
   "unavailableGroup": "Unavailable group; selection retained. Uncheck to remove this ID",
-  "scope": "Applies once by updating the account’s concurrency, model mappings or group bindings, which you can view and change in the account editor. Concurrency only decreases; models intersect existing authorization, and no allowed models disables scheduling. Better metrics, disabling the policy or changing its threshold do not restore existing account settings.",
+  "scope": "The ordinary probe branch applies once by updating the account’s concurrency, model mappings or group bindings, which you can view and change in the account editor. Concurrency only decreases; models intersect existing authorization, and no allowed models disables scheduling. Better metrics, disabling the policy or changing its threshold do not restore existing account settings.",
   "invalid": "Select a condition and an action. Degradation threshold: 0–100%; HTTP thresholds: greater than 0 and at most 100%. Check the selected actions’ concurrency (integer 1–10000), exact model IDs (up to 500), or group selections (1–100).",
   "event": "Degradation rate {percent}% ≥ {threshold}% · {samples} conclusive rounds · {actions} · window {start} — {end}",
   "concurrencyEvent": "concurrency {before} → {after}",

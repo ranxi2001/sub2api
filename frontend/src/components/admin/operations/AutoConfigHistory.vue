@@ -2,7 +2,7 @@
   <section class="min-w-0 rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-900" aria-labelledby="auto-config-history-title" data-testid="auto-config-history">
     <header class="flex flex-wrap items-start justify-between gap-4 p-5">
       <div class="min-w-0">
-        <h2 id="auto-config-history-title" class="text-lg font-semibold">{{ t('autoConfig.logs.title') }}</h2>
+        <h2 id="auto-config-history-title" class="flex items-center gap-2 text-lg font-semibold">{{ t('autoConfig.logs.title') }}<NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.oauth429IndependentTests" :user-id="auth.user?.id" /></h2>
         <p class="mt-1 text-sm leading-6 text-gray-500 dark:text-gray-400">{{ t('autoConfig.logs.description') }}</p>
       </div>
       <div class="flex w-full items-center gap-3 sm:w-auto">
@@ -72,6 +72,8 @@ import { onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import Icon from '@/components/icons/Icon.vue'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import { formatDateTime } from '@/utils/format'
 import { getAutoConfigEvents, type AutoConfigEvent, type AutoConfigEventKind } from '@/api/admin/autoConfig'
 
