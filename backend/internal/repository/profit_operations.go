@@ -21,6 +21,7 @@ func profitOperationsAccounts(ctx context.Context, tx *sql.Tx, f service.Upstrea
 	var accounts []struct {
 		operationsAccount
 		Multiplier      *float64 `json:"multiplier"`
+		AccountType     string   `json:"account_type"`
 		CostBasis       string   `json:"cost_basis"`
 		URLKey          string   `json:"url_key"`
 		URLAttribution  string   `json:"url_attribution"`
@@ -37,16 +38,18 @@ func profitOperationsAccounts(ctx context.Context, tx *sql.Tx, f service.Upstrea
 	if err = json.Unmarshal(raw, &accounts); err != nil {
 		return nil, err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT id,extra->'cost_multiplier' FROM accounts WHERE id IN (SELECT id FROM jsonb_to_recordset($1::jsonb) c(id bigint))`, string(raw))
+	rows, err := tx.QueryContext(ctx, `SELECT id,type,extra->'cost_multiplier' FROM accounts WHERE id IN (SELECT id FROM jsonb_to_recordset($1::jsonb) c(id bigint))`, string(raw))
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 	costs := map[int64]any{}
+	accountTypes := map[int64]string{}
 	for rows.Next() {
 		var id int64
 		var value []byte
-		if err = rows.Scan(&id, &value); err != nil {
+		var accountType string
+		if err = rows.Scan(&id, &accountType, &value); err != nil {
 			return nil, err
 		}
 		var cost any
@@ -56,6 +59,7 @@ func profitOperationsAccounts(ctx context.Context, tx *sql.Tx, f service.Upstrea
 			}
 		}
 		costs[id] = cost
+		accountTypes[id] = accountType
 	}
 	if err = rows.Err(); err != nil {
 		return nil, err
@@ -66,6 +70,11 @@ func profitOperationsAccounts(ctx context.Context, tx *sql.Tx, f service.Upstrea
 		v, basis := service.OperationsCostMultiplier(&service.Account{Extra: map[string]any{"cost_multiplier": costs[id]}})
 		a.Multiplier = v
 		a.CostBasis = basis
+		a.AccountType = accountTypes[id]
+		if a.AccountType == service.AccountTypeGateway {
+			a.Multiplier = nil
+			a.CostBasis = "request_procurement_unknown"
+		}
 	}
 	if err = rows.Close(); err != nil {
 		return nil, err
@@ -178,10 +187,24 @@ func profitOAuthChannels(ctx context.Context, tx *sql.Tx, raw string) (map[int64
 }
 
 const profitOperationsCohort = `accounts_config AS (
- SELECT * FROM jsonb_to_recordset($3::jsonb) AS c(id bigint,name text,key text,attribution text,updated_at timestamptz,deleted boolean,multiplier numeric,cost_basis text,schedulable boolean,concurrency integer,status text,url_key text,url_attribution text,url_channel_id bigint,url_origin_hash text,channel_id bigint,channel_name text,channel_code text,channel_remark text,channel_revision bigint,assignment text,oauth_channel_id bigint)
+ SELECT * FROM jsonb_to_recordset($3::jsonb) AS c(id bigint,name text,key text,attribution text,updated_at timestamptz,deleted boolean,multiplier numeric,cost_basis text,schedulable boolean,concurrency integer,status text,url_key text,url_attribution text,url_channel_id bigint,url_origin_hash text,channel_id bigint,channel_name text,channel_code text,channel_remark text,channel_revision bigint,assignment text,oauth_channel_id bigint,account_type text)
 ), cohort AS (
  SELECT * FROM accounts_config WHERE ($4='' OR key=$4) AND ($5::bigint=0 OR id=$5) AND ($11::bigint=0 OR channel_id=$11)
 )`
+
+// A captured unknown/unsupported snapshot never falls back to today's account
+// settings. The multiplier already includes New API's request-target x1/x7.
+const profitRequestCostMultiplierSQL = `CASE WHEN u.procurement_cost_snapshot IS NOT NULL THEN
+ CASE WHEN u.procurement_cost_snapshot->>'version'='1'
+  AND u.procurement_cost_snapshot->>'basis'='total_cost'
+  AND u.procurement_cost_snapshot->>'account_type'='gateway'
+  AND u.procurement_cost_snapshot->>'provider'='new_api'
+  AND u.procurement_cost_snapshot->>'target_platform'=u.platform
+  AND u.platform<>'' AND u.platform<>'composite'
+  AND jsonb_typeof(u.procurement_cost_snapshot->'cost_multiplier')='number'
+ THEN CASE WHEN (u.procurement_cost_snapshot->>'cost_multiplier')::numeric BETWEEN 0 AND 1000000
+  THEN (u.procurement_cost_snapshot->>'cost_multiplier')::numeric END END
+ WHEN c.account_type='gateway' THEN NULL ELSE c.multiplier END`
 
 // Join the complete projection before applying the selected cohort. Joining only
 // cohort would turn every configured account outside it into account_missing.
@@ -190,7 +213,9 @@ const profitOperationsBase = `WITH ` + profitOperationsCohort + `, event_rows AS
  u.account_stats_cost,u.input_tokens,u.output_tokens,u.cache_read_tokens,u.cache_creation_tokens,u.duration_ms,u.billing_type,u.created_at,u.queue_timing,u.queue_wait_ms,
  COALESCE('channel:'||owner.channel_id::text,c.url_key,'unknown:account_missing') AS upstream_key,
  CASE WHEN e.channel_id IS NOT NULL OR h.channel_id IS NOT NULL THEN 'historical_channel' WHEN legacy.channel_id IS NOT NULL THEN 'legacy_channel_estimate' WHEN owner.channel_id IS NOT NULL THEN 'provider_url' ELSE COALESCE(c.url_attribution,'account_missing') END AS attribution,
- c.name AS account_name,c.updated_at AS config_updated_at,c.deleted,c.multiplier,owner.channel_id AS explicit_channel_id,ch.name AS channel_name,ch.code AS channel_code,ch.remark AS channel_remark,ch.revision AS channel_revision,p.id AS provider_id,p.site_type AS provider_site_type,
+ c.name AS account_name,c.updated_at AS config_updated_at,c.deleted,` + profitRequestCostMultiplierSQL + ` AS multiplier,
+ u.procurement_cost_snapshot IS NOT NULL AS has_procurement_snapshot,
+ owner.channel_id AS explicit_channel_id,ch.name AS channel_name,ch.code AS channel_code,ch.remark AS channel_remark,ch.revision AS channel_revision,p.id AS provider_id,p.site_type AS provider_site_type,
  CASE WHEN snap.amount IS NOT NULL THEN snap.amount
       WHEN $18::bool AND jsonb_typeof(p.metrics->'today_spend')='number' AND p.observed_at>=$12::timestamptz AND p.observed_at<$13::timestamptz THEN (p.metrics->>'today_spend')::numeric END AS wallet_spend,
  CASE WHEN snap.amount IS NOT NULL AND snap.currency IN ('USD','CNY','quota_units') THEN snap.currency
@@ -203,7 +228,8 @@ const profitOperationsBase = `WITH ` + profitOperationsCohort + `, event_rows AS
   CASE WHEN h.assignment='manual_unlinked' AND owner.channel_id IS NOT NULL THEN CASE WHEN c.url_key='unknown:oauth_dynamic_endpoint' THEN 'provider_import' ELSE 'provider_url' END END,
   h.assignment,
   CASE WHEN legacy.channel_id IS NOT NULL THEN 'explicit' WHEN owner.channel_id IS NOT NULL AND c.url_key='unknown:oauth_dynamic_endpoint' THEN 'provider_import' WHEN owner.channel_id IS NOT NULL THEN 'provider_url' WHEN c.url_key IS NULL OR c.url_key LIKE 'unknown:%' THEN 'unbound_unknown' ELSE 'unbound_url' END) AS assignment,
- e.amount AS upstream_reported,e.settled_amount AS upstream_debit,COALESCE(c.cost_basis,'account_missing') AS cost_basis,
+ e.amount AS upstream_reported,e.settled_amount AS upstream_debit,
+ CASE WHEN u.procurement_cost_snapshot IS NOT NULL THEN 'request_procurement_snapshot' ELSE COALESCE(c.cost_basis,'account_missing') END AS cost_basis,
  COALESCE(NULLIF(u.requested_model,''),u.model) AS public_model,
  u.total_cost AS cost_base
  FROM usage_logs u LEFT JOIN accounts_config c ON c.id=u.account_id
@@ -399,9 +425,9 @@ func (r *channelRepository) ReadProfitOperations(ctx context.Context, f service.
  'catalog',COALESCE((SELECT jsonb_agg(to_jsonb(g)) FROM (SELECT key AS key,COALESCE(NULLIF(max(channel_name),''),key) AS name,max(channel_id) AS channel_id,max(channel_code) AS channel_code,max(channel_remark) AS channel_remark,max(channel_revision) AS channel_revision,max(assignment) AS assignment,count(*) AS accounts FROM cohort c WHERE NOT deleted AND ($6::bigint=0 OR EXISTS(SELECT 1 FROM account_groups ag WHERE ag.account_id=c.id AND ag.group_id=$6)) GROUP BY key ORDER BY key LIMIT $9 OFFSET $10)g),'[]'::jsonb),
  'capacity',(SELECT jsonb_build_object('accounts',count(*),'schedulable',count(*) FILTER(WHERE schedulable AND status='active'),'configured_concurrency',COALESCE(sum(concurrency),0)) FROM cohort c WHERE NOT deleted AND ($6::bigint=0 OR EXISTS(SELECT 1 FROM account_groups ag WHERE ag.account_id=c.id AND ag.group_id=$6))),
  'catalog_total',(SELECT count(DISTINCT key) FROM cohort c WHERE NOT deleted AND ($6::bigint=0 OR EXISTS(SELECT 1 FROM account_groups ag WHERE ag.account_id=c.id AND ag.group_id=$6))),
- 'account_details_limit',100,'historical_upstream_snapshot_requests',(SELECT count(*) FROM priced WHERE attribution='historical_channel'),'historical_cost_multiplier_snapshot_requests',0,
+ 'account_details_limit',100,'historical_upstream_snapshot_requests',(SELECT count(*) FROM priced WHERE attribution='historical_channel'),'historical_cost_multiplier_snapshot_requests',(SELECT count(*) FROM priced WHERE has_procurement_snapshot AND multiplier IS NOT NULL),
  'wallet_synced_at',(SELECT to_jsonb(max(observed_at)) FROM provider_spend_snapshots WHERE window_from=$1 AND window_until=$2 AND amount IS NOT NULL),
- 'cost_formula','bound channel: provider_spend_snapshots for this exact window (today also falls back to channel-operations today_spend); wallet total is not split by account or model; unbound channel: usage_logs.total_cost * current extra.cost_multiplier (default 0.1)',
+ 'cost_formula','request procurement estimate: persisted usage_logs.total_cost * captured procurement multiplier once; unknown gateway snapshots stay unknown; legacy estimate: total_cost * current extra.cost_multiplier (default 0.1); bound channel wallet accounting is unchanged and never split across requests',
  'income_source','persisted usage_logs.actual_cost; subscription usage valuation, not cash receipts; no guarantee of debit in simple mode',
  'standard_source','persisted usage_logs.total_cost; historical model/cache/per-request pricing is not recalculated',
  'account_rate_multiplier_used',false,'error_rate',NULL)`
