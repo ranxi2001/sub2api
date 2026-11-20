@@ -3,6 +3,8 @@
 package handler
 
 import (
+	"context"
+	"errors"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -78,4 +80,43 @@ func TestProbePenaltyDisabledAdjustmentLeavesBodyUnchanged(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, w.finish(&service.ForwardResult{}))
 	require.Equal(t, body, r.Body.String())
+}
+
+type probeHandlerBilling struct{ httpDeliveryBilling }
+
+func (r *probeHandlerBilling) ApplyStagedUsageBilling(ctx context.Context, key service.UsageBillingEventKey) (*service.UsageBillingRecovery, error) {
+	recovered, err := r.httpDeliveryBilling.ApplyStagedUsageBilling(ctx, key)
+	if recovered != nil {
+		recovered.Settled = true
+	}
+	return recovered, err
+}
+func TestProbePenaltyActualGatewayProtocols(t *testing.T) {
+	for _, endpoint := range []string{"messages", "chat/completions", "responses"} {
+		for _, fail := range []bool{false, true} {
+			t.Run(endpoint+map[bool]string{false: "/settled", true: "/settlement-failed"}[fail], func(t *testing.T) {
+				repo := &probeHandlerBilling{}
+				if fail {
+					repo.failure = errors.New("injected settlement error")
+				}
+				extra := map[string]any{service.AccountProbePenaltyExtraKey: map[string]any{"enabled": true, "minimum_charge": .001}}
+				run := runCompatStreamUsageHandlerWithDelivery(t, endpoint, compatStreamUsagePartialStream+compatStreamUsageCompletion, true, repo, "", extra)
+				require.Equal(t, 1, run.upstream.calls)
+				require.NotNil(t, repo.event, "actual handler must synchronously stage the charge")
+				require.Equal(t, .001, repo.event.Command.BalanceCost)
+				require.Equal(t, 7, repo.event.Usage.OutputTokens)
+				require.Equal(t, 12, repo.event.Usage.InputTokens)
+				body := run.rec.Body.String()
+				require.Contains(t, body, "partial")
+				if fail {
+					require.NotContains(t, body, `"usage_kind":"billing_equivalent"`)
+					require.Contains(t, body, "do not automatically retry")
+				} else {
+					require.Contains(t, body, `"usage_kind":"billing_equivalent"`)
+					require.Contains(t, body, `"actual_cost":0.001`)
+					require.True(t, repo.applied)
+				}
+			})
+		}
+	}
 }

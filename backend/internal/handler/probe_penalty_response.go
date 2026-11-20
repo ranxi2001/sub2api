@@ -24,6 +24,7 @@ type probePenaltyResponse struct {
 	holding  bool
 	jsonMode bool
 	seenBody bool
+	protocol string
 }
 
 func newProbePenaltyResponse(w gin.ResponseWriter, stream bool) (*probePenaltyResponse, error) {
@@ -60,7 +61,14 @@ func (w *probePenaltyResponse) Write(b []byte) (int, error) {
 		block := w.pending[:end+separator]
 		payload := probeEventData(block)
 		kind := gjson.GetBytes(payload, "type").String()
-		if kind == "message_delta" || kind == "message_stop" {
+		if strings.HasPrefix(kind, "response.") {
+			w.protocol = "responses"
+		}
+		if gjson.GetBytes(payload, "object").String() == "chat.completion.chunk" {
+			w.protocol = "chat"
+		}
+		finish := gjson.GetBytes(payload, "choices.0.finish_reason")
+		if kind == "message_delta" || kind == "message_stop" || kind == "response.completed" || kind == "response.incomplete" || kind == "response.failed" || (finish.Exists() && finish.Type != gjson.Null) || gjson.GetBytes(payload, "usage").IsObject() || bytes.Equal(payload, []byte("[DONE]")) {
 			w.holding = true
 		}
 		if w.holding {
@@ -121,7 +129,7 @@ func (w *probePenaltyResponse) validate() error {
 		return errors.New("probe penalty response is not successful")
 	}
 	if w.jsonMode {
-		if !gjson.ValidBytes(body) || gjson.GetBytes(body, "type").String() != "message" || !gjson.GetBytes(body, "usage").IsObject() {
+		if !gjson.ValidBytes(body) || (gjson.GetBytes(body, "type").String() != "message" && gjson.GetBytes(body, "object").String() != "chat.completion" && gjson.GetBytes(body, "object").String() != "response") || !gjson.GetBytes(body, "usage").IsObject() {
 			return errors.New("probe penalty requires a Claude message with usage")
 		}
 		return nil
@@ -134,8 +142,16 @@ func (w *probePenaltyResponse) validate() error {
 			usage = gjson.GetBytes(payload, "usage.output_tokens").Exists()
 		case "message_stop":
 			stop = true
-		case "error":
+		case "response.completed":
+			usage, stop = gjson.GetBytes(payload, "response.usage").IsObject(), true
+		case "error", "response.failed", "response.incomplete":
 			return errors.New("probe penalty response contains an error")
+		}
+		if gjson.GetBytes(payload, "usage.completion_tokens").Exists() {
+			usage = true
+		}
+		if bytes.Equal(payload, []byte("[DONE]")) {
+			stop = true
 		}
 	}
 	if !usage || !stop {
@@ -148,25 +164,36 @@ func rewriteProbeUsage(body []byte, result *service.ForwardResult) ([]byte, erro
 	if result == nil || result.ProbePenalty == nil {
 		return body, nil
 	}
-	original := gjson.GetBytes(body, "usage")
+	prefix := ""
+	if gjson.GetBytes(body, "type").String() == "response.completed" {
+		prefix = "response."
+	}
+	original := gjson.GetBytes(body, prefix+"usage")
 	if !original.IsObject() {
 		return nil, errors.New("missing terminal usage")
 	}
-	body, err := sjson.SetRawBytes(body, "upstream_usage", []byte(original.Raw))
+	body, err := sjson.SetRawBytes(body, prefix+"upstream_usage", []byte(original.Raw))
 	if err != nil {
 		return nil, err
 	}
-	usage := result.Usage
-	usage.OutputTokens = result.ProbePenalty.BillingOutputTokens
-	// Keep provider-specific usage fields; overwrite only the billing counters.
-	for key, value := range map[string]int{"input_tokens": usage.InputTokens, "output_tokens": usage.OutputTokens, "cache_creation_input_tokens": usage.CacheCreationInputTokens, "cache_read_input_tokens": usage.CacheReadInputTokens} {
-		body, err = sjson.SetBytes(body, "usage."+key, value)
+	// Preserve all input/cache details from the existing protocol converter.
+	output := "output_tokens"
+	if gjson.GetBytes(body, prefix+"usage.completion_tokens").Exists() {
+		output = "completion_tokens"
+	}
+	extra := result.ProbePenalty.BillingOutputTokens - result.ProbePenalty.OriginalOutputTokens
+	body, err = sjson.SetBytes(body, prefix+"usage."+output, original.Get(output).Int()+int64(extra))
+	if err != nil {
+		return nil, err
+	}
+	if original.Get("total_tokens").Exists() {
+		body, err = sjson.SetBytes(body, prefix+"usage.total_tokens", original.Get("total_tokens").Int()+int64(extra))
 		if err != nil {
 			return nil, err
 		}
 	}
 	metadata := map[string]any{"usage_kind": "billing_equivalent", "probe_penalty": result.ProbePenalty}
-	return sjson.SetBytes(body, "billing", metadata)
+	return sjson.SetBytes(body, prefix+"billing", metadata)
 }
 
 func (w *probePenaltyResponse) finish(result *service.ForwardResult) error {
@@ -181,7 +208,7 @@ func (w *probePenaltyResponse) finish(result *service.ForwardResult) error {
 			blocks := bytes.Split(bytes.ReplaceAll(body, []byte("\r\n"), []byte("\n")), []byte("\n\n"))
 			for i, block := range blocks {
 				payload := probeEventData(block)
-				if gjson.GetBytes(payload, "type").String() != "message_delta" {
+				if !gjson.GetBytes(payload, "usage").IsObject() && !gjson.GetBytes(payload, "response.usage").IsObject() {
 					continue
 				}
 				var rewritten []byte
@@ -189,7 +216,14 @@ func (w *probePenaltyResponse) finish(result *service.ForwardResult) error {
 				if err != nil {
 					break
 				}
-				blocks[i] = append([]byte("event: message_delta\ndata: "), rewritten...)
+				var lines [][]byte
+				for _, line := range bytes.Split(block, []byte("\n")) {
+					if !bytes.HasPrefix(line, []byte("data:")) {
+						lines = append(lines, line)
+					}
+				}
+				lines = append(lines, append([]byte("data: "), rewritten...))
+				blocks[i] = bytes.Join(lines, []byte("\n"))
 			}
 			body = bytes.Join(blocks, []byte("\n\n"))
 		}
@@ -211,7 +245,15 @@ func (w *probePenaltyResponse) settlementError() {
 	// model call: the durable journal may already own the monetary event.
 	payload, _ := json.Marshal(gin.H{"type": "error", "error": gin.H{"type": "api_error", "message": "Probe penalty settlement unavailable; do not automatically retry"}})
 	if w.live {
-		_, _ = w.ResponseWriter.Write(append(append([]byte("event: error\ndata: "), payload...), '\n', '\n'))
+		prefix := "event: error\ndata: "
+		if w.protocol == "chat" {
+			prefix = "data: "
+		}
+		if w.protocol == "responses" {
+			prefix = "event: response.failed\ndata: "
+			payload, _ = json.Marshal(gin.H{"type": "response.failed", "response": gin.H{"status": "failed", "error": gin.H{"code": "settlement_unavailable", "message": "Probe penalty settlement unavailable; do not automatically retry"}}})
+		}
+		_, _ = w.ResponseWriter.Write(append(append([]byte(prefix), payload...), '\n', '\n'))
 	} else {
 		w.ResponseWriter.Header().Set("Content-Type", "application/json")
 		w.ResponseWriter.WriteHeader(http.StatusServiceUnavailable)
