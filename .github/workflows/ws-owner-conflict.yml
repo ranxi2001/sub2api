@@ -104,7 +104,7 @@ jobs:
           python3 - "$RUNNER_TEMP/ws-owner-evidence/service-contracts.jsonl" <<'PY'
           import json, sys
           rows = [json.loads(line) for line in open(sys.argv[1]) if line.startswith('{')]
-          for test in ('TestOpenAIWSMixedOwnerFinalSendFences', 'TestOpenAIWSMixedOwnerProofCannotComeFromDiagnostics', 'TestOpenAIRecoveryDiagnosticsAreAllowlisted', 'TestOpenAIRecoveryShadowRefusalDiagnostics', 'TestOpenAIRecoveryShadowRetainsTaskBeforeOpaqueEnvelope', 'TestOpenAIRecoveryShadowDoesNotReclassifyClientMetadataText'):
+          for test in ('TestOpenAIWSMixedOwnerFinalSendFences', 'TestOpenAIWSMixedOwnerProofCannotComeFromDiagnostics', 'TestOpenAIRecoveryDiagnosticsAreAllowlisted', 'TestOpenAIRecoveryShadowRefusalDiagnostics', 'TestOpenAIRecoveryShadowRetainsTaskBeforeOpaqueEnvelopeAndSummary', 'TestOpenAIRecoveryShadowDoesNotReclassifyClientMetadataText'):
               assert sum(r.get('Action') == 'pass' and r.get('Test') == test for r in rows) == 1, test
           PY
       - name: Persist safe refusal subtype with logical turn
