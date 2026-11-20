@@ -113,6 +113,11 @@ jobs:
           path.write_bytes(historical.replace(anchor, anchor + field, 1))
           PY
               git diff "$original" -- "$source" > evidence/red-compile-compatibility.diff
+            else
+              # The pinned repository predates the OpenAI rotation CAS tests.
+              fixture=backend/internal/repository/account_repo_temp_unsched_test.go
+              git show "$original:$fixture" > "$fixture"
+              test "$(git hash-object "$fixture")" = "$(git rev-parse "$original:$fixture")"
             fi
             git diff --stat > evidence/red-source-diff.txt
           else
