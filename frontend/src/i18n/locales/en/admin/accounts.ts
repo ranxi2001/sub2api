@@ -480,6 +480,7 @@ export default {
           group: "Group: {name}",
           groupRatio: "Group ratio",
           ratio: "Group ratio: {value}x",
+          convertedDeclaration: 'Converted upstream rate: {rate} × 7 = {value}x',
           groupRatioHint: 'The upstream group ratio excludes model prices. Purchase cost follows the account’s USD conversion and auto-sync settings; customer prices are unchanged.',
         costConversion: 'Purchase cost conversion',
         costConversionHint: 'USD conversion is enabled by default: CN platforms ×1, other platforms ×7. Uncheck to use the upstream ratio ×1 as purchase cost. Customer prices are unchanged.',

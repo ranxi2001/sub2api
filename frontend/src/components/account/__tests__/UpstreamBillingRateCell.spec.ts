@@ -138,10 +138,11 @@ describe('UpstreamBillingRateCell', () => {
     expect(wrapper.get('[data-testid="upstream-balance-value"]').text()).not.toContain('$12.34')
   })
 
-  it('shows New API rates and wallets like other accounts while retaining configuration and tooltip context', async () => {
+  it('converts a New API declaration independently of manually set cost and retains the upstream rate', async () => {
     const wrapper = mount(UpstreamBillingRateCell, { props: {
-      account: makeAccount({ extra: { upstream_billing_provider: 'new_api', upstream_billing_probe: {
-        status: 'ok', data: { ...billingData, provider: 'new_api', object: 'new_api.group_billing', billing_scope: 'group', peak_rate_enabled: false },
+      account: makeAccount({ extra: { upstream_billing_provider: 'new_api', cost_multiplier_auto_sync: false, cost_multiplier: 0.5, upstream_billing_probe: {
+        status: 'ok', data: { ...billingData, provider: 'new_api', object: 'new_api.group_billing', billing_scope: 'group', peak_rate_enabled: false,
+          group_rate_multiplier: 0.1214, effective_rate_multiplier: 0.1214, resolved_rate_multiplier: 0.1214 },
         received_at: '2026-07-13T00:00:00Z', fresh_until: '2026-07-14T00:00:00Z',
         last_attempt_at: '', next_probe_at: '', balance: {
           status: 'ok', received_at: '2026-07-13T00:00:00Z', fresh_until: '2026-07-14T00:00:00Z', last_attempt_at: '',
@@ -149,7 +150,7 @@ describe('UpstreamBillingRateCell', () => {
         }
       } } }), now: Date.now()
     } })
-    expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toContain('0.60x')
+    expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('0.85x')
     expect(wrapper.get('[data-testid="upstream-balance-value"]').text()).toBe('$12.34')
     const regularAccount = JSON.parse(JSON.stringify(wrapper.props('account')))
     delete regularAccount.extra.upstream_billing_provider
@@ -157,8 +158,8 @@ describe('UpstreamBillingRateCell', () => {
     regularAccount.extra.upstream_billing_probe.data.object = 'sub2api.key_billing'
     regularAccount.extra.upstream_billing_probe.data.billing_scope = 'token'
     const regular = mount(UpstreamBillingRateCell, { props: { account: regularAccount, now: Date.now() } })
-    expect(wrapper.text()).toBe(regular.text())
-    expect(wrapper.get('[data-testid="upstream-billing-configure"]').text()).toBe('0.60x')
+    expect(regular.get('[data-testid="upstream-billing-rate"]').text()).toBe('0.1214x')
+    expect(wrapper.get('[data-testid="upstream-billing-configure"]').text()).toBe('0.85x')
     await wrapper.get('[data-testid="upstream-billing-configure"]').trigger('click')
     expect(wrapper.emitted('configure')).toHaveLength(1)
     await wrapper.get('[data-testid="upstream-billing-details"]').trigger('mouseenter')
@@ -166,12 +167,18 @@ describe('UpstreamBillingRateCell', () => {
     const tooltip = Array.from(document.body.querySelectorAll<HTMLElement>('[role="tooltip"]'))
       .find(element => element.style.display !== 'none' && element.textContent?.includes('admin.accounts.upstreamBilling.newAPI.groupRatioHint'))
     expect(tooltip).toBeDefined()
-    expect(tooltip?.textContent).toContain('admin.accounts.upstreamBilling.groupRate:0.8')
+    expect(tooltip?.textContent).toContain('admin.accounts.upstreamBilling.groupRate:0.1214')
+    expect(tooltip?.textContent).toContain('admin.accounts.upstreamBilling.newAPI.convertedDeclaration:0.1214,0.8498')
     await wrapper.get('[data-testid="upstream-billing-details"]').trigger('mouseleave')
     const account = JSON.parse(JSON.stringify(wrapper.props('account')))
-    account.extra.upstream_billing_probe.status = 'unsupported'
-    delete account.extra.upstream_billing_probe.data
-    await wrapper.setProps({ account })
+    await wrapper.setProps({ account: { ...account, extra: { ...account.extra, new_api_apply_usd_rate: false } } })
+    expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('0.1214x')
+    await wrapper.setProps({ account: { ...account, platform: 'deepseek' } })
+    expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('0.1214x')
+    const unsupported = JSON.parse(JSON.stringify(account))
+    unsupported.extra.upstream_billing_probe.status = 'unsupported'
+    delete unsupported.extra.upstream_billing_probe.data
+    await wrapper.setProps({ account: unsupported })
     expect(wrapper.get('[data-testid="upstream-billing-configure"]').text()).toBe('admin.accounts.upstreamBilling.unsupported')
     expect(wrapper.get('[data-testid="upstream-balance-value"]').text()).toBe('$12.34')
     regular.unmount()

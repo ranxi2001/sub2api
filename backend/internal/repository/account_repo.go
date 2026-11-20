@@ -29,6 +29,7 @@ import (
 	dbpredicate "github.com/Wei-Shaw/sub2api/ent/predicate"
 	dbproxy "github.com/Wei-Shaw/sub2api/ent/proxy"
 	"github.com/Wei-Shaw/sub2api/internal/accounttimer"
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/adminaccess"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
@@ -1669,10 +1670,17 @@ func upstreamBillingRateSortExpression(extra string) string {
 	dynamicRate := "CASE WHEN " + peakEnabled + " = 'false' THEN (" + resolved + ")::numeric WHEN " + peakEnabled + " = 'true' AND " + validPeakConfig +
 		" THEN (" + resolved + ")::numeric * CASE WHEN " + localMinute + " >= " + startMinute + " AND " + localMinute + " < " + endMinute +
 		" THEN " + peakMultiplierValue + " ELSE 1 END ELSE NULL END"
+	// The list shows a converted rate only for fixed New API group declarations.
+	foreignPlatforms := domain.PlatformIDsWhere(func(p domain.PlatformSpec) bool { return !p.CNProvider })
+	for i, id := range foreignPlatforms {
+		foreignPlatforms[i] = pq.QuoteLiteral(id)
+	}
+	conversion := "CASE WHEN " + newAPIGroup + " AND " + dbaccount.Table + "." + dbaccount.FieldPlatform + " IN (" + strings.Join(foreignPlatforms, ",") + ")" +
+		" AND (" + extra + " -> 'new_api_apply_usd_rate') IS DISTINCT FROM 'false'::jsonb THEN 7 ELSE 1 END"
 	legacySnapshot := "jsonb_typeof(" + resolvedJSON + ") IS NULL AND jsonb_typeof(" + peakEnabledJSON + ") IS NULL"
 
 	return "CASE WHEN " + status + " IN ('ok', 'failed') AND (jsonb_typeof(" + resolvedJSON + ") = 'number' OR jsonb_typeof(" + effectiveJSON + ") = 'number') THEN CASE WHEN jsonb_typeof(" +
-		resolvedJSON + ") = 'number' AND jsonb_typeof(" + peakEnabledJSON + ") = 'boolean' THEN CASE WHEN " + billingScope + " = 'token' OR " + newAPIGroup + " THEN " + dynamicRate + " ELSE NULL END WHEN " + legacySnapshot +
+		resolvedJSON + ") = 'number' AND jsonb_typeof(" + peakEnabledJSON + ") = 'boolean' THEN CASE WHEN " + billingScope + " = 'token' OR " + newAPIGroup + " THEN (" + dynamicRate + ") * (" + conversion + ") ELSE NULL END WHEN " + legacySnapshot +
 		" AND jsonb_typeof(" + effectiveJSON + ") = 'number' THEN (" + effective + ")::numeric END END"
 }
 

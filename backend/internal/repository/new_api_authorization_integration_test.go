@@ -158,9 +158,14 @@ func TestNewAPIIntegrationGroupRateSortReadsOnlyValidatedGroupSnapshot(t *testin
 	_, e = integrationDB.ExecContext(ctx, `UPDATE accounts SET extra=extra||$1::jsonb WHERE id=$2`, string(raw), a.ID)
 	require.NoError(t, e)
 	var rate sql.NullFloat64
-	e = integrationDB.QueryRowContext(ctx, `SELECT `+upstreamBillingRateSortExpression("extra")+` FROM accounts WHERE id=$1`, a.ID).Scan(&rate)
+	query := `SELECT ` + upstreamBillingRateSortExpression("extra") + ` FROM accounts WHERE id=$1`
+	e = integrationDB.QueryRowContext(ctx, query, a.ID).Scan(&rate)
 	require.NoError(t, e)
 	require.True(t, rate.Valid)
+	require.Equal(t, 3.5, rate.Float64)
+	_, e = integrationDB.ExecContext(ctx, `UPDATE accounts SET extra=extra || '{"new_api_apply_usd_rate":false}'::jsonb WHERE id=$1`, a.ID)
+	require.NoError(t, e)
+	require.NoError(t, integrationDB.QueryRowContext(ctx, query, a.ID).Scan(&rate))
 	require.Equal(t, 0.5, rate.Float64)
 }
 func TestNewAPIIntegrationDirectOrBulkCredentialsUnbind(t *testing.T) {
