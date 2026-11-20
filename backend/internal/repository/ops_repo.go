@@ -931,7 +931,11 @@ func buildOpsErrorLogsWhere(filter *service.OpsErrorLogFilter) (string, []any) {
 	}
 	if p := strings.TrimSpace(filter.Platform); p != "" {
 		args = append(args, p)
-		clauses = append(clauses, "e.platform = $"+itoa(len(args)))
+		match := "e.platform = $" + itoa(len(args))
+		if p == "unknown" {
+			match = "(" + match + " OR e.platform IS NULL OR e.platform = '')"
+		}
+		clauses = append(clauses, match)
 	}
 	if filter.GroupID != nil && *filter.GroupID > 0 {
 		args = append(args, *filter.GroupID)

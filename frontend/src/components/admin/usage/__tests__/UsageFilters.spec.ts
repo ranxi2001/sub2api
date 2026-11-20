@@ -442,7 +442,7 @@ describe('UsageFilters — identity-only traffic filters', () => {
 })
 
 describe('admin usage platform filter', () => {
-  it.each(['errors', 'ranking', 'connections', 'latency'] as const)('keeps the platform selector out of %s', async mode => {
+  it.each(['ranking', 'connections', 'latency'] as const)('keeps the platform selector out of %s', async mode => {
     const wrapper = mountFilters(defaultFilters(), mode)
     await flushPromises()
     expect(wrapper.find('[data-testid="usage-platform-filter"]').exists()).toBe(false)
@@ -459,8 +459,8 @@ describe('admin usage platform filter', () => {
     wrapper.unmount()
   })
 
-  it('offers a server-side platform filter alongside the group filter', async () => {
-    const wrapper = mountFilters()
+  it.each(['usage', 'errors'] as const)('offers the platform selector alongside the group filter in %s', async mode => {
+    const wrapper = mountFilters(defaultFilters(), mode)
     await flushPromises()
     expect(wrapper.find('[data-testid="usage-platform-filter"]').exists(),
       'admin usage details must offer a platform selector').toBe(true)
