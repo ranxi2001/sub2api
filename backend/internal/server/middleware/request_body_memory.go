@@ -12,7 +12,7 @@ import (
 // handler runs. Cancelled clients have no response body and an uncommitted
 // response is marked 499, matching the gateway handler's cancellation path.
 func RejectRequestBodyReadError(c *gin.Context, err error) bool {
-	if err != nil && c != nil && c.Request != nil && c.Request.Context().Err() != nil {
+	if err != nil && c != nil && c.Request != nil && c.Request.Context().Err() != nil && !pkghttputil.IsRequestBodyReadTimeout(err) {
 		if !c.Writer.Written() {
 			c.Status(499)
 		}

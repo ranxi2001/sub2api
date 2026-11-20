@@ -46,7 +46,7 @@ func RejectConflictingRequestFields() gin.HandlerFunc {
 
 		body, err := httputil.ReadRequestBodyWithPrealloc(c.Request)
 		if err != nil {
-			if RejectRequestBodyReadError(c, "middleware.request_field_conflict", err) {
+			if RejectRequestBodyReadError(c, err) {
 				return
 			}
 			AbortWithRequestBodyReadFailure(c, "middleware.request_field_conflict", err)

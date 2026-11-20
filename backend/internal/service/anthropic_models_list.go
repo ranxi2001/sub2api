@@ -17,7 +17,7 @@ func (s *GatewayService) ExpandAnthropicLongContextModels(ctx context.Context, g
 	if err != nil {
 		return models
 	}
-	result := cloneStringSlice(models)
+	result := slices.Clone(models)
 	seen := make(map[string]bool, len(models))
 	for _, model := range models {
 		seen[strings.ToLower(model)] = true

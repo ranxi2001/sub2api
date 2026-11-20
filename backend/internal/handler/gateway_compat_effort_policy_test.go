@@ -41,7 +41,7 @@ func TestOpenAIResponsesUsageReportsConfigurationUpdateEffort(t *testing.T) {
 	billing := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
 	t.Cleanup(billing.Stop)
 	gateway := service.NewOpenAIGatewayService(
-		&openAIWSUsageHandlerAccountRepoStub{account: account}, usageRepo, nil, nil, nil, nil, nil, cfg,
+		&openAIWSUsageHandlerAccountRepoStub{account: account}, nil, usageRepo, nil, nil, nil, nil, nil, cfg,
 		nil, nil, service.NewBillingService(cfg, nil), nil, billing, upstream, &service.DeferredService{},
 		nil, nil, nil, nil, nil, nil, nil,
 	)

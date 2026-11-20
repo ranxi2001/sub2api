@@ -1231,9 +1231,9 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 		}
 		source := availableModels
 		if group != nil && group.ModelAllowlistEnabled() {
-			source = modelListingSource(platform, availableModels, defaultModelIDsForPlatform(platform))
+			source = service.ModelListingSource(platform, availableModels, service.DefaultModelIDsForPlatform(platform))
 		} else if len(source) == 0 {
-			source = defaultModelIDsForPlatform(platform)
+			source = service.DefaultModelIDsForPlatform(platform)
 		}
 		expanded := h.gatewayService.ExpandAnthropicLongContextModels(c.Request.Context(), group, source)
 		if len(availableModels) > 0 || len(expanded) > len(source) || (group != nil && group.ModelAllowlistEnabled()) {

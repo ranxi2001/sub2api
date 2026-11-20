@@ -100,11 +100,11 @@ func ensureDeepSeekAnthropicThinkingBlocks(body []byte) []byte {
 }
 
 // shouldRepairDeepSeekAnthropicThinking 报告该请求是否需要做 DeepSeek Anthropic
-// thinking 补位：仅 DeepSeek 官方上游账号（targetsDeepSeekAPIHost）且请求启用
+// thinking 补位：仅 DeepSeek 官方上游账号且请求启用
 // thinking 时生效，其他上游保持字节不变。
 func shouldRepairDeepSeekAnthropicThinking(account *Account, body []byte) bool {
 	if account == nil {
 		return false
 	}
-	return targetsDeepSeekAPIHost(account) && anthropicBodyThinkingEnabled(body)
+	return isDeepSeekAPIHost(account.GetAnthropicProtocolBaseURL()) && anthropicBodyThinkingEnabled(body)
 }

@@ -94,7 +94,11 @@ func TestGatewayModelsAnthropicLongContextVariants(t *testing.T) {
 			for _, absent := range test.absent {
 				require.NotContains(t, ids, absent)
 			}
-			require.Len(t, mergeModelIDs(ids, nil), len(ids))
+			seen := make(map[string]bool, len(ids))
+			for _, id := range ids {
+				require.False(t, seen[id], "duplicate model ID: %s", id)
+				seen[id] = true
+			}
 		})
 	}
 }
