@@ -11,7 +11,7 @@ import (
 )
 
 // PlatformGateway is reserved for account storage and is excluded from the catalog.
-const PlatformGateway = domain.PlatformGateway
+const PlatformGateway = domain.AccountPlatformGateway
 const GatewayUpstreamKindCredentialKey = "upstream_kind"
 
 var ErrGatewayAccountIdentity = infraerrors.BadRequest("INVALID_GATEWAY_ACCOUNT", "gateway accounts require platform/type gateway, upstream_kind new_api or sub2api, a site URL and an API key")
