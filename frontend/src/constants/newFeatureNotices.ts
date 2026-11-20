@@ -24,6 +24,7 @@ export const NEW_FEATURE_NOTICES = {
   accountOpsProviderBalance: 'account-ops-provider-wallet-balance',
   accountOpsOAuthLifecycle: 'account-ops-oauth-lifecycle',
   moderationUpstreamAccountScope: 'moderation-upstream-account-scope',
+  adminErrorPlatform: 'admin-error-platform-filter',
   adminUsagePlatform: 'admin-usage-platform-filter-initial-announcement',
   usageTrendRate: 'usage-trend-tooltip-rpm-tpm-initial-announcement',
   priorityCacheWeight: 'priority-cache-weight-initial-announcement',
@@ -89,4 +90,5 @@ export const NEW_FEATURE_NOTICES = {
   bpsAccountMultiProxy: 'bps-account-multi-proxy-request-routing',
   openaiAccountMultiProxy: '2026-11-16-openai-account-multi-proxy',
   cacheTtlBillingFromRequest: 'anthropic-apikey-cache-ttl-billing-from-request-initial-announcement',
+  accountProbePenalty: 'account-claude-probe-penalty-initial-announcement',
 } as const

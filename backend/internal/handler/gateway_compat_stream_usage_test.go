@@ -72,7 +72,7 @@ func runCompatStreamUsageHandler(t *testing.T, endpoint, upstreamStream string, 
 	return runCompatStreamUsageHandlerWithDelivery(t, endpoint, upstreamStream, closeUpstream, nil, "")
 }
 
-func runCompatStreamUsageHandlerWithDelivery(t *testing.T, endpoint, upstreamStream string, closeUpstream bool, durable service.UsageBillingRepository, baseURL string) compatStreamUsageRun {
+func runCompatStreamUsageHandlerWithDelivery(t *testing.T, endpoint, upstreamStream string, closeUpstream bool, durable service.UsageBillingRepository, baseURL string, accountExtra ...map[string]any) compatStreamUsageRun {
 	t.Helper()
 	cfg := &config.Config{Gateway: config.GatewayConfig{StreamDataIntervalTimeout: 1}}
 	cfg.Security.URLAllowlist.AllowPrivateHosts = true
@@ -84,6 +84,9 @@ func runCompatStreamUsageHandlerWithDelivery(t *testing.T, endpoint, upstreamStr
 		Status: service.StatusActive, Schedulable: true, Concurrency: 1,
 		Credentials:   map[string]any{"api_key": "test-key"},
 		AccountGroups: []service.AccountGroup{{AccountID: 9301, GroupID: groupID}},
+	}
+	if len(accountExtra) > 0 {
+		account.Extra = accountExtra[0]
 	}
 	snapshot := service.NewSchedulerSnapshotService(&fakeSchedulerCache{accounts: []*service.Account{account}}, nil, nil, nil, nil)
 	run := compatStreamUsageRun{
@@ -126,6 +129,9 @@ func runCompatStreamUsageHandlerWithDelivery(t *testing.T, endpoint, upstreamStr
 	}
 
 	body := `{"model":"claude-sonnet-4.5","stream":true,"input":"hello"}`
+	if endpoint == "messages" {
+		body = `{"model":"claude-sonnet-4.5","stream":true,"max_tokens":32,"messages":[{"role":"user","content":"hello"}]}`
+	}
 	if endpoint == "chat/completions" {
 		body = `{"model":"claude-sonnet-4.5","stream":true,"messages":[{"role":"user","content":"hello"}]}`
 	}
@@ -136,7 +142,9 @@ func runCompatStreamUsageHandlerWithDelivery(t *testing.T, endpoint, upstreamStr
 	c.Set(string(middleware.ContextKeyAPIKey), apiKey)
 	c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 9303})
 
-	if endpoint == "chat/completions" {
+	if endpoint == "messages" {
+		h.Messages(c)
+	} else if endpoint == "chat/completions" {
 		h.ChatCompletions(c)
 	} else {
 		h.Responses(c)
