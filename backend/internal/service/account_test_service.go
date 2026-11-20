@@ -400,7 +400,7 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Account not found")
 	}
-	if expected, ok := ctx.Value(oauth429ExecutionKey{}).(oauth429Execution); ok {
+	if expected, ok := ctx.Value(oauth429ExecutionKey{}).(*oauth429Execution); ok {
 		if account.ID != expected.AccountID || account.GetMappedModel(modelID) != expected.Model || account.IsCredentialShadow() || account.IsSIWCEnabled() || account.IsExcelBPSEnabled() || account.IsPrismBrowserEnabledForModel(modelID) || isOpenAIImageModel(expected.Model) {
 			return s.sendErrorAndEnd(c, "Independent test target route is unavailable")
 		}
@@ -3088,6 +3088,9 @@ func (s *AccountTestService) processGeminiStream(c *gin.Context, body io.Reader)
 
 		var data map[string]any
 		if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
+			if isOAuth429Execution(c.Request.Context()) {
+				return s.sendErrorAndEnd(c, "Independent test received invalid stream data")
+			}
 			continue
 		}
 
@@ -3126,6 +3129,7 @@ func (s *AccountTestService) processGeminiStream(c *gin.Context, body io.Reader)
 
 				// Check for completion after extracting content
 				if finishReason, ok := candidate["finishReason"].(string); ok && finishReason != "" {
+					confirmOAuth429Answer(c.Request.Context(), finishReason == "STOP")
 					s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
 					return nil
 				}
@@ -3201,6 +3205,7 @@ func (s *AccountTestService) processClaudeStream(c *gin.Context, body io.Reader)
 	stopReason, refusalCategory := "", ""
 	messageStopped := false
 	complete := func() error {
+		confirmOAuth429Answer(c.Request.Context(), messageStopped && stopReason == "end_turn" && refusalCategory == "")
 		if modelTraceRequested(c.Request.Context()) && (!messageStopped || stopReason != "end_turn") {
 			return s.sendErrorAndEnd(c, "ModelTrace generation did not finish normally")
 		}
@@ -3235,6 +3240,9 @@ func (s *AccountTestService) processClaudeStream(c *gin.Context, body io.Reader)
 
 		var data map[string]any
 		if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
+			if isOAuth429Execution(c.Request.Context()) {
+				return s.sendErrorAndEnd(c, "Independent test received invalid stream data")
+			}
 			continue
 		}
 
@@ -3357,6 +3365,10 @@ func (s *AccountTestService) processOpenAIChatCompletionsStream(c *gin.Context, 
 				if modelTraceRequested(c.Request.Context()) && finishReason != "stop" {
 					return s.sendErrorAndEnd(c, "ModelTrace generation did not finish normally")
 				}
+				if isOAuth429Execution(c.Request.Context()) && finishReason != "stop" {
+					return s.sendErrorAndEnd(c, "Independent test answer incomplete")
+				}
+				confirmOAuth429Answer(c.Request.Context(), finishReason == "stop")
 				seenFinish = true
 			}
 		}
@@ -3400,6 +3412,9 @@ func (s *AccountTestService) processOpenAIStream(c *gin.Context, body io.Reader)
 
 		var data map[string]any
 		if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
+			if isOAuth429Execution(c.Request.Context()) {
+				return s.sendErrorAndEnd(c, "Independent test received invalid stream data")
+			}
 			continue
 		}
 
@@ -3412,11 +3427,27 @@ func (s *AccountTestService) processOpenAIStream(c *gin.Context, body io.Reader)
 				accountTestContent(c, delta)
 				s.sendEvent(c, TestEvent{Type: "content", Text: delta})
 			}
-		case "response.incomplete":
-			if isCialloRequest(c.Request.Context()) {
+		case "response.refusal.delta", "response.refusal.done", "response.incomplete":
+			if isOAuth429Execution(c.Request.Context()) {
+				return s.sendErrorAndEnd(c, "Independent test answer incomplete")
+			}
+			if eventType == "response.incomplete" && isCialloRequest(c.Request.Context()) {
 				return s.sendErrorAndEnd(c, "Ciallo generation incomplete")
 			}
 		case "response.completed", "response.done":
+			if isOAuth429Execution(c.Request.Context()) {
+				status := gjson.Get(jsonStr, "response.status").String()
+				refusal := gjson.Get(jsonStr, "response.output.#.content.#(type==\"refusal\").type")
+				var refused bool
+				for _, item := range refusal.Array() {
+					if item.String() == "refusal" {
+						refused = true
+						break
+					}
+				}
+				normal := status == "completed" || status == "" && eventType == "response.completed"
+				confirmOAuth429Answer(c.Request.Context(), normal && !refused && gjson.Get(jsonStr, "response.incomplete_details").Type == gjson.Null && gjson.Get(jsonStr, "response.error").Type == gjson.Null)
+			}
 			if isCialloRequest(c.Request.Context()) {
 				if obj, ok := data["response"].(map[string]any); ok && (obj["incomplete_details"] != nil || (obj["status"] != nil && obj["status"] != "completed")) {
 					return s.sendErrorAndEnd(c, "Ciallo generation incomplete")

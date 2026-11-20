@@ -111,6 +111,13 @@ func oauth429Runner(t *testing.T, repo *accountRepository, answers []string) (*s
 			_, _ = io.WriteString(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"23\"}\n\n")
 			return
 		}
+		if answer == "incomplete_status" {
+			_, _ = io.WriteString(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"23\"}\n\ndata: {\"type\":\"response.done\",\"response\":{\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}}\n\n")
+			return
+		}
+		if answer == "wrapped_rate_limit" {
+			answer = "429"
+		}
 		text, _ := json.Marshal(answer)
 		_, _ = fmt.Fprintf(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":%s}\n\ndata: {\"type\":\"response.completed\"}\n\n", text)
 	}))
@@ -137,6 +144,9 @@ func TestOAuth429WorkerIndependentPair(t *testing.T) {
 		{"wrong_unknown_429", []string{"23", "429"}, nil, false},
 		{"two_rejections_terminate", []string{"429", "429"}, nil, false},
 		{"auth_is_inconclusive", []string{"401", "401"}, nil, false},
+		{"partial_integer_with_terminal_error", []string{"23", "incomplete_status"}, nil, false},
+		{"rate_limit_delivered_as_text", []string{"wrapped_rate_limit", "wrapped_rate_limit"}, nil, false},
+		{"formatted_correct", []string{"23", "答案是21颗糖果。"}, nil, false},
 		{"wrong_empty", []string{"23", ""}, nil, false},
 		{"wrong_truncated", []string{"23", "truncated"}, nil, false},
 	} {
@@ -187,6 +197,16 @@ func TestOAuth429WorkerIndependentPair(t *testing.T) {
 			require.NoError(t, json.Unmarshal(data, &saved))
 			require.Equal(t, "complete", state)
 			require.Len(t, saved.Runs, 2)
+			switch tc.name {
+			case "auth_is_inconclusive", "two_rejections_terminate", "rate_limit_delivered_as_text":
+				for _, run := range saved.Runs {
+					require.Equal(t, "inconclusive", run.Verdict)
+				}
+			case "partial_integer_with_terminal_error", "wrong_truncated", "wrong_empty", "wrong_unknown_429":
+				require.Equal(t, "inconclusive", saved.Runs[1].Verdict)
+			case "formatted_correct", "wrong_pass":
+				require.Equal(t, "correct", saved.Runs[1].Verdict)
+			}
 			require.NotEqual(t, saved.Runs[0].ID, saved.Runs[1].ID)
 			require.NotEqual(t, saved.Runs[0].ResultID, saved.Runs[1].ResultID)
 			require.NoError(t, repo.CompleteOAuth429(t.Context(), &saved))

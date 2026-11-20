@@ -437,7 +437,7 @@ func (r *accountRepository) CompleteOAuth429(ctx context.Context, task *service.
 			return err
 		}
 		one, two := current.Runs[0], current.Runs[1]
-		if one.Verdict != "incorrect" || two.Verdict != "incorrect" || one.ID == two.ID || one.ResultID == "" || one.ResultID == two.ResultID || one.StartedAt.Before(current.TriggeredAt) || two.StartedAt.Before(one.FinishedAt) {
+		if !one.AnswerComplete || !two.AnswerComplete || one.Verdict != "incorrect" || two.Verdict != "incorrect" || one.ID == two.ID || one.ResultID == "" || one.ResultID == two.ResultID || one.StartedAt.Before(current.TriggeredAt) || two.StartedAt.Before(one.FinishedAt) {
 			return nil
 		}
 		// Reuse only the selected model-restriction action, never account-wide

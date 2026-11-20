@@ -40,12 +40,13 @@ type OAuth429Sample struct {
 	At      time.Time `json:"at"`
 }
 type OAuth429Run struct {
-	ID         string    `json:"id"`
-	ResultID   string    `json:"result_id,omitempty"`
-	StartedAt  time.Time `json:"started_at"`
-	FinishedAt time.Time `json:"finished_at,omitempty"`
-	Verdict    string    `json:"verdict"`
-	Digest     string    `json:"digest,omitempty"`
+	ID             string    `json:"id"`
+	ResultID       string    `json:"result_id,omitempty"`
+	StartedAt      time.Time `json:"started_at"`
+	FinishedAt     time.Time `json:"finished_at,omitempty"`
+	Verdict        string    `json:"verdict"`
+	AnswerComplete bool      `json:"answer_complete,omitempty"`
+	Digest         string    `json:"digest,omitempty"`
 }
 type OAuth429Task struct {
 	AccountID    int64            `json:"account_id"`
@@ -76,14 +77,23 @@ type OAuth429Repository interface {
 }
 
 func isOAuth429Execution(ctx context.Context) bool {
-	_, ok := ctx.Value(oauth429ExecutionKey{}).(oauth429Execution)
+	_, ok := ctx.Value(oauth429ExecutionKey{}).(*oauth429Execution)
 	return ok
 }
 
 type oauth429ExecutionKey struct{}
 type oauth429Execution struct {
-	AccountID int64
-	Model     string
+	AccountID      int64
+	Model          string
+	answerComplete atomic.Bool
+}
+
+// Only a terminal event with a normal finish reason certifies an answer.
+// Other test transports can still report connectivity without grading a model.
+func confirmOAuth429Answer(ctx context.Context, normal bool) {
+	if run, ok := ctx.Value(oauth429ExecutionKey{}).(*oauth429Execution); ok && normal {
+		run.answerComplete.Store(true)
+	}
 }
 
 // ValidateOAuth429Upstream fences any hidden alternate-account/model route.
@@ -91,7 +101,7 @@ func ValidateOAuth429Upstream(req *http.Request, accountID int64) error {
 	if req == nil {
 		return nil
 	}
-	expected, ok := req.Context().Value(oauth429ExecutionKey{}).(oauth429Execution)
+	expected, ok := req.Context().Value(oauth429ExecutionKey{}).(*oauth429Execution)
 	if !ok {
 		return nil
 	}
@@ -256,12 +266,14 @@ func (s *ScheduledTestRunnerService) RunOAuth429Task(ctx context.Context, repo O
 			}
 			return err
 		}
-		cfg := &PelicanTestConfig{QuestionKind: "candy", Prompt: CandyPrompt, ReasoningEffort: "high", ParallelCount: 1, ModelID: task.RequestModel, Quality: &QualityPolicy{Action: QualityActionObserveOnly}}
-		testCtx, stop := context.WithTimeout(context.WithValue(ctx, oauth429ExecutionKey{}, oauth429Execution{AccountID: task.AccountID, Model: task.Model}), 90*time.Second)
+		cfg := &PelicanTestConfig{QuestionKind: "candy", Prompt: CandyPrompt + "\n你可以凭手感选择每种形状取多少颗，不能选择口味。", ReasoningEffort: "high", ParallelCount: 1, ModelID: task.RequestModel, Quality: &QualityPolicy{Action: QualityActionObserveOnly}}
+		execution := &oauth429Execution{AccountID: task.AccountID, Model: task.Model}
+		testCtx, stop := context.WithTimeout(context.WithValue(ctx, oauth429ExecutionKey{}, execution), 90*time.Second)
 		// This direct executor addresses the original account; no group selection,
 		// answer retry, scheduled plan, or qualityops switch is consulted.
 		result, executeErr := s.runOAuth429Answer(testCtx, task, cfg)
-		run.Verdict = oauth429Verdict(result, executeErr, testCtx.Err(), task.RequestModel)
+		run.AnswerComplete = execution.answerComplete.Load()
+		run.Verdict = oauth429Verdict(result, executeErr, testCtx.Err(), task.RequestModel, run.AnswerComplete)
 		run.ResultID, run.FinishedAt = uuid.NewString(), time.Now().UTC()
 		if result != nil {
 			digest := sha256.Sum256([]byte(result.ResponseText))
@@ -291,15 +303,23 @@ func (s *ScheduledTestRunnerService) runOAuth429Answer(ctx context.Context, task
 
 var oauth429Integer = regexp.MustCompile(`^[0-9]{1,6}$`)
 
-func oauth429Verdict(result *ScheduledTestResult, err, contextErr error, model string) string {
-	if err != nil || contextErr != nil || result == nil || result.Status != "success" || result.ErrorMessage != "" || result.PelicanConfig == nil || result.PelicanConfig.ModelID != model {
+func oauth429Verdict(result *ScheduledTestResult, err, contextErr error, model string, complete bool) string {
+	if !complete || err != nil || contextErr != nil || result == nil || result.Status != "success" || result.ErrorMessage != "" || result.PelicanConfig == nil || result.PelicanConfig.ModelID != model {
 		return "inconclusive"
 	}
 	answer := strings.TrimSpace(result.ResponseText)
+	if CandyAnswerCorrect(answer) {
+		return "correct"
+	}
 	if !oauth429Integer.MatchString(answer) {
 		return "inconclusive"
 	}
-	if strings.TrimLeft(answer, "0") == "21" {
+	number := strings.TrimLeft(answer, "0")
+	// Relays may stream a bare HTTP error code inside a successful SSE response.
+	if len(number) == 3 && number >= "400" && number <= "599" {
+		return "inconclusive"
+	}
+	if number == "21" {
 		return "correct"
 	}
 	return "incorrect"
