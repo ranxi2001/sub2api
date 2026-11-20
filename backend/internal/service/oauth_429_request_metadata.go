@@ -29,7 +29,7 @@ type OAuth429RoutingConfigurator interface {
 }
 
 type oauth429RequestRoute struct {
-	Model string
+	Model   string
 	Compact bool
 }
 

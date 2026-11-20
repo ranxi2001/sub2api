@@ -49,26 +49,26 @@ type OAuth429Run struct {
 	Digest         string    `json:"digest,omitempty"`
 }
 type OAuth429Task struct {
-	AccountID    int64            `json:"account_id"`
-	AccountEpoch int64            `json:"account_epoch"`
-	Model        string           `json:"model"`
-	Reason       string           `json:"reason,omitempty"`
-	ModelBlocked bool             `json:"model_blocked,omitempty"`
-	RequestModel string           `json:"request_model"`
-	Endpoint     string           `json:"endpoint,omitempty"`
-	RoutingRevision string        `json:"routing_revision,omitempty"`
-	CompactModel string           `json:"compact_model,omitempty"`
-	Revision     string           `json:"revision"`
-	TriggerID    string           `json:"trigger_id"`
-	Generation   int64            `json:"generation"`
-	TriggeredAt  time.Time        `json:"triggered_at"`
-	ExpiresAt    time.Time        `json:"expires_at"`
-	Lease        string           `json:"lease"`
-	LeaseUntil   time.Time        `json:"lease_until"`
-	State        string           `json:"state"`
-	Armed        bool             `json:"armed"`
-	Samples      []OAuth429Sample `json:"samples"`
-	Runs         []OAuth429Run    `json:"runs"`
+	AccountID       int64            `json:"account_id"`
+	AccountEpoch    int64            `json:"account_epoch"`
+	Model           string           `json:"model"`
+	Reason          string           `json:"reason,omitempty"`
+	ModelBlocked    bool             `json:"model_blocked,omitempty"`
+	RequestModel    string           `json:"request_model"`
+	Endpoint        string           `json:"endpoint,omitempty"`
+	RoutingRevision string           `json:"routing_revision,omitempty"`
+	CompactModel    string           `json:"compact_model,omitempty"`
+	Revision        string           `json:"revision"`
+	TriggerID       string           `json:"trigger_id"`
+	Generation      int64            `json:"generation"`
+	TriggeredAt     time.Time        `json:"triggered_at"`
+	ExpiresAt       time.Time        `json:"expires_at"`
+	Lease           string           `json:"lease"`
+	LeaseUntil      time.Time        `json:"lease_until"`
+	State           string           `json:"state"`
+	Armed           bool             `json:"armed"`
+	Samples         []OAuth429Sample `json:"samples"`
+	Runs            []OAuth429Run    `json:"runs"`
 }
 
 // The repository owns all transitions and live fences. No scheduled plan,
@@ -135,13 +135,13 @@ func ValidateOAuth429Upstream(req *http.Request, accountID int64) error {
 // Keep only routing metadata in the bounded queues. Each account has a single
 // FIFO consumer per gateway, including retried physical responses.
 type OAuth429Observation struct {
-	AccountID    int64
-	Model        string
-	Revision     string
-	RequestModel string
-	Endpoint     string
+	AccountID       int64
+	Model           string
+	Revision        string
+	RequestModel    string
+	Endpoint        string
 	RoutingRevision string
-	CompactModel string
+	CompactModel    string
 	// Request start fences a response spanning an account transition. At remains
 	// the response-header timestamp used by the statistical window.
 	StartedAt time.Time

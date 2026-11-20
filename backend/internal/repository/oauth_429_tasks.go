@@ -44,7 +44,18 @@ func oauth429PolicyAccount(ctx context.Context, tx *sql.Tx, id int64) (service.O
 	return cfg, a, nil
 }
 func oauth429EligibleRequest(c service.OAuthAutoConfig, a *service.Account, request, target, endpoint, compactModel string) bool {
-	return c.Revision != "" && c.DegradationAction.Enabled && c.DegradationAction.UsesUpstream429() && c.DegradationAction.Independent429.Enabled && c.DegradationAction.Validate() == nil && a != nil && a.Type == service.AccountTypeOAuth && a.Schedulable && a.Status == service.StatusActive && a.Concurrency > 0 && !(a.AutoPauseOnExpired && a.ExpiresAt != nil && !time.Now().Before(*a.ExpiresAt)) && service.OAuth429RequestModelSupported(a, request, endpoint, compactModel) && service.ResolveOAuth429TargetModel(a, request, endpoint, compactModel) == target
+	if c.Revision == "" || !c.DegradationAction.Enabled || !c.DegradationAction.UsesUpstream429() ||
+		!c.DegradationAction.Independent429.Enabled || c.DegradationAction.Validate() != nil {
+		return false
+	}
+	if a == nil || a.Type != service.AccountTypeOAuth || !a.Schedulable || a.Status != service.StatusActive || a.Concurrency <= 0 {
+		return false
+	}
+	if a.AutoPauseOnExpired && a.ExpiresAt != nil && !time.Now().Before(*a.ExpiresAt) {
+		return false
+	}
+	return service.OAuth429RequestModelSupported(a, request, endpoint, compactModel) &&
+		service.ResolveOAuth429TargetModel(a, request, endpoint, compactModel) == target
 }
 
 // The HTTP wire model may be reachable only through a public mapping alias.
