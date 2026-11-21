@@ -248,6 +248,44 @@ func TestListPlazaGroups_OfficialPricingFill(t *testing.T) {
 	require.Nil(t, byName["token-absent"].OfficialPricing)
 }
 
+func TestListPlazaGroups_DeepSeekProAliasOfficialPricing(t *testing.T) {
+	pricingSvc := newStubPricingServiceFromMap(map[string]*LiteLLMModelPricing{})
+	channels := []Channel{
+		plazaPricedChannel(1, "custom", []int64{10}, PlatformDeepseek,
+			"deepseek-pro", "deepseek-v4-pro", "deepseek-flash", "deepseek-pro-preview"),
+	}
+	groups := []Group{{ID: 10, Name: "discount", Platform: PlatformDeepseek, RateMultiplier: 0.5}}
+	svc := newPlazaServiceWithBilling(channels, groups, map[int64]string{10: PlatformDeepseek}, pricingSvc)
+
+	out, err := svc.ListGroups(context.Background())
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	require.Equal(t, 0.5, out[0].RateMultiplier)
+	require.Len(t, out[0].Models, 4)
+	byName := make(map[string]PlazaModel)
+	for _, model := range out[0].Models {
+		byName[model.Name] = model
+		// 官方参考价修正不能替换客户渠道价或预乘分组折扣。
+		require.NotNil(t, model.Pricing)
+		require.Equal(t, 3e-6, *model.Pricing.InputPrice)
+		require.Equal(t, 1.5e-5, *model.Pricing.OutputPrice)
+	}
+	for _, model := range []string{"deepseek-pro", "deepseek-v4-pro"} {
+		official := byName[model].OfficialPricing
+		require.NotNil(t, official, model)
+		require.InDelta(t, 0.66e-6, *official.InputPrice, 1e-15, model)
+		require.InDelta(t, 1.98e-6, *official.OutputPrice, 1e-15, model)
+		require.InDelta(t, 0.022e-6, *official.CacheReadPrice, 1e-15, model)
+	}
+	for _, model := range []string{"deepseek-flash", "deepseek-pro-preview"} {
+		official := byName[model].OfficialPricing
+		require.NotNil(t, official, model)
+		require.InDelta(t, 0.15e-6, *official.InputPrice, 1e-15, model)
+		require.InDelta(t, 0.6e-6, *official.OutputPrice, 1e-15, model)
+		require.InDelta(t, 0.003e-6, *official.CacheReadPrice, 1e-15, model)
+	}
+}
+
 func TestListPlazaGroups_GroupImagePriceOverridesChannelPricing(t *testing.T) {
 	// 图片计费模型:档位价按实收口径合成(分组图片价 > 渠道档位价 > 渠道默认按次价),
 	// 分组独立倍率字段透传;未配图片价的分组保持渠道定价原样。
