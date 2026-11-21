@@ -22,8 +22,8 @@ import (
 type gatewayProtocolOpenAIRepo struct {
 	*gatewayProtocolAdmissionRepo
 	turnReads int
-	changeAt int
-	change   func(*Account)
+	changeAt  int
+	change    func(*Account)
 }
 
 func (r *gatewayProtocolOpenAIRepo) GetOpenAITurnAdmission(context.Context, int64) (*Account, *Account, error) {

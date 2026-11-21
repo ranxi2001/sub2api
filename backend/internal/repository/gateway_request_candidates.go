@@ -2,7 +2,6 @@ package repository
 
 import (
 	"context"
-	"database/sql"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	dbaccount "github.com/Wei-Shaw/sub2api/ent/account"
@@ -18,14 +17,13 @@ func (r *accountRepository) ListGatewayRequestCandidates(ctx context.Context, gr
 	if groupID <= 0 || target != service.PlatformAnthropic {
 		return nil, nil, nil
 	}
-	tx, err := r.client.BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
-	if err != nil {
-		return nil, nil, err
-	}
-	defer func() { _ = tx.Rollback() }()
-	reader := &accountRepository{client: tx.Client()}
-	txctx := dbent.NewTxContext(ctx, tx)
-	g, err := reader.client.Group.Get(txctx, groupID)
+	return withGatewayReadSnapshot(ctx, r, func(ctx context.Context, reader *accountRepository) ([]service.Account, *service.Group, error) {
+		return reader.gatewayRequestCandidates(ctx, groupID, target)
+	})
+}
+
+func (r *accountRepository) gatewayRequestCandidates(ctx context.Context, groupID int64, target string) ([]service.Account, *service.Group, error) {
+	g, err := r.client.Group.Get(ctx, groupID)
 	if err != nil {
 		return nil, nil, translatePersistenceError(err, service.ErrGroupNotFound, nil)
 	}
@@ -33,24 +31,21 @@ func (r *accountRepository) ListGatewayRequestCandidates(ctx context.Context, gr
 	if g.DeletedAt != nil || !group.IsActive() || group.Platform != target || group.RequireOAuthOnly {
 		return nil, group, nil
 	}
-	ids, err := observerAccountQuery(txctx, reader.client.Account.Query()).Where(
+	ids, err := observerAccountQuery(ctx, r.client.Account.Query()).Where(
 		dbaccount.PlatformEQ(service.PlatformGateway), dbaccount.TypeEQ(service.AccountTypeGateway),
 		dbaccount.StatusEQ(service.StatusActive), dbaccount.SchedulableEQ(true),
 		dbaccount.HasAccountGroupsWith(dbaccountgroup.GroupIDEQ(groupID)),
-	).Order(dbent.Asc(dbaccount.FieldPriority), dbent.Asc(dbaccount.FieldID)).IDs(txctx)
+	).Order(dbent.Asc(dbaccount.FieldPriority), dbent.Asc(dbaccount.FieldID)).IDs(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
 	accounts := make([]service.Account, 0, len(ids))
 	for _, id := range ids {
-		account, _, err := reader.gatewayRequestAccount(txctx, id, groupID)
+		account, _, err := r.gatewayRequestAccount(ctx, id, groupID)
 		if err != nil {
 			return nil, nil, err
 		}
 		accounts = append(accounts, *account)
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, nil, err
 	}
 	return accounts, group, nil
 }

@@ -3,7 +3,6 @@ package repository
 import (
 	"context"
 	"database/sql"
-	"errors"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -12,25 +11,37 @@ import (
 var _ service.GatewayRequestAccountReader = (*accountRepository)(nil)
 
 func (r *accountRepository) GatewayRequestAccount(ctx context.Context, accountID, groupID int64) (*service.Account, *service.Group, error) {
-	if dbent.TxFromContext(ctx) == nil {
-		tx, err := r.client.BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
-		if errors.Is(err, dbent.ErrTxStarted) {
-			return r.gatewayRequestAccount(ctx, accountID, groupID)
-		}
-		if err != nil {
-			return nil, nil, err
-		}
-		defer func() { _ = tx.Rollback() }()
-		account, group, err := r.gatewayRequestAccount(dbent.NewTxContext(ctx, tx), accountID, groupID)
-		if err != nil {
-			return nil, nil, err
-		}
-		if err := tx.Commit(); err != nil {
-			return nil, nil, err
-		}
-		return account, group, nil
+	return withGatewayReadSnapshot(ctx, r, func(ctx context.Context, reader *accountRepository) (*service.Account, *service.Group, error) {
+		return reader.gatewayRequestAccount(ctx, accountID, groupID)
+	})
+}
+
+// Reuse the caller's transaction when present. Otherwise keep the account,
+// bindings and group policy in one repeatable-read snapshot.
+func withGatewayReadSnapshot[T any](ctx context.Context, r *accountRepository, read func(context.Context, *accountRepository) (T, *service.Group, error)) (T, *service.Group, error) {
+	tx := dbent.TxFromContext(ctx)
+	if tx == nil {
+		tx, _ = r.sql.(*dbent.Tx)
 	}
-	return r.gatewayRequestAccount(ctx, accountID, groupID)
+	if tx != nil {
+		ctx = dbent.NewTxContext(ctx, tx)
+		return read(ctx, r.accountTransactionScope(ctx))
+	}
+	var zero T
+	tx, err := r.client.BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
+	if err != nil {
+		return zero, nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	ctx = dbent.NewTxContext(ctx, tx)
+	value, group, err := read(ctx, r.accountTransactionScope(ctx))
+	if err != nil {
+		return zero, nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return zero, nil, err
+	}
+	return value, group, nil
 }
 
 func (r *accountRepository) gatewayRequestAccount(ctx context.Context, accountID, groupID int64) (*service.Account, *service.Group, error) {

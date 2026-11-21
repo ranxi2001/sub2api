@@ -159,7 +159,8 @@ func gatewayProtocolAccountFromSnapshot(ctx context.Context, selected, current *
 	if !concrete || (liveGroup.Platform != PlatformComposite && liveGroup.Platform != target) {
 		return nil, ErrGatewayAccountGroup
 	}
-	if spec.Gateway != family && !(target == PlatformAntigravity && (family == domain.PlatformGatewayAnthropic || family == domain.PlatformGatewayGemini)) {
+	nativeAntigravity := target == PlatformAntigravity && (family == domain.PlatformGatewayAnthropic || family == domain.PlatformGatewayGemini)
+	if spec.Gateway != family && !nativeAntigravity {
 		return nil, ErrGatewayProtocolsPending
 	}
 	// Validate model scope while the account still has its neutral identity: no

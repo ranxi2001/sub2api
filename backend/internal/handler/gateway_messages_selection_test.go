@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/repository"
 	middleware "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -28,6 +29,10 @@ type gatewayMessagesHandlerRepo struct {
 	queries   int
 	reads     int
 	afterRead func()
+}
+
+func (r *gatewayMessagesHandlerRepo) ListModelAvailabilityCandidates(context.Context, *int64, []string, bool) ([]service.Account, error) {
+	return nil, nil
 }
 
 func (r *gatewayMessagesHandlerRepo) ListGatewayRequestCandidates(context.Context, int64, string) ([]service.Account, *service.Group, error) {
@@ -136,6 +141,7 @@ func TestGatewayProtocolMessagesHandlerSchedulerToUsage(t *testing.T) {
 					rec := httptest.NewRecorder()
 					c, _ := gin.CreateTestContext(rec)
 					c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-sonnet-4.5","max_tokens":32,"messages":[{"role":"user","content":"hello"}]}`))
+					c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.Group, group))
 					c.Request.Header.Set("Content-Type", "application/json")
 					key := &service.APIKey{ID: 9593, UserID: 9594, GroupID: &groupID, Group: group, User: &service.User{ID: 9594, Balance: 100}}
 					c.Set(string(middleware.ContextKeyAPIKey), key)
@@ -228,7 +234,7 @@ func TestGatewayProtocolMessagesChannelMappingPreservesBindingModel(t *testing.T
 				account := &service.Account{ID: 9596, Platform: service.PlatformGateway, Type: service.AccountTypeGateway,
 					Status: service.StatusActive, Schedulable: true, Concurrency: 2,
 					Credentials: map[string]any{"upstream_kind": "new_api", "api_key": "synthetic-only", "base_url": peer.URL + "/tenant/v1"},
-					GroupIDs: []int64{groupID}, AccountGroups: []service.AccountGroup{{AccountID: 9596, GroupID: groupID, AllowedModels: []string{publicModel}}}}
+					GroupIDs:    []int64{groupID}, AccountGroups: []service.AccountGroup{{AccountID: 9596, GroupID: groupID, AllowedModels: []string{publicModel}}}}
 				if scenario == "channel-account-mapping" {
 					// Selection checks source keys; forwarding maps the channel result,
 					// exactly as the existing handler and legacy account contract do.
@@ -274,6 +280,7 @@ func TestGatewayProtocolMessagesChannelMappingPreservesBindingModel(t *testing.T
 				rec := httptest.NewRecorder()
 				c, _ := gin.CreateTestContext(rec)
 				c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"`+publicModel+`","max_tokens":32,"messages":[{"role":"user","content":"hello"}]}`))
+				c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.Group, group))
 				c.Request.Header.Set("Content-Type", "application/json")
 				key := &service.APIKey{ID: 9598, UserID: 9599, GroupID: &groupID, Group: group, User: &service.User{ID: 9599, Balance: 100}}
 				c.Set(string(middleware.ContextKeyAPIKey), key)
