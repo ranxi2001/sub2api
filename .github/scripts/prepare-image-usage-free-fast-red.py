@@ -28,6 +28,7 @@ elif phase == 'cache':
     # backporting either the cache-price producer or UltraFast behavior.
     addition = ('\n\tImageMinimumCharge float64 `json:"image_minimum_charge,omitempty"`\n'
                 '\tImageMinimumChargeAdjustment float64 `json:"image_minimum_charge_adjustment,omitempty"`\n'
+                '\tProbePenalty *ProbePenaltyReceipt `json:"probe_penalty,omitempty"`\n'
                 '\tFreeUltrafast bool `json:"free_ultrafast,omitempty"`\n'
                 '\tCacheCostDetails []CustomerCacheCostDetail `json:"cache_cost_details,omitempty"`\n')
 else:

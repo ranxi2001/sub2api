@@ -36,14 +36,16 @@ jobs:
         run: |
           set -euo pipefail
           baseline=9227fee3866d7ad7628817771cdd208b406a166d
-          sources=(backend/internal/repository/account_repo.go backend/internal/service/admin_account.go)
-          for source in "${sources[@]}"; do cp "$source" "$RUNNER_TEMP/$(basename "$source")"; done
-          trap 'for source in "${sources[@]}"; do cp "$RUNNER_TEMP/$(basename "$source")" "$source"; done' EXIT
+          red_dir="$RUNNER_TEMP/quality152-red"
           git fetch --no-tags --depth=1 origin "$baseline"
-          git rev-parse "$baseline" | tee evidence/red-source-head.txt
-          for source in "${sources[@]}"; do git show "$baseline:$source" > "$source"; done
+          git worktree add --detach "$red_dir" "$baseline"
+          git -C "$red_dir" rev-parse HEAD | tee evidence/red-source-head.txt
+          for oracle in backend/internal/repository/quality_rule152{,_http}_integration_test.go; do
+            cp "$oracle" "$red_dir/$oracle"
+          done
+          (cd "$red_dir" && sha256sum -c "$GITHUB_WORKSPACE/evidence/test-input.sha256")
           set +e
-          (cd backend && go test -tags=integration ./internal/repository -run '^TestQuality152' -count=1 -v) > evidence/red.log 2>&1
+          (cd "$red_dir/backend" && go test -tags=integration ./internal/repository -run '^TestQuality152' -count=1 -v) > evidence/red.log 2>&1
           result=$?
           set -e
           cat evidence/red.log

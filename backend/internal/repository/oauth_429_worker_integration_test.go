@@ -81,13 +81,17 @@ func oauth429Prime(t *testing.T, repo *accountRepository, id int64, model string
 		require.Equal(t, i == 19, oauth429Observe(t, repo, id, model, i))
 	}
 }
-func oauth429Runner(t *testing.T, repo *accountRepository, answers []string) (*service.ScheduledTestRunnerService, *atomic.Int32, *oauth429Loopback) {
+func oauth429Runner(t *testing.T, repo *accountRepository, answers []string, models ...string) (*service.ScheduledTestRunnerService, *atomic.Int32, *oauth429Loopback) {
 	t.Helper()
+	model := "gpt-6-astra"
+	if len(models) > 0 {
+		model = models[0]
+	}
 	calls := &atomic.Int32{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		index := int(calls.Add(1)) - 1
 		var input map[string]any
-		if json.NewDecoder(r.Body).Decode(&input) != nil || input["model"] != "gpt-6-astra" {
+		if json.NewDecoder(r.Body).Decode(&input) != nil || input["model"] != model {
 			http.Error(w, "wrong target model", 400)
 			return
 		}

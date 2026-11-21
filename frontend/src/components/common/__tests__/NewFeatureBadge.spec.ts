@@ -37,6 +37,7 @@ describe('NewFeatureBadge', () => {
     ['QQ community', NEW_FEATURE_NOTICES.qqCommunity],
     ['QQ reward coupons', NEW_FEATURE_NOTICES.qqRewardCoupons],
     ['moderation upstream scope', NEW_FEATURE_NOTICES.moderationUpstreamAccountScope],
+    ['admin error platform', NEW_FEATURE_NOTICES.adminErrorPlatform],
     ['admin usage platform', NEW_FEATURE_NOTICES.adminUsagePlatform],
     ['user ID copy', NEW_FEATURE_NOTICES.userIdCopy],
     ['Antigravity usage query', NEW_FEATURE_NOTICES.antigravityUsageQuery],

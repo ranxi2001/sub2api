@@ -713,3 +713,29 @@ func TestProbePreservesManualCostWhenAutoSyncDisabledDuringProbe(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1.0, synced.CostMultiplier())
 }
+
+func TestAccountProbePenaltyOmittedEditPreservesCommittedSetting(t *testing.T) {
+	ctx := context.Background()
+	tx := testEntTx(t)
+	repo := newAccountRepositoryWithSQL(tx.Client(), tx, nil)
+	account := mustCreateAccount(t, tx.Client(), &service.Account{Name: "probe-penalty-omit", Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey, Extra: map[string]any{service.AccountProbePenaltyExtraKey: map[string]any{"enabled": true, "minimum_charge": .001}}})
+	stale, err := repo.GetByID(ctx, account.ID)
+	require.NoError(t, err)
+	require.NoError(t, repo.UpdateExtra(ctx, account.ID, map[string]any{service.AccountProbePenaltyExtraKey: map[string]any{"enabled": false, "minimum_charge": .002}}))
+	delete(stale.Extra, service.AccountProbePenaltyExtraKey)
+	stale.Name = "unrelated rename"
+	require.NoError(t, repo.Update(ctx, stale))
+	saved, err := repo.GetByID(ctx, account.ID)
+	require.NoError(t, err)
+	require.Equal(t, map[string]any{"enabled": false, "minimum_charge": .002}, saved.Extra[service.AccountProbePenaltyExtraKey])
+	stale.Extra[service.AccountProbePenaltyExtraKey] = map[string]any{"enabled": true, "minimum_charge": .003}
+	require.NoError(t, repo.Update(ctx, stale))
+	saved, err = repo.GetByID(ctx, account.ID)
+	require.NoError(t, err)
+	require.Equal(t, .003, saved.ProbePenaltyMinimum())
+	stale.Extra[service.AccountProbePenaltyExtraKey] = nil
+	require.NoError(t, repo.Update(ctx, stale))
+	saved, err = repo.GetByID(ctx, account.ID)
+	require.NoError(t, err)
+	require.Zero(t, saved.ProbePenaltyMinimum())
+}

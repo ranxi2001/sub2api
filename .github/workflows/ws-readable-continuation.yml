@@ -287,11 +287,22 @@ jobs:
           # compilation failure nor a missing diagnostic is accepted as RED.
           failed=0
           for suite in ws-residual ws-ticket; do
+            suite_tree="$tested_tree"
             package=handler
             test_name=TestOpenAI409WSResidualRepairs
-            if [ "$suite" = ws-ticket ]; then package=service; test_name=TestOpenAI409WSTicketBoundEgress; fi
+            if [ "$suite" = ws-ticket ]; then
+              package=service
+              test_name=TestOpenAI409WSTicketBoundEgress
+              if [ "$PHASE" = RED ]; then
+                suite_tree="$RUNNER_TEMP/ws-ticket-red"
+                git worktree add --detach "$suite_tree" "$baseline"
+                oracle=backend/internal/service/openai_409_ws_ticket_test.go
+                git show "$CANDIDATE_SHA:$oracle" > "$suite_tree/$oracle"
+                test "$(git hash-object "$suite_tree/$oracle")" = "$(git rev-parse "$CANDIDATE_SHA:$oracle")"
+              fi
+            fi
             set +e
-            (cd "$tested_tree/backend" && go test -race -json -tags=unit "./internal/$package" -run "^$test_name$" -count=1 -timeout=5m) > "$RUNNER_TEMP/ws-evidence/$suite.jsonl" 2>&1
+            (cd "$suite_tree/backend" && go test -race -json -tags=unit "./internal/$package" -run "^$test_name$" -count=1 -timeout=5m) > "$RUNNER_TEMP/ws-evidence/$suite.jsonl" 2>&1
             result=$?
             set -e
             cat "$RUNNER_TEMP/ws-evidence/$suite.jsonl"

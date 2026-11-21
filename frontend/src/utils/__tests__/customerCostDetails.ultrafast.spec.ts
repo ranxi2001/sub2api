@@ -58,3 +58,22 @@ describe('image minimum charge and saved Standard tier costs', () => {
   expect(customerCostsUnknown(row)).toBe(false)
  })
 })
+
+
+it('uses the saved probe penalty quote for fast and standard requests', () => {
+  for (const service_tier of [null, 'fast']) {
+    const row = fixture()
+    row.service_tier = service_tier
+    row.actual_cost = .01
+    row.customer_cost_details = {
+      version: 4, free_fast: false, input_cost: .00071, output_cost: .00095,
+      image_input_cost: 0, image_output_cost: 0, cache_creation_cost: 0, cache_read_cost: 0,
+      total_cost: .00166, actual_cost: .01, multiplier: .6,
+      probe_penalty: { minimum_charge: .01, adjustment: .009004, actual_cost: .01, original_output_tokens: 19, billing_output_tokens: 200, output_token_price: .00005 }
+    }
+    expect(customerCostSnapshot(row)).toBe(row.customer_cost_details)
+    expect(customerCostsUnknown(row)).toBe(false)
+    row.customer_cost_details.probe_penalty!.adjustment = .009
+    expect(customerCostSnapshot(row)).toBeNull()
+  }
+})

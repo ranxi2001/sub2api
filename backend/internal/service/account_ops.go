@@ -110,6 +110,8 @@ type AccountOpsService struct {
 	degradationCursor  int64
 	autoSeen           map[int64]bool
 	oauth429Samples    [4]chan OAuth429Observation
+	oauth429Routing    OAuth429RoutingPolicy
+	oauth429RoutingErr error
 	autoConfigMu       sync.Mutex
 	autoGroups         GroupRepository
 	autoAccounts       AccountConcurrencyRepository

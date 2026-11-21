@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -48,22 +49,26 @@ type OAuth429Run struct {
 	Digest         string    `json:"digest,omitempty"`
 }
 type OAuth429Task struct {
-	AccountID    int64            `json:"account_id"`
-	Model        string           `json:"model"`
-	Reason       string           `json:"reason,omitempty"`
-	ModelBlocked bool             `json:"model_blocked,omitempty"`
-	RequestModel string           `json:"request_model"`
-	Revision     string           `json:"revision"`
-	TriggerID    string           `json:"trigger_id"`
-	Generation   int64            `json:"generation"`
-	TriggeredAt  time.Time        `json:"triggered_at"`
-	ExpiresAt    time.Time        `json:"expires_at"`
-	Lease        string           `json:"lease"`
-	LeaseUntil   time.Time        `json:"lease_until"`
-	State        string           `json:"state"`
-	Armed        bool             `json:"armed"`
-	Samples      []OAuth429Sample `json:"samples"`
-	Runs         []OAuth429Run    `json:"runs"`
+	AccountID       int64            `json:"account_id"`
+	AccountEpoch    int64            `json:"account_epoch"`
+	Model           string           `json:"model"`
+	Reason          string           `json:"reason,omitempty"`
+	ModelBlocked    bool             `json:"model_blocked,omitempty"`
+	RequestModel    string           `json:"request_model"`
+	Endpoint        string           `json:"endpoint,omitempty"`
+	RoutingRevision string           `json:"routing_revision,omitempty"`
+	CompactModel    string           `json:"compact_model,omitempty"`
+	Revision        string           `json:"revision"`
+	TriggerID       string           `json:"trigger_id"`
+	Generation      int64            `json:"generation"`
+	TriggeredAt     time.Time        `json:"triggered_at"`
+	ExpiresAt       time.Time        `json:"expires_at"`
+	Lease           string           `json:"lease"`
+	LeaseUntil      time.Time        `json:"lease_until"`
+	State           string           `json:"state"`
+	Armed           bool             `json:"armed"`
+	Samples         []OAuth429Sample `json:"samples"`
+	Runs            []OAuth429Run    `json:"runs"`
 }
 
 // The repository owns all transitions and live fences. No scheduled plan,
@@ -86,6 +91,8 @@ type oauth429ExecutionKey struct{}
 type oauth429Execution struct {
 	AccountID      int64
 	Model          string
+	Endpoint       string
+	CompactModel   string
 	httpStatus     atomic.Int32
 	answerComplete atomic.Bool
 }
@@ -128,9 +135,16 @@ func ValidateOAuth429Upstream(req *http.Request, accountID int64) error {
 // Keep only routing metadata in the bounded queues. Each account has a single
 // FIFO consumer per gateway, including retried physical responses.
 type OAuth429Observation struct {
-	AccountID int64
-	Model     string
-	Revision  string
+	AccountID       int64
+	Model           string
+	Revision        string
+	RequestModel    string
+	Endpoint        string
+	RoutingRevision string
+	CompactModel    string
+	// Request start fences a response spanning an account transition. At remains
+	// the response-header timestamp used by the statistical window.
+	StartedAt time.Time
 	OAuth429Sample
 }
 
@@ -138,6 +152,10 @@ var oauth429HTTPObserver atomic.Pointer[AccountOpsService]
 var oauth429Wake = make(chan struct{}, 1)
 
 func (s *AccountOpsService) startOAuth429Observations(ctx context.Context, repo OAuth429Repository) {
+	if s.oauth429RoutingErr != nil {
+		slog.Error("oauth429 routing initialization failed", "error", s.oauth429RoutingErr)
+		return
+	}
 	for i := range s.oauth429Samples {
 		queue := make(chan OAuth429Observation, 256)
 		s.oauth429Samples[i] = queue
@@ -168,9 +186,9 @@ func (s *AccountOpsService) startOAuth429Observations(ctx context.Context, repo 
 	oauth429HTTPObserver.Store(s)
 }
 
-func ObserveOAuth429HTTP(req *http.Request, accountID int64, status int) {
+func ObserveOAuth429HTTP(req *http.Request, accountID int64, status int, requestStarted ...time.Time) {
 	observer := oauth429HTTPObserver.Load()
-	if observer == nil || accountID <= 0 || req == nil || req.GetBody == nil || status < 200 || status > 599 || req.Context().Value(qualityProbeContextKey{}) != nil {
+	if observer == nil || accountID <= 0 || req == nil || status < 200 || status > 599 || req.Context().Value(qualityProbeContextKey{}) != nil {
 		return
 	}
 	cfg, _ := observer.autoConfig.Load().(OAuthAutoConfig)
@@ -182,23 +200,50 @@ func ObserveOAuth429HTTP(req *http.Request, accountID int64, status int) {
 	if requestID == "" {
 		return
 	}
-	body, err := req.GetBody()
-	if err != nil {
-		return
+	// Handlers already parsed the complete request, including large or streaming
+	// bodies. Preserve their actual public model; the repository resolves and
+	// validates its target under the live account mapping and epoch lock.
+	requestModel, _ := req.Context().Value(ctxkey.Model).(string)
+	model, _ := req.Context().Value(oauth429WireModelKey{}).(string)
+	if model == "" && req.GetBody != nil {
+		body, err := req.GetBody()
+		if err != nil {
+			return
+		}
+		var meta struct {
+			Model string `json:"model"`
+		}
+		err = json.NewDecoder(body).Decode(&meta)
+		_ = body.Close()
+		if err != nil {
+			return
+		}
+		model = meta.Model
 	}
-	raw, err := io.ReadAll(io.LimitReader(body, 1<<20))
-	_ = body.Close()
-	if err != nil {
-		return
+	if model == "" && req.URL != nil {
+		// Native Gemini identifies the model in its endpoint rather than JSON.
+		if _, tail, ok := strings.Cut(req.URL.Path, "/models/"); ok {
+			if value, _, ok := strings.Cut(tail, ":"); ok {
+				model = value
+			}
+		}
 	}
-	model := gjson.GetBytes(raw, "model").String()
-	if model == "" || len(model) > 256 {
+	if model == "" || len(requestModel) > 256 || len(model) > 256 {
 		return
 	}
 	digest := sha256.Sum256([]byte(requestID))
-	sample := OAuth429Observation{AccountID: accountID, Model: model, Revision: cfg.Revision, OAuth429Sample: OAuth429Sample{
+	started := time.Now().UTC()
+	if len(requestStarted) > 0 {
+		started = requestStarted[0]
+	}
+	sample := OAuth429Observation{StartedAt: started, RequestModel: requestModel, AccountID: accountID, Model: model, Revision: cfg.Revision, OAuth429Sample: OAuth429Sample{
 		Request: hex.EncodeToString(digest[:]), Status: status, At: time.Now().UTC(),
 	}}
+	if req.URL != nil {
+		sample.Endpoint = req.URL.Path
+	}
+	sample.RoutingRevision = observer.oauth429Routing.Revision
+	sample.CompactModel = oauth429CompactModel(req.Context())
 	select {
 	case observer.oauth429Samples[accountID%int64(len(observer.oauth429Samples))] <- sample:
 	default:
@@ -207,11 +252,15 @@ func ObserveOAuth429HTTP(req *http.Request, accountID int64, status int) {
 }
 
 func (a *Account) IsOAuth429ModelBlocked(model string) bool {
+	return a.isOAuth429ModelBlockedForEndpoint(model, "")
+}
+
+func (a *Account) isOAuth429ModelBlockedForEndpoint(model, endpoint string, compactModel ...string) bool {
 	if a == nil {
 		return false
 	}
 	entries, _ := a.Extra[OAuth429ModelBlocksKey].(map[string]any)
-	return entries[model] != nil || entries[a.GetMappedModel(model)] != nil
+	return len(entries) > 0 && entries[ResolveOAuth429TargetModel(a, model, endpoint, compactModel...)] != nil
 }
 
 const OAuth429ConsecutiveLimit = 5
@@ -334,7 +383,7 @@ func (s *ScheduledTestRunnerService) RunOAuth429Task(ctx context.Context, repo O
 			return repo.CompleteOAuth429(ctx, task)
 		}
 		cfg := &PelicanTestConfig{QuestionKind: "candy", Prompt: CandyPrompt + "\n你可以凭手感选择每种形状取多少颗，不能选择口味。", ReasoningEffort: "high", ParallelCount: 1, ModelID: task.RequestModel, Quality: &QualityPolicy{Action: QualityActionObserveOnly}}
-		execution := &oauth429Execution{AccountID: task.AccountID, Model: task.Model}
+		execution := &oauth429Execution{AccountID: task.AccountID, Model: task.Model, Endpoint: task.Endpoint, CompactModel: task.CompactModel}
 		testCtx, stop := context.WithTimeout(context.WithValue(ctx, oauth429ExecutionKey{}, execution), 90*time.Second)
 		// This direct executor addresses the original account; no group selection,
 		// answer retry, scheduled plan, or qualityops switch is consulted.

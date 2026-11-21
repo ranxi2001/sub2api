@@ -14,6 +14,7 @@ on:
       - 'frontend/src/utils/oauthDegradation.ts'
       - 'frontend/src/i18n/locales/*/autoConfig.ts'
       - 'frontend/src/views/admin/__tests__/OAuthDegradationActions.spec.ts'
+      - 'frontend/src/views/admin/__tests__/OAuth429RealNoticeEntrypoints.spec.ts'
       - '.github/scripts/oauth-429-independent-browser.mjs'
       - 'backend/internal/pkg/upstreamstats/**'
       - '.github/workflows/autoconfig-429-and-two-quality-tests.yml'
@@ -26,58 +27,58 @@ concurrency:
   group: autoconfig-429-fresh-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-# This first increment verifies the no-direct-action guard. Dedicated worker,
-# handler and loopback-provider acceptance must be added before this draft is ready.
+# Guard RED/GREEN at 7990f8da2 is retained historical evidence. This workflow
+# verifies current behavior and the newly repaired observation boundaries.
 jobs:
   no-direct-action:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:18.1-alpine3.23
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sub2api_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sub2api_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+      redis:
+        image: redis:8.4-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     env:
       CI: 'true'
       GOMAXPROCS: '2'
       GOFLAGS: '-p=2'
+      SUB2API_TEST_POSTGRES_DSN: 'postgres://postgres:postgres@127.0.0.1:5432/sub2api_test?sslmode=disable&TimeZone=UTC'
+      SUB2API_TEST_REDIS_URL: 'redis://127.0.0.1:6379/0'
     steps:
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           path: candidate
           persist-credentials: false
-      - uses: actions/checkout@v6
-        with:
-          ref: 8678e88f4dfb6bfb718993db8a2a15b4a6af8282
-          path: baseline
-          persist-credentials: false
       - uses: actions/setup-go@v6
         with:
           go-version-file: candidate/backend/go.mod
           cache-dependency-path: candidate/backend/go.sum
-      - name: Baseline must fail the unchanged behavior oracle
+      - name: Candidate behavior and existing ordinary probe review
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p evidence
           test "$(git -C candidate rev-parse HEAD)" = '${{ github.event.pull_request.head.sha || github.sha }}'
           git -C candidate rev-parse HEAD > evidence/candidate-head.txt
-          git -C baseline rev-parse HEAD > evidence/baseline-head.txt
-          oracle=backend/internal/repository/oauth_degradation_429_fresh_integration_test.go
-          cp "candidate/$oracle" "baseline/$oracle"
-          cmp "candidate/$oracle" "baseline/$oracle"
-          sha256sum "candidate/$oracle" "baseline/$oracle" > evidence/oracle-sha256.txt
-          set +e
-          (cd baseline/backend && go test -tags=integration ./internal/repository -run '^TestOAuth429RequiresFreshIndependentTestsBeforeAction$' -count=1 -v -timeout=15m) > evidence/red.log 2>&1
-          result=$?
-          set -e
-          cat evidence/red.log
-          printf '%s\n' "$result" > evidence/red-exit.txt
-          test "$result" -ne 0
-          bash candidate/.github/scripts/assert-test-log-clean.sh red evidence/red.log
-          grep -F '429 pressure and historical wrong answers must not authorize degradation before two fresh independent tests' evidence/red.log
-          grep -F -- '--- FAIL: TestOAuth429RequiresFreshIndependentTestsBeforeAction/no_quality_plan' evidence/red.log
-          grep -F -- '--- FAIL: TestOAuth429RequiresFreshIndependentTestsBeforeAction/historical_wrong_results' evidence/red.log
-      - name: Candidate behavior and existing ordinary probe review
-        shell: bash
-        run: |
-          set -euo pipefail
           (cd candidate/backend && go test -race -tags=integration ./internal/repository -run '^TestOAuth429RequiresFreshIndependentTestsBeforeAction$|^TestOAuthDegradationCandyReviewUsesCurrentRule$' -count=1 -v -timeout=15m) 2>&1 | tee evidence/green.log
           bash candidate/.github/scripts/assert-test-log-clean.sh green evidence/green.log
           grep -F -- '--- PASS: TestOAuth429RequiresFreshIndependentTestsBeforeAction/no_quality_plan' evidence/green.log
@@ -111,6 +112,93 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
+      - uses: actions/checkout@v6
+        with:
+          ref: ee16421fb2d7e7ec87aabe18ffbcd90fa2281ec3
+          path: repair-baseline
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          ref: 64082916cf88ef727f5772cb393ccb4655de0683
+          path: normalization-baseline
+          persist-credentials: false
+      - name: Same transport oracle rejects the reviewed normalization regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          # Reviewed640 contains the same unrelated unused-variable compiler
+          # defect fixed in26837ecc8. Apply only that fixture repair so RED can
+          # reach its named behavior assertion; retain the exact baseline diff.
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('normalization-baseline/backend/internal/repository/oauth_429_metadata_integration_test.go')
+          s=p.read_text()
+          old='func TestOAuth429HTTPWithoutResponseDoesNotSample(t *testing.T) {\n\trepo, a, _ := oauth429Fixture(t, nil)'
+          new=old.replace('repo, a, _ :=', '_, a, _ :=')
+          assert s.count(old)==1
+          p.write_text(s.replace(old,new,1))
+          PY
+          git -C normalization-baseline diff -- backend/internal/repository/oauth_429_metadata_integration_test.go > evidence/normalization-baseline-compile-compat.patch
+          oracle=backend/internal/repository/oauth_429_normalization_integration_test.go
+          cp "$oracle" "normalization-baseline/$oracle"
+          cmp "$oracle" "normalization-baseline/$oracle"
+          sha256sum "$oracle" "normalization-baseline/$oracle" > evidence/normalization-oracle-sha256.txt
+          git -C normalization-baseline rev-parse HEAD > evidence/normalization-baseline-head.txt
+          set +e
+          (cd normalization-baseline/backend && go test -tags=integration ./internal/repository -run '^TestOAuth429HTTPForwardNormalization$' -count=1 -v -timeout=10m) > evidence/normalization-red.log 2>&1
+          result=$?
+          set -e
+          cat evidence/normalization-red.log
+          test "$result" -ne 0
+          bash .github/scripts/assert-test-log-clean.sh red evidence/normalization-red.log
+          grep -F 'Forward-normalized model must complete both tests and block only its canonical target' evidence/normalization-red.log
+          grep -F -- '--- FAIL: TestOAuth429HTTPForwardNormalization/provider_prefix' evidence/normalization-red.log
+          grep -F -- '--- FAIL: TestOAuth429HTTPForwardNormalization/wildcard_to_prefix' evidence/normalization-red.log
+      - name: Reviewed head deduplication and account transition behavioral RED
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          oracle=backend/internal/repository/oauth_429_observation_fences_integration_test.go
+          cp "$oracle" "repair-baseline/$oracle"
+          cmp "$oracle" "repair-baseline/$oracle"
+          sha256sum "$oracle" "repair-baseline/$oracle" > evidence/repair-oracle-sha256.txt
+          git -C repair-baseline rev-parse HEAD > evidence/repair-baseline-head.txt
+          set +e
+          (cd repair-baseline/backend && go test -tags=integration ./internal/repository -run '^TestOAuth429DedupSurvivesStatisticalWindowEviction$|^TestOAuth429QueuedObservationCannotCrossAccountTransition$' -count=1 -v -timeout=10m) > evidence/repair-red.log 2>&1
+          result=$?
+          set -e
+          cat evidence/repair-red.log
+          test "$result" -ne 0
+          bash .github/scripts/assert-test-log-clean.sh red evidence/repair-red.log
+          grep -F 'evicted business retry must not become the 160th independent failing sample' evidence/repair-red.log
+          grep -F 'queued old-epoch sample must be rejected even after the account becomes schedulable again' evidence/repair-red.log
+          grep -F -- '--- FAIL: TestOAuth429DedupSurvivesStatisticalWindowEviction' evidence/repair-red.log
+          grep -F -- '--- FAIL: TestOAuth429QueuedObservationCannotCrossAccountTransition' evidence/repair-red.log
+      - uses: actions/checkout@v6
+        with:
+          ref: 8678e88f4dfb6bfb718993db8a2a15b4a6af8282
+          path: worker-production-baseline
+          persist-credentials: false
+      - name: Same complete worker behavior oracle on old production
+        shell: bash
+        run: |
+          set -euo pipefail
+          oracle=backend/internal/repository/oauth_429_immediate_oracle_integration_test.go
+          cp "$oracle" "worker-production-baseline/$oracle"
+          cmp "$oracle" "worker-production-baseline/$oracle"
+          sha256sum "$oracle" "worker-production-baseline/$oracle" > evidence/full-worker-oracle-sha256.txt
+          git -C worker-production-baseline rev-parse HEAD > evidence/full-worker-baseline-head.txt
+          set +e
+          (cd worker-production-baseline/backend && go test -tags=integration ./internal/repository -run '^TestOAuth429ImmediateWithoutQualityOpsBehaviorOracle$' -count=1 -v -timeout=10m) > evidence/full-worker-red.log 2>&1
+          result=$?
+          set -e
+          cat evidence/full-worker-red.log
+          test "$result" -ne 0
+          bash .github/scripts/assert-test-log-clean.sh red evidence/full-worker-red.log
+          grep -F 'threshold must immediately execute two independent provider tests with qualityops disabled and no plan' evidence/full-worker-red.log
+          grep -F -- '--- FAIL: TestOAuth429ImmediateWithoutQualityOpsBehaviorOracle' evidence/full-worker-red.log
       - name: Negative control rejects disconnected production worker
         shell: bash
         run: |
@@ -142,14 +230,28 @@ jobs:
           set -euo pipefail
           mkdir -p evidence
           git rev-parse HEAD > evidence/worker-head.txt
-          (cd backend && go test -race -tags=integration ./internal/repository -run '^TestOAuth429Worker|^TestOAuth429Persistent|^TestOAuth429HTTP|^TestOAuth429Alias' -count=1 -v -timeout=20m) 2>&1 | tee evidence/worker.log
+          (cd backend && go test -race -tags=integration ./internal/repository -run '^TestOAuth429Worker|^TestOAuth429Persistent|^TestOAuth429HTTP|^TestOAuth429Compact|^TestOAuth429ActualAlias|^TestOAuth429Immediate|^TestOAuth429Alias|^TestOAuth429Dedup|^TestOAuth429Queued|^TestOAuth429AccountEpoch|^TestOAuth429Expiry|^TestOAuth429First' -count=1 -v -timeout=20m) 2>&1 | tee evidence/worker.log
           bash .github/scripts/assert-test-log-clean.sh green evidence/worker.log
           grep -F -- '--- PASS: TestOAuth429WorkerIndependentPair/qualityops_off_two_wrong' evidence/worker.log
           grep -F -- '--- PASS: TestOAuth429WorkerIndependentPair/history_wrong_cannot_shortcut' evidence/worker.log
+          grep -F -- '--- PASS: TestOAuth429DedupSurvivesStatisticalWindowEviction' evidence/worker.log
+          grep -F -- '--- PASS: TestOAuth429QueuedObservationCannotCrossAccountTransition' evidence/worker.log
+          grep -F -- '--- PASS: TestOAuth429ImmediateWithoutQualityOpsBehaviorOracle' evidence/worker.log
+          grep -F -- '--- PASS: TestOAuth429HTTPParsedModelSurvivesStreamingAndLargeBody' evidence/worker.log
+          grep -F -- '--- PASS: TestOAuth429HTTPForwardNormalization' evidence/worker.log
+          grep -F -- '--- PASS: TestOAuth429CompactGlobalForwardWorker' evidence/worker.log
+          grep -F -- '--- PASS: TestOAuth429CompactRoutingChangeFencesEveryStage' evidence/worker.log
       - name: Real settings handler validation
         shell: bash
         run: |
           set -euo pipefail
+          (cd backend && go test -race -tags=unit ./internal/service -run '^TestOAuth429' -count=1 -v) 2>&1 | tee evidence/classifier.log
+          bash .github/scripts/assert-test-log-clean.sh green evidence/classifier.log
+          grep -F -- '--- PASS: TestOAuth429RealForwardNormalization' evidence/classifier.log
+          grep -F -- '--- PASS: TestOAuth429EndpointResolution' evidence/classifier.log
+          grep -F -- '--- PASS: TestOAuth429CompactGlobalForwardAndAdmission' evidence/classifier.log
+          (cd backend && go test -tags=unit ./internal/handler -run '^TestOAuth429ParsedInputModelAndIdentitySurviveHTTPContext$' -count=1 -v) 2>&1 | tee evidence/model-context.log
+          bash .github/scripts/assert-test-log-clean.sh green evidence/model-context.log
           (cd backend && go test -tags=unit ./internal/handler/admin -run '^TestOAuthAutoConfig.*Degradation|^Test.*Degradation' -count=1 -v) 2>&1 | tee evidence/handler.log
           bash .github/scripts/assert-test-log-clean.sh green evidence/handler.log
           (cd backend && go test -race -tags=integration ./internal/handler/admin -run '^TestOAuth429HandlerPostgresWorkerLoopback$' -count=1 -v -timeout=10m) 2>&1 | tee evidence/handler-worker.log
@@ -183,7 +285,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p evidence
-          pnpm --dir frontend exec vitest run src/views/admin/__tests__/OAuthDegradationActions.spec.ts src/stores/__tests__/newFeatureNotices.spec.ts src/i18n/__tests__/localeKeyCompleteness.spec.ts --maxWorkers=1 --minWorkers=1 2>&1 | tee evidence/ui-tests.log
+          pnpm --dir frontend exec vitest run src/views/admin/__tests__/OAuthDegradationActions.spec.ts src/views/admin/__tests__/OAuth429RealNoticeEntrypoints.spec.ts src/stores/__tests__/newFeatureNotices.spec.ts src/i18n/__tests__/localeKeyCompleteness.spec.ts --maxWorkers=1 --minWorkers=1 2>&1 | tee evidence/ui-tests.log
           pnpm --dir frontend typecheck 2>&1 | tee evidence/ui-types.log
           pnpm --dir frontend exec eslint src/components/admin/operations/OAuthDegradationCard.vue src/utils/oauthDegradation.ts 2>&1 | tee evidence/ui-lint.log
       - name: Real desktop/mobile baseline and current rendering
