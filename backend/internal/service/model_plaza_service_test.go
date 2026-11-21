@@ -255,9 +255,7 @@ func TestListPlazaGroups_DeepSeekProAliasOfficialPricing(t *testing.T) {
 			"deepseek-pro", "deepseek-v4-pro", "deepseek-flash", "deepseek-pro-preview"),
 	}
 	groups := []Group{{ID: 10, Name: "discount", Platform: PlatformDeepseek, RateMultiplier: 0.5}}
-	svc := newPlazaService(channels, groups, pricingSvc)
-	svc.billingService = NewBillingService(&config.Config{}, pricingSvc)
-	svc.resolver = NewModelPricingResolver(nil, svc.billingService)
+	svc := newPlazaServiceWithBilling(channels, groups, map[int64]string{10: PlatformDeepseek}, pricingSvc)
 
 	out, err := svc.ListGroups(context.Background())
 	require.NoError(t, err)
