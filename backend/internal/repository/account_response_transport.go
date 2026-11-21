@@ -15,10 +15,11 @@ import (
 type accountResponseTransport struct{ base http.RoundTripper }
 
 func (t *accountResponseTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	started := time.Now().UTC()
 	resp, err := t.base.RoundTrip(req)
 	if err == nil && resp != nil && req.Context().Err() == nil && isAccountInferenceRequest(req) {
 		upstreamstats.Default.Record(requestcapture.AccountFromContext(req.Context()), resp.StatusCode, time.Now())
-		service.ObserveOAuth429HTTP(req, requestcapture.AccountFromContext(req.Context()), resp.StatusCode)
+		service.ObserveOAuth429HTTP(req, requestcapture.AccountFromContext(req.Context()), resp.StatusCode, started)
 	}
 	return resp, err
 }

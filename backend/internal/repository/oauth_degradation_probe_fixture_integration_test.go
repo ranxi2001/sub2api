@@ -62,3 +62,16 @@ type confirmedProbeAccounts struct{ *accountRepository }
 func (r confirmedProbeAccounts) EvaluateOAuthDegradation(ctx context.Context, id int64, now time.Time) error {
 	return evaluateConfirmedProbe(ctx, r.accountRepository, id, now)
 }
+
+func TestOAuthDegradationProbeFixturePreservesOtherScopeLease(t *testing.T) {
+	_, _ = degradationPolicyFixture(t)
+	f := newQualityBPSFixture(t, `{}`, &service.QualityPolicy{Action: service.QualityActionRemoveModel, RemoveModels: []string{"gpt-6-astra"}})
+	review := prepareConfirmedProbeFixture(t, f.account)
+	require.NotEqual(t, f.plan.ID, review.PlanID, "confirmation uses the independent observation scope")
+	var lease time.Time
+	require.NoError(t, integrationDB.QueryRowContext(t.Context(), `SELECT running_until FROM scheduled_test_plans WHERE id=$1`, f.plan.ID).Scan(&lease))
+	require.True(t, f.until.Equal(lease), "prepare must not replace the quarantine rule's current lease")
+	var plans int
+	require.NoError(t, integrationDB.QueryRowContext(t.Context(), `SELECT count(*) FROM scheduled_test_plans WHERE account_id=$1`, f.account).Scan(&plans))
+	require.Equal(t, 2, plans)
+}
