@@ -1163,7 +1163,7 @@ func (s *GatewayService) isAccountAllowedForPlatform(account *Account, platform 
 		return false
 	}
 	if account.IsGateway() {
-		return account.gatewayMessagesView != nil && platform == PlatformAnthropic
+		return account.gatewayMessagesView != nil && platform == account.gatewaySelectionTarget
 	}
 	if useMixed {
 		if account.Platform == platform {
@@ -1505,7 +1505,8 @@ func (s *GatewayService) ReleaseAccountSession(ctx context.Context, account *Acc
 
 func (s *GatewayService) getSchedulableAccount(ctx context.Context, accountID int64) (*Account, error) {
 	if group, _ := ctx.Value(ctxkey.Group).(*Group); group != nil {
-		if _, enabled := gatewayMessagesSelectionModel(ctx, &group.ID, PlatformAnthropic); enabled && (s.schedulerSnapshot == nil || s.schedulerSnapshot.localSnapshotReader == nil) {
+		scope, _ := ctx.Value(gatewaySelectionKey{}).(gatewaySelection)
+		if _, enabled := requestGatewaySelection(ctx, &group.ID, scope.target); enabled && (s.schedulerSnapshot == nil || s.schedulerSnapshot.localSnapshotReader == nil) {
 			if reader, ok := s.accountRepo.(GatewayRequestAccountReader); ok {
 				fresh, _, err := reader.GatewayRequestAccount(ctx, accountID, group.ID)
 				if err == nil && fresh != nil && fresh.gatewayProtocolsPending() {
@@ -2601,7 +2602,7 @@ func isPlatformFilteredForSelection(acc *Account, platform string, allowMixedSch
 		return true
 	}
 	if acc.IsGateway() && acc.gatewayMessagesView != nil {
-		return platform != PlatformAnthropic
+		return platform != acc.gatewaySelectionTarget
 	}
 	if allowMixedScheduling {
 		if acc.Platform == PlatformAntigravity {

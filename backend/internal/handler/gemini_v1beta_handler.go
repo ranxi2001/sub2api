@@ -392,6 +392,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		return
 	}
 
+	c.Request = c.Request.WithContext(service.WithGatewayGeminiSelection(c.Request.Context(), modelName))
 	stream := action == gemini.ActionStreamGenerateContent
 	reqLog = reqLog.With(zap.String("model", modelName), zap.String("action", action), zap.Bool("stream", stream))
 

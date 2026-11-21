@@ -59,7 +59,7 @@ func TestGatewayProtocolMessagesCandidatesStayRequestScoped(t *testing.T) {
 			svc := &GatewayService{accountRepo: repo}
 			accounts, err := svc.appendGatewayMessagesCandidates(ctx, &repo.group.ID, PlatformAnthropic, nil)
 			require.NoError(t, err)
-			if scenario != "eligible" {
+			if scenario != "eligible" && scenario != "composite" {
 				require.Empty(t, accounts)
 				return
 			}
@@ -102,4 +102,44 @@ func TestGatewayProtocolMessagesCandidateSourceRefreshesAfterWarmSnapshot(t *tes
 	require.NoError(t, err)
 	require.Empty(t, second, "outbox lag cannot retain a revoked candidate")
 	require.Equal(t, 2, repo.queries)
+}
+
+func TestGatewayProtocolCandidatesByGroupAndProtocol(t *testing.T) {
+	for _, target := range []string{PlatformOpenAI, PlatformKimi, PlatformGrok, PlatformGemini, PlatformAntigravity} {
+		for _, composite := range []bool{false, true} {
+			t.Run(target+map[bool]string{false: "/concrete", true: "/composite"}[composite], func(t *testing.T) {
+				base, ctx := gatewayProtocolFixture(target)
+				repo := &gatewayMessagesCandidateRepo{gatewayProtocolAdmissionRepo: base}
+				if composite {
+					base.group.Platform = PlatformComposite
+					ctx = WithResolvedTargetPlatform(ctx, target)
+				}
+				if target == PlatformGemini || target == PlatformAntigravity {
+					ctx = WithGatewayGeminiSelection(ctx, "public-model")
+				} else {
+					ctx = WithGatewayOpenAISelection(ctx, "public-model", "public-model")
+				}
+				accounts := appendGatewayCandidates(ctx, repo, nil, &base.group.ID, target, nil)
+				require.Len(t, accounts, 1)
+				require.Equal(t, base.account.ID, accounts[0].ID)
+				require.Equal(t, base.account.Concurrency, accounts[0].Concurrency)
+				require.Empty(t, appendGatewayCandidates(ctx, repo, nil, nil, target, nil))
+				if accounts[0].IsGateway() {
+					svc := &GatewayService{accountRepo: repo}
+					require.True(t, svc.isAccountAllowedForPlatform(&accounts[0], target, false))
+					_, err := svc.hydrateSelectedAccount(ctx, &accounts[0])
+					require.NoError(t, err)
+				} else {
+					require.Equal(t, target, accounts[0].Platform)
+					svc := &OpenAIGatewayService{accountRepo: repo}
+					fresh, err := svc.openAIGatewaySelectionView(ctx, &accounts[0])
+					require.NoError(t, err)
+					require.True(t, fresh.gatewayProtocolSource.IsGateway())
+					base.account.GroupIDs, base.account.AccountGroups = nil, nil
+					_, err = svc.openAIGatewaySelectionView(ctx, &accounts[0])
+					require.Error(t, err)
+				}
+			})
+		}
+	}
 }

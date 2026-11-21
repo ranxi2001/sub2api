@@ -81,9 +81,10 @@ type Account struct {
 
 	// Request-local transport binding only; never persisted or exported. Final
 	// admission compares the neutral gateway identity before rebuilding a view.
-	gatewayProtocolSource *Account
-	gatewayProtocolModel  string
-	gatewayMessagesView   *Account
+	gatewayProtocolSource  *Account
+	gatewayProtocolModel   string
+	gatewayMessagesView    *Account
+	gatewaySelectionTarget string
 
 	// model_mapping 热路径缓存（非持久化字段）
 	modelMappingCache               map[string]string

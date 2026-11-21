@@ -170,15 +170,14 @@ func gatewayProtocolAccountFromSnapshot(ctx context.Context, selected, current *
 	scope.modelMappingCacheReady = false
 	id := liveGroup.ID
 	selectionModel := model
-	if family == domain.PlatformGatewayAnthropic {
-		if requested, enabled := gatewayMessagesSelectionModel(ctx, &id, target); enabled {
-			selectionModel = requested
-			if scheduling, _ := ctx.Value(gatewaySchedulingModelContextKey{}).(string); scheduling != "" {
-				selectionModel = scheduling
-			}
+	publicModel := model
+	if selection, enabled := requestGatewaySelection(ctx, &id, target); enabled && selection.family == family {
+		selectionModel = selection.model
+		publicModel = selection.publicModel
+		if scheduling, _ := ctx.Value(gatewaySchedulingModelContextKey{}).(string); scheduling != "" {
+			selectionModel = scheduling
 		}
 	}
-	publicModel := selectionModel
 	if original, ok := RequestedPublicModelFromContext(ctx); ok {
 		publicModel = original
 	}
