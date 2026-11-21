@@ -94,7 +94,7 @@
       </section>
       <section v-if="activeTab === 'settings' && remote" id="ops-panel-settings" role="tabpanel" aria-labelledby="ops-tab-settings"
         class="space-y-5">
-        <AccountOpsRuleList ref="ruleList" :user-id="auth.user?.id" :accounts="scopedAccounts" :groups="accountGroups" :config="remote.config" :loading="thresholdLoading"
+        <AccountOpsRuleList ref="ruleList" :channel-view="embedded" :scoped="!!channelId || !!accountId" :user-id="auth.user?.id" :accounts="scopedAccounts" :groups="accountGroups" :config="remote.config" :loading="thresholdLoading"
           :ready="thresholdReady" :error="thresholdError" :busy="mutating"
           @batch-edit="batchAccounts = $event" @edit-group="showGroupDialog = true" @toggle="toggleGroup" @refresh="loadAccounts" @saved="acceptConfig">
           <template #actions><button type="button" class="btn btn-secondary text-sm" :disabled="thresholdLoading || mutating" data-testid="edit-account-groups" @click="showGroupDialog = true">{{ t('accountOps.manageGroups') }}</button></template>
@@ -248,7 +248,7 @@ function acceptGroupConfig(config: AccountOpsConfig) {
   accountsVersion++
   thresholdLoading.value = false
   accountGroups.value = (config.groups ?? []).map(group => ({
-    id: group.id, name: group.name, default_name: group.name,
+    id: group.id, name: group.name, default_name: group.name, provider_id: group.provider_id,
     provider: group.provider || 'manual', site: group.site || '', mode: 'manual',
     account_ids: [...(group.account_ids ?? [])],
   }))

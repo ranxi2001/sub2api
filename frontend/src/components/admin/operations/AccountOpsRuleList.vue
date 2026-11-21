@@ -4,20 +4,27 @@
     data-testid="account-ops-rules"
   >
     <div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-5 py-4 dark:border-dark-700">
-      <div>
+      <div v-if="!channelView">
         <h3 class="text-sm font-semibold">{{ t('accountOps.accountRules') }} <NewFeatureBadge v-if="userId != null" :notice-id="NEW_FEATURE_NOTICES.accountOpsProviderBalance" :user-id="userId" /></h3>
         <p class="mt-1 text-xs text-gray-500">{{ t('accountOps.rulesOnceSummary') }}</p>
+      </div>
+      <div v-else class="flex flex-wrap items-center gap-1">
+        <button v-for="view in channelViews" :key="view" type="button" :aria-pressed="activeView === view"
+          :data-testid="`channel-view-${view}`" class="rounded-lg px-3 py-2 text-sm font-medium"
+          :class="activeView === view ? 'bg-primary-50 text-primary-700 dark:bg-primary-950 dark:text-primary-300' : 'text-gray-600 dark:text-gray-300'"
+          @click="activeView = view">{{ t(`channelConfig.${view}`) }}</button>
+        <NewFeatureBadge v-if="userId != null" :notice-id="NEW_FEATURE_NOTICES.channelBalanceOverview" :user-id="userId" />
       </div>
       <div class="flex flex-wrap gap-2">
         <slot name="actions" />
         <input v-model="search" class="input w-48 text-sm" :placeholder="t('accountOps.search')" :aria-label="t('accountOps.search')" />
-        <select v-model="type" class="input w-auto text-sm" :aria-label="t('accountOps.accountType')">
+        <select v-if="!channelView || activeView === 'official'" v-model="type" class="input w-auto text-sm" :aria-label="t('accountOps.accountType')">
           <option value="all">{{ t('accountOps.allAccounts') }}</option>
-          <option value="apikey">API Key</option>
-          <option value="oauth">OAuth</option>
+          <option v-if="!channelView" value="apikey">API Key</option>
+          <option v-if="!channelView" value="oauth">OAuth</option>
           <option value="temporary">{{ t('accountOps.oauthTemporary') }}</option>
           <option value="long_term">{{ t('accountOps.oauthLongTerm') }}</option>
-          <option value="mixed">API Key + OAuth</option>
+          <option v-if="!channelView" value="mixed">API Key + OAuth</option>
         </select>
         <select v-model="state" class="input w-auto text-sm" :aria-label="t('accountOps.ruleState')">
           <option value="all">{{ t('accountOps.allStates') }}</option>
@@ -43,9 +50,9 @@
         <thead class="bg-gray-50 text-xs text-gray-500 dark:bg-dark-800">
           <tr>
             <th class="w-12 py-3 pl-5 pr-2">
-              <input type="checkbox" data-testid="select-visible-groups" :aria-label="t('accountOps.selectVisibleGroups')" :checked="allVisibleSelected" :indeterminate="selectedGroups.length > 0 && !allVisibleSelected" :disabled="selectionUnavailable || !filtered.length" @change="selectVisible(($event.target as HTMLInputElement).checked)" />
+              <input type="checkbox" data-testid="select-visible-groups" :aria-label="t(channelView ? 'channelConfig.pageSelect' : 'accountOps.selectVisibleGroups')" :checked="allVisibleSelected" :indeterminate="someVisibleSelected && !allVisibleSelected" :disabled="selectionUnavailable || !selectableRows.length" @change="selectVisible(($event.target as HTMLInputElement).checked)" />
             </th>
-            <th class="px-3 py-3">{{ t('accountOps.accountGroup') }}</th>
+            <th class="px-3 py-3">{{ t(channelView ? `channelConfig.${activeView}` : 'accountOps.accountGroup') }}</th>
             <th class="px-4 py-3">{{ t('accountOps.metric') }}</th>
             <th class="px-4 py-3">{{ t('accountOps.currentValue') }}</th>
             <th class="px-4 py-3">{{ t('accountOps.ruleSummary') }}</th>
@@ -53,18 +60,32 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="row in filtered" :key="row.group.id" class="border-t border-gray-100 dark:border-dark-700" :data-testid="`rule-row-${row.group.id}`">
+          <tr v-for="row in visibleRows" :key="row.group.id" class="border-t border-gray-100 dark:border-dark-700" :data-testid="`rule-row-${row.group.id}`">
             <td class="py-4 pl-5 pr-2">
-              <input type="checkbox" :data-testid="`select-group-${row.group.id}`" :aria-label="t('accountOps.selectGroup', { name: row.group.name })" :checked="selectedIds.has(row.group.id)" :disabled="selectionUnavailable" @change="selectGroup(row.group.id, ($event.target as HTMLInputElement).checked)" />
+              <input type="checkbox" :data-testid="`select-group-${row.group.id}`" :aria-label="t('accountOps.selectGroup', { name: row.group.name })" :checked="selectedIds.has(row.group.id)" :disabled="selectionUnavailable || row.group.mode === 'account'" @change="selectGroup(row.group.id, ($event.target as HTMLInputElement).checked)" />
             </td>
             <td class="px-3 py-4">
               <p class="font-medium text-gray-900 dark:text-gray-100">{{ row.group.name }}</p>
-              <p class="mt-1 text-xs text-gray-500">{{ row.group.site || row.group.provider || '—' }} · {{ t('accountOps.groupMemberCount', { count: row.accounts.length }) }}</p>
-              <p class="mt-1 max-w-72 truncate text-xs text-gray-500" :title="row.memberNames">{{ row.memberNames || t('accountOps.noAccountGroups') }}</p>
-              <a v-if="row.group.provider_id" href="/admin/channel-operations" class="mt-1 inline-block text-xs text-primary-600">{{ t('accountOps.providerBalanceSource') }} #{{ row.group.provider_id }}</a>
-              <p v-if="row.balanceAccounts.length > 1" class="mt-1 text-xs text-gray-500">{{ t('accountOps.sharedBalanceHint') }}</p>
-              <AccountOpsBalanceNotification v-for="account in row.balanceAccounts" :key="`balance-${account.account_id}`" :account="account" :config="config" :user-id="userId" :disabled="selectionUnavailable" @saved="emit('saved', $event)" />
-              <AccountOpsLifecycleSelector v-for="account in row.quotaAccounts" :key="account.account_id" :account="account" :user-id="userId" :disabled="selectionUnavailable" @updated="emit('refresh')" />
+              <p v-if="!channelView" class="mt-1 text-xs text-gray-500">{{ row.group.site || row.group.provider || '—' }} · {{ t('accountOps.groupMemberCount', { count: row.accounts.length }) }}</p>
+              <details v-if="channelView && row.accounts.length" class="mt-1 text-xs text-gray-500">
+                <summary class="cursor-pointer">{{ t('channelConfig.memberDetails', { count: row.accounts.length }) }}</summary>
+                <div v-for="account in row.accounts" :key="account.account_id" class="mt-1">
+                  <AccountOpsBalanceNotification v-if="account.type === 'apikey'" :account="account" :config="config" :user-id="userId" :disabled="selectionUnavailable" @saved="emit('saved', $event)" />
+                  <template v-else>
+                    <AccountOpsLifecycleSelector :account="account" :user-id="userId" :disabled="selectionUnavailable" @updated="emit('refresh')" />
+                    <span v-for="window in account.usage_windows" :key="window.window" class="mr-2">
+                      {{ window.label }} · {{ window.status === 'ok' && window.used_percent != null ? `${window.used_percent.toFixed(1)}%` : t(`accountOps.observations.${window.status}`) }}
+                    </span>
+                  </template>
+                </div>
+              </details>
+              <template v-if="!channelView">
+                <p class="mt-1 max-w-72 truncate text-xs text-gray-500" :title="row.memberNames">{{ row.memberNames || t('accountOps.noAccountGroups') }}</p>
+                <a v-if="row.group.provider_id" href="/admin/channel-operations" class="mt-1 inline-block text-xs text-primary-600">{{ t('accountOps.providerBalanceSource') }} #{{ row.group.provider_id }}</a>
+                <p v-if="row.balanceAccounts.length > 1" class="mt-1 text-xs text-gray-500">{{ t('accountOps.sharedBalanceHint') }}</p>
+                <AccountOpsBalanceNotification v-for="account in row.balanceAccounts" :key="`balance-${account.account_id}`" :account="account" :config="config" :user-id="userId" :disabled="selectionUnavailable" @saved="emit('saved', $event)" />
+                <AccountOpsLifecycleSelector v-for="account in row.quotaAccounts" :key="account.account_id" :account="account" :user-id="userId" :disabled="selectionUnavailable" @updated="emit('refresh')" />
+              </template>
             </td>
             <td class="px-4 py-4 text-xs text-gray-500">
               <span v-if="row.balanceAccounts.length" class="block">{{ t('accountOps.balanceMetric') }}</span>
@@ -91,21 +112,25 @@
                   <input type="checkbox" :data-testid="`toggle-rule-${row.group.id}`" :checked="row.balanceRule?.enabled ?? row.quotaRule?.enabled" :disabled="busy" :aria-label="`${row.group.name} ${t('accountOps.ruleEnabled')}`" @change="emit('toggle', row.group, row.accounts, ($event.target as HTMLInputElement).checked)" />
                   {{ t('accountOps.channelEnabled') }}
                 </label>
-                <button type="button" class="text-sm text-primary-600 hover:underline" :data-testid="`edit-rule-${row.group.id}`" :disabled="selectionUnavailable" @click="editRow(row)">{{ t('accountOps.editRule') }}</button>
+                <button type="button" class="text-sm text-primary-600 hover:underline" :data-testid="`edit-rule-${row.group.id}`" :disabled="selectionUnavailable" @click="editRow(row)">{{ t(row.group.mode === 'account' ? 'accountOps.manageGroups' : 'accountOps.editRule') }}</button>
               </div>
             </td>
           </tr>
         </tbody>
       </table>
     </div>
+    <Pagination v-if="channelView && filtered.length > pageSize" :page="page" :page-size="pageSize" :total="filtered.length"
+      :show-page-size-selector="false" :show-jump="false" @update:page="page = $event" />
     <details class="border-t border-gray-100 dark:border-dark-700" data-testid="failure-settings"><summary class="cursor-pointer px-5 py-3 text-sm text-gray-500">{{ t('accountOps.failureSettingsSummary') }}</summary><slot name="global-settings" /></details>
     <p v-if="loading" role="status" class="p-8 text-center text-sm text-gray-500">{{ t('common.loading') }}</p>
-    <p v-else-if="!filtered.length && !error" class="p-8 text-center text-sm text-gray-500">{{ t('accountOps.noThresholdAccounts') }}</p>
+    <p v-else-if="!filtered.length && !error" class="p-8 text-center text-sm text-gray-500">{{ t(channelView && activeView === 'wallets' ? 'channelConfig.emptyWallets' : 'accountOps.noThresholdAccounts') }}</p>
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import Pagination from '@/components/common/Pagination.vue'
+import { channelRuleGroups, type ChannelRuleView } from './channelRuleGroups'
 import AccountOpsBalanceStatus from './AccountOpsBalanceStatus.vue'
 import AccountOpsLifecycleSelector from './AccountOpsLifecycleSelector.vue'
 import AccountOpsBalanceNotification from './AccountOpsBalanceNotification.vue'
@@ -127,10 +152,14 @@ interface GroupRow {
   state: string
 }
 
-const props = withDefaults(defineProps<{ userId?: number | null; accounts: AccountOpsThresholdAccount[]; groups?: AccountOpsGroup[]; config: AccountOpsConfig; loading: boolean; ready: boolean; error: string; busy?: boolean }>(), { groups: () => [] })
+const props = withDefaults(defineProps<{ channelView?: boolean; scoped?: boolean; userId?: number | null; accounts: AccountOpsThresholdAccount[]; groups?: AccountOpsGroup[]; config: AccountOpsConfig; loading: boolean; ready: boolean; error: string; busy?: boolean }>(), { groups: () => [] })
 const emit = defineEmits<{ (event: 'refresh'): void; (event: 'saved', config: AccountOpsConfig): void; (event: 'batch-edit', accounts: AccountOpsThresholdAccount[]): void; (event: 'edit-group', group: AccountOpsGroup): void; (event: 'toggle', group: AccountOpsGroup, accounts: AccountOpsThresholdAccount[], enabled: boolean): void }>()
 const { t } = useI18n()
 const search = ref(''), type = ref('all'), state = ref('all'), selectedIds = ref(new Set<string>())
+const channelViews: ChannelRuleView[] = ['wallets', 'official', 'other']
+const activeView = ref<ChannelRuleView>('wallets')
+const page = ref(1)
+const pageSize = 10
 const states = ['warning', 'normal', 'unknown', 'unconfigured', 'disabled']
 const accountByID = computed(() => new Map(props.accounts.map(account => [account.account_id, account])))
 const groups = computed(() => {
@@ -138,7 +167,7 @@ const groups = computed(() => {
   const known = new Set(result.map(group => group.id))
   for (const account of props.accounts) {
     if (account.group_mode !== 'manual' || !account.group_id || known.has(account.group_id)) continue
-    result.push({ id: account.group_id, name: account.group_name || account.group_id, default_name: account.group_name || account.group_id, provider: account.platform, site: account.platform, mode: 'manual', account_ids: [] })
+    result.push({ id: account.group_id, name: account.group_name || account.group_id, default_name: account.group_name || account.group_id, provider_id: account.provider_id, provider: account.platform, site: account.platform, mode: 'manual', account_ids: props.accounts.filter(member => member.group_id === account.group_id).map(member => member.account_id) })
     known.add(account.group_id)
   }
   return result
@@ -163,7 +192,10 @@ function metricValue(account: AccountOpsThresholdAccount, rule: GroupRow['balanc
   const current = account.usage_windows.find(item => (selected === 'any' || selected === '' || selected === item.window) && item.status === 'ok' && item.used_percent != null)
   return current ? `${current.used_percent!.toFixed(1)}%` : t('accountOps.observations.unknown')
 }
-const rows = computed<GroupRow[]>(() => groups.value.map(group => {
+const displayedGroups = computed(() => props.channelView
+  ? channelRuleGroups(groups.value, props.accounts, activeView.value, !!props.scoped)
+  : groups.value)
+const rows = computed<GroupRow[]>(() => displayedGroups.value.map(group => {
   const accounts = group.account_ids.map(id => accountByID.value.get(id)).filter((account): account is AccountOpsThresholdAccount => !!account)
   const balanceAccounts = accounts.filter(account => account.type === 'apikey')
   const quotaAccounts = accounts.filter(account => account.type === 'oauth')
@@ -181,6 +213,13 @@ const filtered = computed(() => {
     return hasType && (state.value === 'all' || row.state === state.value) && matches
   })
 })
+const visibleRows = computed(() => props.channelView
+  ? filtered.value.slice((page.value - 1) * pageSize, page.value * pageSize)
+  : filtered.value)
+const selectableRows = computed(() => visibleRows.value.filter(row => row.group.mode !== 'account'))
+watch([search, type, state], () => { page.value = 1 })
+watch(activeView, () => { type.value = 'all'; state.value = 'all'; search.value = ''; page.value = 1; clearSelection() })
+watch(() => filtered.value.length, length => { page.value = Math.min(page.value, Math.max(1, Math.ceil(length / pageSize))) })
 const selectionUnavailable = computed(() => props.busy || props.loading || !props.ready || !!props.error)
 const selectedGroups = computed(() => filtered.value.filter(row => selectedIds.value.has(row.group.id)))
 const selectedAccounts = computed(() => {
@@ -189,7 +228,8 @@ const selectedAccounts = computed(() => {
   return [...unique.values()]
 })
 const selectedTypes = computed(() => [...(selectedAccounts.value.some(account => account.type === 'apikey') ? ['API Key'] : []), ...(selectedAccounts.value.some(account => account.type === 'oauth') ? ['OAuth'] : [])])
-const allVisibleSelected = computed(() => filtered.value.length > 0 && filtered.value.every(row => selectedIds.value.has(row.group.id)))
+const allVisibleSelected = computed(() => selectableRows.value.length > 0 && selectableRows.value.every(row => selectedIds.value.has(row.group.id)))
+const someVisibleSelected = computed(() => selectableRows.value.some(row => selectedIds.value.has(row.group.id)))
 const policy = (row: GroupRow) => {
   const rules = [row.balanceRule, row.quotaRule].filter(Boolean)
   const alert = rules.some(rule => rule?.notify_alert ?? true), recovery = rules.some(rule => rule?.notify_recovery ?? true)
@@ -199,10 +239,18 @@ function clearSelection() { selectedIds.value = new Set() }
 watch([type, state], clearSelection, { flush: 'sync' })
 watch(filtered, visible => { const visibleIDs = new Set(visible.map(row => row.group.id)); selectedIds.value = new Set([...selectedIds.value].filter(id => visibleIDs.has(id))) }, { flush: 'sync' })
 function selectGroup(id: string, checked: boolean) { if (selectionUnavailable.value) return; const next = new Set(selectedIds.value); if (checked) next.add(id); else next.delete(id); selectedIds.value = next }
-function selectVisible(checked: boolean) { if (selectionUnavailable.value) return; selectedIds.value = new Set(checked ? filtered.value.map(row => row.group.id) : []) }
+function selectVisible(checked: boolean) {
+  if (selectionUnavailable.value) return
+  const next = new Set(selectedIds.value)
+  for (const row of selectableRows.value) {
+    if (checked) next.add(row.group.id)
+    else next.delete(row.group.id)
+  }
+  selectedIds.value = next
+}
 function editRow(row: GroupRow) {
   if (selectionUnavailable.value) return
-  if (row.accounts.length) emit('batch-edit', row.accounts)
+  if (row.group.mode !== 'account' && row.accounts.length) emit('batch-edit', row.accounts)
   else emit('edit-group', row.group)
 }
 function editBatch() { if (!selectionUnavailable.value && selectedAccounts.value.length) emit('batch-edit', selectedAccounts.value) }

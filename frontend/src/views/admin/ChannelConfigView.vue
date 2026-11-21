@@ -10,30 +10,33 @@
       </form>
       <p v-if="stale" role="status" class="rounded-lg bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950">{{ t('channelConfig.stale') }}</p>
       <div class="grid min-w-0 gap-5" data-testid="channel-config-panels">
-        <details v-for="panel in panels" :key="panel" :open="opened[panel]" class="card min-w-0" :data-testid="`config-panel-${panel}`" @toggle="toggle(panel, $event)">
-          <summary class="cursor-pointer p-5 text-lg font-semibold">{{ t(labels[panel]) }}</summary>
-          <div v-if="visited[panel]" v-show="opened[panel]" class="min-w-0 space-y-5 border-t p-4 dark:border-dark-700">
-            <template v-if="panel === 'channels'">
+        <section aria-labelledby="profit-heading" data-testid="config-panel-profit" class="card min-w-0 p-4">
+          <ProfitAnalytics embedded heading-id="profit-heading" :scope="scope" @scope="acceptScope" @refreshed="stale = false" />
+        </section>
+        <section ref="channelPanel" aria-labelledby="channel-heading" class="card min-w-0 scroll-mt-4 space-y-4 p-4" data-testid="config-panel-channels">
+          <h2 id="channel-heading" class="text-lg font-semibold">{{ t('channelConfig.channels') }}</h2>
+          <AccountOpsView embedded :channel-id="scope.channel_id" :account-id="scope.account_id" />
+          <details data-testid="channel-directory" class="rounded-lg border p-4 dark:border-dark-700" @toggle="directoryOpen = ($event.target as HTMLDetailsElement).open">
+            <summary class="cursor-pointer font-semibold">{{ t('channelConfig.directory') }}</summary>
+            <div v-if="directoryOpen" class="mt-4 space-y-4">
               <p class="text-sm text-gray-500">{{ t('channelConfig.identityHelp') }}</p>
               <UpstreamChannelManager expanded @changed="changed" @selected="selectChannel($event.id)" />
               <RouterLink class="btn btn-secondary inline-block" to="/admin/channels/pricing">{{ t('channelOps.pricing') }}</RouterLink>
-              <details class="rounded-lg border p-4 dark:border-dark-700" @toggle="walletOpen = ($event.target as HTMLDetailsElement).open">
-                <summary class="cursor-pointer font-semibold">{{ t('channelConfig.connections') }}</summary>
-                <div v-if="walletOpen" class="mt-4 space-y-5"><MatureProvidersPanel passive @changed="changed" /><ProfitProviders @changed="changed" /></div>
-              </details>
-              <details class="rounded-lg border p-4 dark:border-dark-700" @toggle="analyticsOpen = ($event.target as HTMLDetailsElement).open"><summary class="cursor-pointer font-semibold">{{ t('channelConfig.observations') }}</summary><UpstreamAnalytics v-if="analyticsOpen" embedded class="mt-4" /></details>
-            </template>
-            <ProfitAnalytics v-else-if="panel === 'profit'" embedded :active="opened.profit" :scope="scope" @scope="acceptScope" @refreshed="stale = false" />
-            <AccountOpsView v-else embedded :active="opened.accounts" :channel-id="scope.channel_id" :account-id="scope.account_id" />
-          </div>
-        </details>
+            </div>
+          </details>
+          <details class="rounded-lg border p-4 dark:border-dark-700" @toggle="walletOpen = ($event.target as HTMLDetailsElement).open">
+            <summary class="cursor-pointer font-semibold">{{ t('channelConfig.connections') }}</summary>
+            <div v-if="walletOpen" class="mt-4 space-y-5"><MatureProvidersPanel passive @changed="changed" /><ProfitProviders @changed="changed" /></div>
+          </details>
+          <details class="rounded-lg border p-4 dark:border-dark-700" @toggle="analyticsOpen = ($event.target as HTMLDetailsElement).open"><summary class="cursor-pointer font-semibold">{{ t('channelConfig.observations') }}</summary><UpstreamAnalytics v-if="analyticsOpen" embedded class="mt-4" /></details>
+        </section>
       </div>
     </div>
   </AppLayout>
 </template>
 
 <script setup lang="ts">
-import { defineAsyncComponent, reactive, ref, watch } from 'vue'
+import { defineAsyncComponent, onMounted, nextTick, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
@@ -50,12 +53,15 @@ const UpstreamAnalytics=defineAsyncComponent(()=>import('@/components/admin/oper
 const ProfitAnalytics=defineAsyncComponent(()=>import('@/components/admin/operations/ProfitAnalytics.vue').then(module=>module.default))
 const AccountOpsView=defineAsyncComponent(()=>import('./AccountOpsView.vue').then(module=>module.default))
 const { t }=useI18n(), route=useRoute(), router=useRouter(), auth=useAuthStore()
-const panels=['channels','profit','accounts'] as const
-type Panel=typeof panels[number]
-const labels={channels:'channelConfig.channels',profit:'profitOps.title',accounts:'accountOps.title'}
-const initial=panels.includes(route.query.panel as Panel)?route.query.panel as Panel:'channels'
-const opened=reactive({channels:initial==='channels',profit:initial==='profit',accounts:initial==='accounts'})
-const visited=reactive({...opened}), walletOpen=ref(false), analyticsOpen=ref(false), stale=ref(false)
+const channelPanel = ref<HTMLElement | null>(null)
+const directoryOpen = ref(false), walletOpen = ref(false), analyticsOpen = ref(false), stale = ref(false)
+function locatePanel(panel: unknown) {
+  if (panel === 'channels' || panel === 'accounts') {
+    void nextTick(() => channelPanel.value?.scrollIntoView?.({ block: 'start' }))
+  }
+}
+onMounted(() => locatePanel(route.query.panel))
+watch(() => route.query.panel, locatePanel)
 const scope=ref<Partial<OperationsQuery>>(profitScopeFromQuery(route.query))
 const channelDraft=ref(scope.value.channel_id || 0)
 function selectChannel(id:number){if(!Number.isSafeInteger(id)||id<0)return;channelDraft.value=id;acceptScope({...scope.value,channel_id:id,upstream:'',account_id:0,dimension:id?'account':'upstream',page:1})}
@@ -64,11 +70,9 @@ function acceptScope(value:Partial<OperationsQuery>){
  channelDraft.value=value.channel_id||0
  void router.replace({query:{...route.query,...Object.fromEntries(Object.entries(value).map(([key,v])=>[key,String(v)]))},hash:route.hash})
 }
-function toggle(panel:Panel,event:Event){const open=(event.target as HTMLDetailsElement).open;opened[panel]=open;if(open){visited[panel]=true;if(route.query.panel!==panel)void router.replace({query:{...route.query,panel},hash:route.hash})}}
 function changed(){stale.value=true}
 watch(()=>route.query,query=>{
  const next=profitScopeFromQuery(query)
  if(JSON.stringify(next)!==JSON.stringify(scope.value))scope.value=next
- const panel=query.panel as Panel;if(panels.includes(panel)){opened[panel]=true;visited[panel]=true}
 })
 </script>

@@ -46,8 +46,8 @@ apiClient.defaults.adapter=async config=>{
   data={scope:params,queried_at:now,currency:'USD',usage:{summary:metrics,wallet_synced_at:now,rows:[{...metrics,key:drilled?'41':'channel:7',name:drilled?'合成账号 41':channel.name,provider_id:1,provider_site_type:'sub2api',channel_id:7,channel_code:channel.code,channel_remark:channel.remark,assignment:'explicit'}],total:1,catalog:[{key:'channel:7',name:channel.name,accounts:2,channel_id:7,channel_code:channel.code,channel_remark:channel.remark,assignment:'explicit'}],catalog_total:1,members:[],member_total:0,accounts:[],capacity:{accounts:2,schedulable:2,configured_concurrency:6}},quality:{status:'ready',data:{summary:{},rows:[]}},errors:{status:'ready',data:{rows:[]}}};
  }else if(url==='/admin/profit-operations/channel-accounts')data={account_ids:[41,42]};
  else if(url==='/admin/account-ops/config')data={config:{enabled:false,recipient:'',balance_low:false,weekly_quota:false,cooldown_minutes:30,groups:[],webhooks:[],balance_thresholds:[],quota_thresholds:[]},encryption_key_configured:true};
- else if(url==='/admin/account-ops/threshold-accounts')data={items:[]};
- else if(url==='/admin/account-ops/groups')data={groups:[]};
+ else if(url==='/admin/account-ops/threshold-accounts')data={items:[...Array.from({length:15},(_,i)=>({account_id:i+1,account_name:'示例成员 '+(i+1),type:'apikey',platform:'openai',provider_id:1,group_id:'manual-demo-wallet',group_mode:'manual',unit:'USD',balance:420,balance_status:'ok',received_at:now,usage_windows:[]})),{account_id:42,account_name:'示例官方账号',platform:'openai',type:'oauth',usage_windows:[],unit:'%',balance:null,balance_status:'unsupported',received_at:null}]};
+ else if(url==='/admin/account-ops/groups')data={groups:[{id:'manual-demo-wallet',name:'示例供应商',provider_id:1,default_name:'示例供应商',mode:'manual',site:'https://fixture.example',account_ids:Array.from({length:15},(_,i)=>i+1)}]};
  else if(url==='/admin/account-ops/alerts')data={items:[],has_more:false};
  else if(url.includes('management-capabilities'))data={web_search_enabled:false,account_quota_notify_enabled:false};
  else if(url.includes('credential-encryption'))data={configured:true,source:'server_config'};
@@ -113,13 +113,14 @@ try{
  await page.getByRole('button',{name:'编辑',exact:true}).first().click();await page.getByTestId('open-channel-bindings').click();await page.getByTestId('upstream-channel-select').waitFor();await page.getByTestId('upstream-channel-select').selectOption('0');await page.getByTestId('confirm-channel-binding').check();await page.getByTestId('save-channel-binding').click();await page.getByText('已保存并从服务器读回确认',{exact:true}).waitFor();await page.screenshot({path:path.join(output,'entity-account-edit-bindings.png'),fullPage:true});await page.keyboard.press('Escape')
  await page.locator('table input[type="checkbox"]').first().check();await page.getByRole('button',{name:'批量编辑',exact:false}).first().click();await page.getByTestId('open-channel-bindings').click();await page.getByTestId('upstream-channel-select').focus();await page.getByTestId('upstream-channel-select').selectOption('7');await page.getByTestId('confirm-channel-binding').check();await page.getByTestId('save-channel-binding').click();await page.getByText('已保存并从服务器读回确认',{exact:true}).waitFor();await page.screenshot({path:path.join(output,'entity-account-bulk-bindings.png'),fullPage:true})
  await page.goto('http://127.0.0.1:4185/admin/channel-config',{waitUntil:'networkidle'})
- await page.getByTestId('new-upstream-channel').waitFor()
- if(await page.evaluate(()=>globalThis.__entityFixture.calls.some(c=>c.url==='/admin/profit-operations/snapshot')))throw new Error('configuration triggered profit aggregation')
- await page.screenshot({path:path.join(output,'channel-config-management.png'),fullPage:true})
- await page.getByTestId('config-panel-profit').locator('summary').first().click();await page.getByTestId('profit-summary').waitFor()
+ await page.getByTestId('profit-summary').waitFor()
  await page.screenshot({path:path.join(output,'channel-config-profit.png'),fullPage:true})
  const reportCalls=await page.evaluate(()=>globalThis.__entityFixture.calls.filter(c=>c.url==='/admin/profit-operations/snapshot').length)
- await page.getByTestId('config-panel-accounts').locator('summary').first().click();await page.getByTestId('account-ops-tab-settings').waitFor()
+ const management=page.getByTestId('config-panel-channels')
+ await management.getByTestId('rule-row-manual-demo-wallet').waitFor()
+ await management.screenshot({path:path.join(output,'channel-config-management.png')})
+ await management.getByTestId('channel-view-official').click()
+ await management.getByTestId('rule-row-account:42').waitFor()
  if(await page.evaluate(()=>globalThis.__entityFixture.calls.filter(c=>c.url==='/admin/profit-operations/snapshot').length)!==reportCalls)throw new Error('account panel recomputed profit')
  await page.screenshot({path:path.join(output,'channel-config-accounts.png'),fullPage:true})
  await page.setViewportSize({width:390,height:844});await page.evaluate(()=>document.documentElement.classList.add('dark'))

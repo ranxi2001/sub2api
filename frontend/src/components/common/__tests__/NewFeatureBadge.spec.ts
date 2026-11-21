@@ -44,6 +44,7 @@ describe('NewFeatureBadge', () => {
     ['user ID copy', NEW_FEATURE_NOTICES.userIdCopy],
     ['Antigravity usage query', NEW_FEATURE_NOTICES.antigravityUsageQuery],
     ['account operations multiple recipients', NEW_FEATURE_NOTICES.accountOpsMultipleEmails],
+    ['channel wallet and official account overview', NEW_FEATURE_NOTICES.channelBalanceOverview],
     ['account operations provider balance', NEW_FEATURE_NOTICES.accountOpsProviderBalance],
     ['account operations OAuth lifecycle', NEW_FEATURE_NOTICES.accountOpsOAuthLifecycle],
     ['account balance notification', NEW_FEATURE_NOTICES.accountOpsBalanceNotification],
