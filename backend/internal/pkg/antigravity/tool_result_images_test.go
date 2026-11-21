@@ -9,6 +9,23 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+func TestResponsesPlainDocumentSurvivesAnthropicBridge(t *testing.T) {
+	var req apicompat.ResponsesRequest
+	require.NoError(t, json.Unmarshal([]byte(`{"input":[{"role":"user","content":[{"type":"input_file","file_data":"data:text/plain;base64,c3ludGhldGlj"}]}]}`), &req))
+	anthropic, err := apicompat.ResponsesToAnthropicRequest(&req)
+	require.NoError(t, err)
+	body, err := json.Marshal(anthropic)
+	require.NoError(t, err)
+	var claude ClaudeRequest
+	require.NoError(t, json.Unmarshal(body, &claude))
+	wire, err := TransformClaudeToGeminiWithOptions(&claude, "test-project", "gemini-2.5-flash", TransformOptions{})
+	require.NoError(t, err)
+	require.Equal(t, "synthetic", gjson.GetBytes(wire, "request.contents.0.parts.0.text").String())
+	content := json.RawMessage(`[{"type":"document","source":{"type":"text","media_type":"text/plain","data":"synthetic"}}]`)
+	require.Equal(t, "synthetic", parseToolResultContent(content, false))
+	require.Empty(t, extractToolResultInlineParts(content), "plain text must stay in the function response text")
+}
+
 func TestResponsesToolResultImagesStayWithTheirCalls(t *testing.T) {
 	for _, model := range []string{"gemini-3.8-flash", "gemini-4-argon"} {
 		t.Run(model, func(t *testing.T) {
