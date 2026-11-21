@@ -885,7 +885,12 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		if err != nil {
 			var sseErr *sseStreamErrorEventError
 			if errors.As(err, &sseErr) {
-				return nil, s.sseStreamErrorEventFailover(ctx, c, account, resp, sseErr.RawData, reqModel, c.Writer.Size() != writerSizeBeforeStream)
+				policyErr := s.sseStreamErrorEventFailover(ctx, c, account, resp, sseErr.RawData, reqModel, c.Writer.Size() != writerSizeBeforeStream)
+				partial := partialStreamUsageResult(c, resp, streamResult, originalModel, mappedModel, startTime, err)
+				if partial != nil || c.Writer.Size() != writerSizeBeforeStream {
+					return partial, errors.New("stream usage incomplete: upstream semantic stream failure")
+				}
+				return nil, policyErr
 			}
 			// 流中断（缺失 terminal 事件、读错误、数据间隔超时等）时保留已观测到的
 			// usage 与错误一起返回，handler 在错误处理完成后照常提交 usage 记录。

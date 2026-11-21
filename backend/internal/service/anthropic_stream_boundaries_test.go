@@ -158,3 +158,47 @@ func TestIssue985FrameBoundAndFieldOrder(t *testing.T) {
 	}
 	require.ErrorIs(t, err, errAnthropicSSEFrameTooLarge, "metadata-only frame must also be bounded")
 }
+
+func TestIssue985NativeRelays(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	canonical := issue985Stream()
+	for _, tc := range []struct {
+		name, wire string
+		fail       bool
+	}{
+		{"multidata", strings.ReplaceAll(canonical, `,"`, ",\ndata: \""), false},
+		{"empty", "", true},
+		{"missing", strings.ReplaceAll(strings.ReplaceAll(canonical, `,"usage":{"input_tokens":17,"output_tokens":0}`, ""), `,"usage":{"output_tokens":3}`, ""), true},
+		{"error_after_terminal", canonical + issue985Frame("error", `{"type":"error","error":{"type":"overloaded_error","message":"fixture"}}`), true},
+		{"reasoning", strings.ReplaceAll(strings.ReplaceAll(canonical, `"type":"text","text":""`, `"type":"thinking","thinking":""`), `"type":"text_delta","text":"fixture text"`, `"type":"thinking_delta","thinking":"fixture reasoning"`), false},
+	} {
+		for _, route := range []string{"native", "passthrough", "normal"} {
+			t.Run(route+"/"+tc.name, func(t *testing.T) {
+				rec := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rec)
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+				resp := &http.Response{Header: http.Header{}, Body: io.NopCloser(strings.NewReader(tc.wire))}
+				account := &Account{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeAPIKey}
+				svc := &GatewayService{rateLimitService: &RateLimitService{}}
+				var err error
+				switch route {
+				case "normal":
+					_, err = svc.handleStreamingResponse(c.Request.Context(), resp, c, account, time.Now(), "fixture-model", "fixture-model", false)
+				case "passthrough":
+					_, err = svc.handleStreamingResponseAnthropicAPIKeyPassthrough(c.Request.Context(), resp, c, account, time.Now(), "fixture-model")
+				default:
+					_, err = (&OpenAIGatewayService{}).handleNativeAnthropicStreamingResponse(c.Request.Context(), resp, c, account, "fixture-model", "fixture-model", "fixture-model", nil, time.Now())
+				}
+				if tc.fail {
+					require.Error(t, err)
+					require.NotContains(t, rec.Body.String(), "event: message_stop")
+					require.Equal(t, 1, strings.Count(rec.Body.String(), "event: error"))
+				} else {
+					require.NoError(t, err)
+					require.Equal(t, 1, strings.Count(rec.Body.String(), "event: message_stop"))
+					require.Contains(t, rec.Body.String(), "fixture")
+				}
+			})
+		}
+	}
+}

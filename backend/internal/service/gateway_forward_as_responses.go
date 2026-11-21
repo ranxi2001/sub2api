@@ -549,6 +549,13 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 		}
 		applyObservedGatewayResponseModel(c, result)
 		if !streamStatus.clientDisconnected {
+			if isAnthropicCompatSafetyRejection([]byte(extractCompatFailurePayload(failure.err))) {
+				writeResponsesError(c, http.StatusForbidden, "permission_error", failure.message)
+				if !usage.hasObservedTokens() {
+					result = nil
+				}
+				return result, fmt.Errorf("upstream safety rejection: %s", failure.message)
+			}
 			writeResponsesError(c, http.StatusBadGateway, failure.errType, failure.message)
 		}
 		if !usage.hasObservedTokens() {

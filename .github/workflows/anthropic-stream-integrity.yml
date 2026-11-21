@@ -44,6 +44,8 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
+      - name: Evidence validator negative controls
+        run: python3 .github/scripts/anthropic_integrity_evidence_test.py
       - name: Fixed production business RED, identical oracle
         shell: bash
         run: |

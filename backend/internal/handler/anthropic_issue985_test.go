@@ -85,7 +85,7 @@ func issue985Gateway(t *testing.T, upstreamURL string, billing service.UsageBill
 	t.Cleanup(cache.Stop)
 	usageRepo := &openAIWSUsageHandlerUsageLogRepoStub{created: make(chan *service.UsageLog, 32)}
 	rateLimit := service.NewRateLimitService(nil, nil, cfg, nil, nil)
-	gw := service.NewGatewayService(nil, &fakeGroupRepo{group: group}, usageRepo, billing, nil, nil, nil, nil, cfg, snapshot, nil, service.NewBillingService(cfg, nil), rateLimit, nil, nil, repository.NewHTTPUpstream(cfg), &service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	gw := service.NewGatewayService(nil, &fakeGroupRepo{group: group}, usageRepo, billing, nil, nil, nil, nil, cfg, snapshot, nil, service.NewBillingService(cfg, nil), rateLimit, nil, nil, repository.NewHTTPUpstream(cfg), &service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	h := &GatewayHandler{gatewayService: gw, billingCacheService: cache, cfg: cfg, maxAccountSwitches: 2, apiKeyService: service.NewAPIKeyService(nil, nil, nil, nil, nil, nil, cfg), concurrencyHelper: NewConcurrencyHelper(service.NewConcurrencyService(&fakeConcurrencyCache{}), SSEPingFormatClaude, 0)}
 	done := make(chan struct{}, 32)
 	router := gin.New()

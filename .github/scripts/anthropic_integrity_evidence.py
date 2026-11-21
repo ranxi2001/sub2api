@@ -5,6 +5,26 @@ import re
 import sys
 
 
+def required_tests(mode):
+    tests = []
+    for route in ('chat', 'responses'):
+        tests += [f'TestIssue985Framing/{route}/{case}' for case in ('canonical', 'id', 'comment', 'multidata')]
+        tests += [f'TestIssue985Failure/{route}/{case}' for case in ('empty', 'terminal_only', 'missing_usage', 'stop_reason_error')]
+    if mode == 'red':
+        return tests
+    for route in ('chat', 'responses', 'native_chat', 'native_responses'):
+        for flow in ('stream', 'buffered'):
+            tests += [f'TestIssue985AdapterBoundaries/{route}/{flow}/{case}' for case in ('crlf', 'compact', 'eof_frame', 'unknown', 'zero', 'missing', 'field_missing', 'stop_reason_only', 'terminal_error', 'malformed', 'mismatch')]
+    for route in ('native', 'passthrough', 'normal'):
+        tests += [f'TestIssue985NativeRelays/{route}/{case}' for case in ('multidata', 'empty', 'missing', 'error_after_terminal', 'reasoning')]
+    tests += ['TestIssue985EveryTransportSplit', 'TestIssue985FrameBoundAndFieldOrder']
+    for flow in ('true', 'false'):
+        tests += [f'TestIssue985HandlerUsage/{case}/stream={flow}' for case in ('framed', 'missing', 'zero', 'partial_error', 'partial_protocol')]
+        tests += [f'TestIssue985PostgresBilling/{case}/stream={flow}' for case in ('valid', 'missing', 'explicit_zero', 'partial_protocol', 'partial_error')]
+        tests += [f'TestIssue985HandlerToolContinuation/stream={flow}']
+    return tests
+
+
 def validate(mode, root):
     raw = (root / f'{mode}.jsonl').read_text()
     stderr = (root / f'{mode}.stderr').read_text()
@@ -14,12 +34,9 @@ def validate(mode, root):
     assert not re.search(r'WARNING: DATA RACE|build failed|setup failed|no tests to run|panic:|fatal error:|test timed out', output), output[-8000:]
     assert not any(event.get('Action') == 'skip' for event in events), 'skip contamination'
     outcomes = {event['Test']: event['Action'] for event in events if event.get('Test') and event.get('Action') in ('pass', 'fail')}
-    expected = {}
-    for route in ('chat', 'responses'):
-        for case in ('canonical', 'id', 'comment', 'multidata'):
-            expected[f'TestIssue985Framing/{route}/{case}'] = 'fail' if mode == 'red' and case != 'canonical' else 'pass'
-        for case in ('empty', 'terminal_only', 'missing_usage', 'stop_reason_error'):
-            expected[f'TestIssue985Failure/{route}/{case}'] = 'fail' if mode == 'red' else 'pass'
+    expected = {test: 'pass' for test in required_tests(mode)}
+    if mode == 'red':
+        expected = {test: ('pass' if test.endswith('/canonical') else 'fail') for test in expected}
     for test, outcome in expected.items():
         assert outcomes.get(test) == outcome, (test, outcome, outcomes.get(test))
     rc = int((root / f'{mode}.exitcode').read_text())
