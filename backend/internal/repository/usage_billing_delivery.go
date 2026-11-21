@@ -94,6 +94,19 @@ func validateUsageBillingEvent(e *service.UsageBillingEvent, key service.UsageBi
 }
 
 func (r *usageBillingRepository) ApplyStagedUsageBilling(ctx context.Context, key service.UsageBillingEventKey) (_ *service.UsageBillingRecovery, err error) {
+	// Use the immutable staged owner for both live delivery and recovery. This
+	// indexed lookup releases its connection before a hot wallet starts waiting.
+	var owner string
+	if err := r.db.QueryRowContext(ctx, `SELECT COALESCE(payload #>> '{command,UserID}', '')
+		FROM usage_billing_events WHERE request_id=$1 AND api_key_id=$2`, key.RequestID, key.APIKeyID).Scan(&owner); err != nil {
+		return nil, err
+	}
+	release, err := r.admission.acquire(ctx, owner, r.db.Stats().MaxOpenConnections)
+	if err != nil {
+		// The staged event remains eligible for recovery.
+		return nil, err
+	}
+	defer release()
 	defer func() {
 		if err == nil {
 			return
