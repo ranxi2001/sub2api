@@ -7848,6 +7848,17 @@
               <Toggle v-model="form.model_plaza_require_auth" />
             </div>
 
+            <ModelPlazaCurrencySettings v-if="form.model_plaza_enabled" v-model="form.model_plaza_currency" />
+            <div v-if="form.model_plaza_enabled">
+              <label for="plaza-exchange-rate" class="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+                {{ t('admin.settings.features.modelPlaza.displayExchangeRate') }}
+                <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.modelPlazaCurrency" :user-id="authStore.user?.id" />
+              </label>
+              <p id="plaza-exchange-rate-help" class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.modelPlaza.displayExchangeRateHint') }}</p>
+              <input id="plaza-exchange-rate" v-model.number="form.model_plaza_usd_to_cny_rate" type="number" min="0.000001" step="any" required
+                aria-describedby="plaza-exchange-rate-help" class="input mt-2 max-w-xs" />
+            </div>
+
             <div v-if="form.model_plaza_enabled">
               <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
                 {{ t('admin.settings.features.modelPlaza.priceDescription') }}
@@ -9605,6 +9616,8 @@
 </template>
 
 <script setup lang="ts">
+import ModelPlazaCurrencySettings from '@/components/settings/ModelPlazaCurrencySettings.vue'
+import { defaultPlazaCurrencySettings } from '@/utils/plazaCurrency'
 import EncryptedHistory409Settings from "@/components/settings/EncryptedHistory409Settings.vue";
 import EncryptedHistory400Settings from "@/components/settings/EncryptedHistory400Settings.vue";
 import { excelBPSImageLimits } from "@/utils/excelBPSImageLimits";
@@ -10735,6 +10748,8 @@ const form = reactive<SettingsForm>({
   model_plaza_enabled: false,
   model_plaza_require_auth: false,
   model_plaza_description: '',
+  model_plaza_usd_to_cny_rate: 7,
+  model_plaza_currency: defaultPlazaCurrencySettings(),
   // Plugin management menu visibility; plugin runtime is unaffected.
   plugin_management_enabled: false,
   // Support tickets (网站工单) switch + form config
@@ -12567,6 +12582,8 @@ async function saveSettings() {
       model_plaza_enabled: form.model_plaza_enabled,
       model_plaza_require_auth: form.model_plaza_require_auth,
       model_plaza_description: form.model_plaza_description,
+      model_plaza_usd_to_cny_rate: form.model_plaza_usd_to_cny_rate,
+      model_plaza_currency: form.model_plaza_currency,
       plugin_management_enabled: form.plugin_management_enabled,
       // Support tickets: blank category rows are dropped; the server trims and deduplicates.
       support_ticket_enabled: form.support_ticket_enabled,

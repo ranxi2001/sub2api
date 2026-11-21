@@ -4,6 +4,7 @@
  * browser; use a new ID to announce the feature again in a later release.
  */
 export const NEW_FEATURE_NOTICES = {
+  modelPlazaCurrency: 'model-plaza-display-currency-20261121',
   exaSearch: 'exa-search-provider',
   claudeWindowCost: 'claude-window-cost-estimate',
   openaiVideos: 'openai-videos-endpoint-capability',

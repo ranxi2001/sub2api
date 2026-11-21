@@ -237,6 +237,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyModelPlazaEnabled:       "false",
 		SettingKeyModelPlazaRequireAuth:   "false",
 		SettingKeyModelPlazaDescription:   "",
+		SettingKeyModelPlazaUSDToCNYRate:  strconv.FormatFloat(defaultModelPlazaUSDToCNYRate, 'f', -1, 64),
 		SettingKeyPluginManagementEnabled: "false",
 
 		// Support tickets (default disabled; opt-in). A missing config means the defaults.
@@ -912,6 +913,8 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	result.ModelPlazaEnabled = settings[SettingKeyModelPlazaEnabled] == "true"
 	result.ModelPlazaRequireAuth = settings[SettingKeyModelPlazaRequireAuth] == "true"
 	result.ModelPlazaDescription = settings[SettingKeyModelPlazaDescription]
+	result.ModelPlazaUSDToCNYRate = modelPlazaUSDToCNYRate(settings[SettingKeyModelPlazaUSDToCNYRate])
+	result.ModelPlazaCurrency = parseModelPlazaCurrency(settings[SettingKeyModelPlazaCurrency])
 	result.PluginManagementEnabled = settings[SettingKeyPluginManagementEnabled] == "true"
 
 	// Support tickets (default: disabled; strict true). A corrupt config is shown as the

@@ -1,3 +1,4 @@
+import { defaultPlazaCurrencySettings } from '@/utils/plazaCurrency'
 import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import PlazaModelPricingTable from '../PlazaModelPricingTable.vue'
@@ -52,6 +53,7 @@ function mountTable(
   rateMultiplier: number,
   userRateMultiplier?: number | null,
   extraProps?: {
+    priceDisplay?: import('@/utils/plazaCurrency').PlazaPriceDisplay
     imageRateIndependent?: boolean
     imageRateMultiplier?: number | null
     videoRateIndependent?: boolean
@@ -66,6 +68,21 @@ function mountTable(
 }
 
 describe('PlazaModelPricingTable', () => {
+  it('converts base, time and tier prices without changing discounts or official source values', async () => {
+    const model = tokenModel({ time_pricing: { timezone: 'Asia/Shanghai', periods: [{ start_time: '09:00', end_time: '12:00', multiplier: 2 }] } })
+    model.pricing!.intervals = [{ min_tokens: 0, max_tokens: null, input_price: 4e-6, output_price: 8e-6, cache_write_price: null, cache_read_price: null, per_request_price: null }]
+    const before = JSON.stringify(model)
+    const wrapper = mountTable([model], 0.5, 0.25, { priceDisplay: { usdToCny: 7, settings: { ...defaultPlazaCurrencySettings(), wallet_currency: 'CNY', wallet_unit_value: 0.5, customer_currency: 'CNY', official_currency: 'CNY' } } })
+    const rows = wrapper.findAll('tbody tr')
+    expect(rows[0].findAll('td')[1].text()).toContain('¥0.50')
+    expect(rows[1].findAll('td')[1].text()).toContain('¥1.00')
+    expect(rows[0].findAll('td')[4].text()).toContain('¥21.00')
+    await wrapper.setProps({ priceDisplay: { usdToCny: 7, settings: { ...defaultPlazaCurrencySettings(), wallet_currency: 'CNY', wallet_unit_value: 0.5 } } })
+    expect(wrapper.findAll('tbody tr')[0].findAll('td')[4].text()).toContain('$3.00')
+    expect(JSON.stringify(model)).toBe(before)
+    wrapper.unmount()
+  })
+
   it('does not multiply the final image floor by personal discounts', () => {
     const m = tokenModel({ name: 'gpt-image-2', platform: 'openai' })
     m.pricing!.image_minimum_charge = 0.01
