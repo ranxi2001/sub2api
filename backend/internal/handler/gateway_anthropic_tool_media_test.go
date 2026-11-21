@@ -100,7 +100,9 @@ func testAnthropicChatToolMedia(t *testing.T, native bool) {
 						ctx := context.WithValue(context.Background(), ctxkey.Group, group)
 						c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body)).WithContext(ctx)
 						c.Request.Header.Set("Content-Type", "application/json")
-						c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{ID: 99, UserID: 100, GroupID: &groupID, Group: group, User: &service.User{ID: 100, Balance: 100}})
+						// Match the new-key default so context admission does not
+						// reject opaque media before the MIME/preservation assertions.
+						c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{ID: 99, UserID: 100, GroupID: &groupID, Group: group, AllowLongContext: true, User: &service.User{ID: 100, Balance: 100}})
 						c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 100})
 						if native {
 							gateway := service.NewOpenAIGatewayService(

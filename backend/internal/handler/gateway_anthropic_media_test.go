@@ -92,7 +92,9 @@ func TestGatewayAnthropicMediaHandlers(t *testing.T) {
 						ctx := context.WithValue(context.Background(), ctxkey.Group, group)
 						c.Request = httptest.NewRequest(http.MethodPost, "/v1/"+endpoint, bytes.NewReader(body)).WithContext(ctx)
 						c.Request.Header.Set("Content-Type", "application/json")
-						c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{ID: 9812, UserID: 9813, GroupID: &groupID, Group: group, User: &service.User{ID: 9813, Balance: 100}})
+						// Use the new-key default; restricted keys reject opaque media
+						// during final context admission before this conversion oracle.
+						c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{ID: 9812, UserID: 9813, GroupID: &groupID, Group: group, AllowLongContext: true, User: &service.User{ID: 9813, Balance: 100}})
 						c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 9813})
 						if endpoint == "chat/completions" {
 							h.ChatCompletions(c)

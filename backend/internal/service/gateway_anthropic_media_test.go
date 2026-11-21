@@ -109,9 +109,10 @@ func testCompatibilityMediaPolicy(t *testing.T, antigravity bool) {
 						wire := gjson.GetBytes(upstream.requestBodies[0], root+".0.parts.0")
 						if mime == "text/plain" {
 							require.Equal(t, "synthetic", wire.Get("text").String())
-						} else if !antigravity && field == "file" && mime != "application/pdf" {
-							// Gemini's legacy document carrier is serialized as text;
-							// only supported PDF/plain document handling is upgraded.
+						} else if field == "file" && mime != "application/pdf" {
+							// Both fixtures target Gemini models, so Antigravity also
+							// uses the shared converter's legacy document-as-text carrier.
+							// Only PDF/plain document handling is upgraded.
 							legacy := gjson.Parse(wire.Get("text").String())
 							require.Equal(t, "document", legacy.Get("type").String())
 							require.Equal(t, mime, legacy.Get("source.media_type").String())
