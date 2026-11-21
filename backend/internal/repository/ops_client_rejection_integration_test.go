@@ -26,7 +26,7 @@ func TestOpsNormalizedContextLimitRetainsRawStatusInSQL(t *testing.T) {
 	} {
 		var got bool
 		query := "SELECT " + opsClientRejectionSQL("e") + ` FROM (
- SELECT $1::int AS status_code,$2::int AS upstream_status_code,$3::text AS error_message,
+ SELECT 'openai'::text AS platform, $1::int AS status_code,$2::int AS upstream_status_code,$3::text AS error_message,
  ''::text AS upstream_error_message,''::text AS upstream_error_detail,false AS is_business_limited,'provider'::text AS error_owner,
  'upstream'::text AS error_phase,'upstream_error'::text AS error_type,1::bigint AS account_id,
  'upstream_http'::text AS error_source,'[]'::jsonb AS upstream_errors) e`
@@ -118,7 +118,7 @@ func TestChannelMonitorClientRejectionRequiresLocalEvidence(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var excluded bool
 			err := integrationDB.QueryRowContext(ctx, "SELECT "+channelMonitorClientRejectionSQL+` FROM (
-    SELECT TRUE AS is_business_limited, NULLIF($1::text,'') AS error_owner,
+    SELECT 'openai'::text AS platform, TRUE AS is_business_limited, NULLIF($1::text,'') AS error_owner,
      $2::text AS error_source, NULLIF($3::int,0) AS upstream_status_code,
      $4::jsonb AS upstream_errors, 'request' AS error_phase,
      'api_error' AS error_type, NULL::bigint AS account_id,
@@ -155,7 +155,7 @@ func TestOpsWrappedContextLimitReadTimeCompatibility(t *testing.T) {
 			err := integrationDB.QueryRowContext(context.Background(), `SELECT `+
 				opsBusinessLimitedSQL("e")+`, `+opsEffectiveOwnerSQL("e")+`, `+
 				opsEffectivePhaseSQL("e")+`, `+opsEffectiveTypeSQL("e")+` FROM (
-				 SELECT $1::int AS status_code, NULLIF($2::int,0) AS upstream_status_code,
+				 SELECT 'openai'::text AS platform, $1::int AS status_code, NULLIF($2::int,0) AS upstream_status_code,
 				 $3::text AS error_message, NULL::text AS upstream_error_message, $4::text AS upstream_error_detail,
 				 $5::text AS error_phase, 'provider'::text AS error_owner, 'upstream_error'::text AS error_type,
 				 FALSE AS is_business_limited, 'upstream_http'::text AS error_source,

@@ -78,6 +78,21 @@ func NormalizeOpsClientRejection(entry *OpsInsertErrorLogInput) {
 	if entry.UpstreamStatusCode != nil {
 		upstreamStatus = *entry.UpstreamStatusCode
 	}
+	effectiveStatus := upstreamStatus
+	if effectiveStatus <= 0 {
+		effectiveStatus = entry.StatusCode
+	}
+	messages := []string{entry.ErrorMessage}
+	if entry.UpstreamErrorMessage != nil {
+		messages = append(messages, *entry.UpstreamErrorMessage)
+	}
+	if IsDeepSeekInputContentRejection(entry.Platform, effectiveStatus, messages...) {
+		entry.IsBusinessLimited = true
+		entry.ErrorOwner = "client"
+		entry.ErrorPhase = "request"
+		entry.ErrorType = "content_policy"
+		return
+	}
 	message := entry.ErrorMessage
 	if entry.UpstreamErrorMessage != nil {
 		message += " " + *entry.UpstreamErrorMessage

@@ -311,6 +311,9 @@ func (s *OpenAIGatewayService) shouldFailoverUpstreamError(statusCode int) bool 
 }
 
 func (s *OpenAIGatewayService) shouldFailoverOpenAIUpstreamResponse(account *Account, statusCode int, upstreamMsg string, upstreamBody []byte) bool {
+	if isDeepSeekInputContentResponse(account, statusCode, upstreamBody) {
+		return false
+	}
 	if isOpenAIUpstreamSessionBlocked(upstreamBody) {
 		return false
 	}
@@ -609,6 +612,9 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 ) (*OpenAIForwardResult, error) {
 	body := s.readUpstreamErrorBody(resp)
 	body = s.redactAgentIdentitySensitiveBody(ctx, account, body)
+	if writeDeepSeekInputContentRejection(c, account, resp, body, writeChatCompletionsError) {
+		return nil, fmt.Errorf("deepseek input content rejected")
+	}
 
 	// This conversation is blocked by the upstream, not the selected credential.
 	// Preserve the actionable error without retrying accounts or recording a new
@@ -892,6 +898,9 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 ) (*OpenAIForwardResult, error) {
 	body := s.readUpstreamErrorBody(resp)
 	body = s.redactAgentIdentitySensitiveBody(context.Background(), account, body)
+	if writeDeepSeekInputContentRejection(c, account, resp, body, writeError) {
+		return nil, fmt.Errorf("deepseek input content rejected")
+	}
 
 	if isOpenAIUpstreamSessionBlocked(body) {
 		message := sanitizeUpstreamErrorMessage(extractUpstreamErrorMessage(body))
