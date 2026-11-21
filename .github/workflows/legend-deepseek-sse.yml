@@ -1,0 +1,88 @@
+name: Legend DeepSeek SSE hotfix
+
+on:
+  push:
+    branches: [hotfix/legend-deepseek-sse-prefix-20261121]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: legend-deepseek-${{ github.sha }}
+  cancel-in-progress: false
+
+env:
+  EXPECTED_HEAD_SHA: ${{ github.sha }}
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.EXPECTED_HEAD_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Scoped prefix and raw chat streaming regression
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          go test -mod=readonly -race -tags=unit ./internal/service -run '^Test(LegendDeepSeek|ForwardAsRawChatCompletions|StreamRawChatCompletions)' -count=1 -timeout=8m
+
+  artifact:
+    needs: regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NODE_OPTIONS: --max-old-space-size=6144
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.EXPECTED_HEAD_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Frontend validation and embedded assets
+        working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run check:i18n
+          pnpm exec vue-tsc -b
+          pnpm exec vite build
+      - name: Build immutable Linux amd64 artifact
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          mkdir -p ../artifacts
+          version=$(cat cmd/server/VERSION)
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags embed -trimpath -ldflags "-s -w -X main.Version=$version -X main.Commit=$EXPECTED_HEAD_SHA -X main.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ) -X main.BuildType=hotfix" -o ../artifacts/sub2api ./cmd/server
+          cd ../artifacts
+          sha256sum sub2api > SHA256SUMS
+          printf '%s\n' "$EXPECTED_HEAD_SHA" > SOURCE_COMMIT
+          git -C .. rev-parse HEAD^{tree} > SOURCE_TREE
+          printf 'linux/amd64\n' > ARCHITECTURE
+          ./sub2api --version > VERSION.txt 2>&1
+      - uses: actions/upload-artifact@v7
+        with:
+          name: legend-deepseek-linux-amd64-${{ env.EXPECTED_HEAD_SHA }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
