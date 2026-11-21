@@ -25,15 +25,17 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/google/uuid"
+	"github.com/tidwall/gjson"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
 )
 
 const (
 	// These values live in accounts.extra so PR2 does not require a schema migration.
-	UpstreamBillingProbeExtraKey           = "upstream_billing_probe"
-	UpstreamBillingProbeEnabledExtraKey    = "upstream_billing_probe_enabled"
-	UpstreamBillingRateSyncEnabledExtraKey = "upstream_billing_rate_sync_enabled"
+	UpstreamBillingProbeExtraKey            = "upstream_billing_probe"
+	UpstreamBillingProbeEnabledExtraKey     = "upstream_billing_probe_enabled"
+	UpstreamBillingRateSyncEnabledExtraKey  = "upstream_billing_rate_sync_enabled"
+	UpstreamBillingGroupSyncEnabledExtraKey = "upstream_billing_group_sync_enabled"
 
 	upstreamBillingProbeDefaultIntervalMinutes = 30
 	upstreamBillingProbeMinIntervalMinutes     = 5
@@ -73,7 +75,8 @@ const UpstreamBillingProbeMaxBatchSize = upstreamBillingProbeMaxPerCycle
 const upstreamBillingRateSyncMaxMultiplier = 100.0
 
 var (
-	ErrUpstreamBillingProbeUnavailable = infraerrors.ServiceUnavailable(
+	ErrUpstreamBillingGroupSyncRequiresProbe = infraerrors.BadRequest("UPSTREAM_BILLING_GROUP_SYNC_REQUIRES_PROBE", "upstream group sync requires upstream billing probe")
+	ErrUpstreamBillingProbeUnavailable       = infraerrors.ServiceUnavailable(
 		"UPSTREAM_BILLING_PROBE_UNAVAILABLE", "upstream billing probe is unavailable",
 	)
 	ErrUpstreamBillingProbeAccountInvalid = infraerrors.BadRequest(
@@ -269,7 +272,7 @@ type UpstreamBillingProbeService struct {
 }
 
 type upstreamBillingProbeSnapshotWriter interface {
-	UpdateUpstreamBillingProbeSnapshot(context.Context, *Account, *UpstreamBillingProbeSnapshot, *float64) error
+	UpdateUpstreamBillingProbeSnapshot(context.Context, *Account, *UpstreamBillingProbeSnapshot, *float64, BillingGroupInfo) error
 }
 
 type upstreamBillingProbeDueAccountLister interface {
@@ -625,6 +628,7 @@ func (s *UpstreamBillingProbeService) SetAccountEnabled(ctx context.Context, acc
 	updates := map[string]any{UpstreamBillingProbeEnabledExtraKey: enabled}
 	if !enabled {
 		updates[UpstreamBillingRateSyncEnabledExtraKey] = false
+		updates[UpstreamBillingGroupSyncEnabledExtraKey] = false
 	}
 	return s.accountRepo.UpdateExtra(ctx, accountID, updates)
 }
@@ -697,7 +701,6 @@ func (s *UpstreamBillingProbeService) PreviewGroup(ctx context.Context, account 
 		return nil, infraerrors.New(http.StatusBadGateway, "UPSTREAM_GROUP_PREVIEW_FAILED", "Could not read group information from the upstream")
 	}
 	var info struct {
-		BillingGroupInfo
 		Object        string `json:"object"`
 		SchemaVersion int    `json:"schema_version"`
 		BillingScope  string `json:"billing_scope"`
@@ -705,7 +708,24 @@ func (s *UpstreamBillingProbeService) PreviewGroup(ctx context.Context, account 
 	if json.Unmarshal(reply.body, &info) != nil || info.Object != "sub2api.key_billing" || info.SchemaVersion != 1 || info.BillingScope != "token" {
 		return nil, infraerrors.New(http.StatusBadGateway, "UPSTREAM_GROUP_PREVIEW_INVALID", "Invalid upstream billing response")
 	}
-	return &info.BillingGroupInfo, nil
+	group := upstreamBillingGroupInfo(reply.body)
+	return &group, nil
+}
+
+// Treat each optional text field independently so an invalid field cannot block rate updates.
+func upstreamBillingGroupInfo(body []byte) BillingGroupInfo {
+	text := func(key string) string {
+		value := gjson.GetBytes(body, key)
+		if value.Type != gjson.String || strings.ContainsRune(value.Str, 0) {
+			return ""
+		}
+		return strings.TrimSpace(value.Str)
+	}
+	name := text("group_name")
+	if len(name) > 100 { // accounts.name uses Ent MaxLen(100).
+		name = ""
+	}
+	return BillingGroupInfo{Name: name, Description: text("group_description")}
 }
 
 func (s *UpstreamBillingProbeService) probeLoadedAccount(ctx context.Context, account *Account, intervalMinutes int) (*UpstreamBillingProbeSnapshot, error) {
@@ -723,14 +743,19 @@ func (s *UpstreamBillingProbeService) probeLoadedAccount(ctx context.Context, ac
 		return s.persistProbeFailure(ctx, account, intervalMinutes, now, 0, "new_api_authorization_required", 0)
 	}
 	target, normalizedBaseURL, err := s.billingProbeTarget(account)
+	groupSync, _ := account.Extra[UpstreamBillingGroupSyncEnabledExtraKey].(bool)
+	includeGroup := groupSync && upstreamBillingProbeEnabled(account)
 	if errors.Is(err, ErrUpstreamBillingProbeIdentityChanged) {
 		return nil, err
 	}
 	if err != nil {
 		return s.persistProbeFailure(ctx, account, intervalMinutes, now, 0, err.Error(), 0)
 	}
-	rateResult := s.fetchUpstreamProbeBody(ctx, account, target,
-		buildOpenAIEndpointURL(normalizedBaseURL, "/v1/sub2api/billing"), upstreamBillingProbeMaxBodyBytes, upstreamBillingProbeRequestTimeout)
+	billingURL := buildOpenAIEndpointURL(normalizedBaseURL, "/v1/sub2api/billing")
+	if includeGroup {
+		billingURL += "?include=group"
+	}
+	rateResult := s.fetchUpstreamProbeBody(ctx, account, target, billingURL, upstreamBillingProbeMaxBodyBytes, upstreamBillingProbeRequestTimeout)
 	previousRate := account.BillingRateMultiplier()
 	snapshot, syncRate := upstreamBillingRateSnapshotFromResult(account, intervalMinutes, now, rateResult, previousRate)
 	if ctx.Err() == nil && upstreamBalanceProbeAllowed(normalizedBaseURL, rateResult) {
@@ -745,7 +770,11 @@ func (s *UpstreamBillingProbeService) probeLoadedAccount(ctx context.Context, ac
 			snapshot.NextProbeAt = now.Add(nextProbeDelay(intervalMinutes, retryAfter(rateResult.header, now)))
 		}
 	}
-	if err := s.updateSnapshot(ctx, account, snapshot, syncRate); err != nil {
+	var group BillingGroupInfo
+	if includeGroup && snapshot.Status == UpstreamBillingProbeStatusOK {
+		group = upstreamBillingGroupInfo(rateResult.body)
+	}
+	if err := s.updateSnapshot(ctx, account, snapshot, syncRate, group); err != nil {
 		return nil, err
 	}
 	if syncRate != nil && previousRate != *syncRate {
@@ -903,7 +932,7 @@ func (s *UpstreamBillingProbeService) persistProbeFailure(
 	retryAfterDuration time.Duration,
 ) (*UpstreamBillingProbeSnapshot, error) {
 	snapshot := upstreamBillingProbeFailureSnapshot(account, intervalMinutes, now, statusCode, reason, retryAfterDuration)
-	if err := s.updateSnapshot(ctx, account, snapshot, nil); err != nil {
+	if err := s.updateSnapshot(ctx, account, snapshot, nil, BillingGroupInfo{}); err != nil {
 		return nil, err
 	}
 	return snapshot, nil
@@ -953,12 +982,13 @@ func (s *UpstreamBillingProbeService) updateSnapshot(
 	account *Account,
 	snapshot *UpstreamBillingProbeSnapshot,
 	rateMultiplier *float64,
+	group BillingGroupInfo,
 ) error {
 	writer, ok := s.accountRepo.(upstreamBillingProbeSnapshotWriter)
 	if !ok {
 		return ErrUpstreamBillingProbeUnavailable
 	}
-	return writer.UpdateUpstreamBillingProbeSnapshot(ctx, account, snapshot, rateMultiplier)
+	return writer.UpdateUpstreamBillingProbeSnapshot(ctx, account, snapshot, rateMultiplier, group)
 }
 
 func parseUpstreamBillingProbeResponse(body []byte) (map[string]any, error) {
