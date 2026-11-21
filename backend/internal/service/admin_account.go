@@ -667,6 +667,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	// An omitted status does not own authentication state. Explicit status edits
 	// override any inherited preservation marker just as scheduling intent does.
 	ctx = withAccountStatusPreservation(ctx, input.Status == "")
+	ctx = withAccountExtraUpdateFields(ctx, input.Extra)
 	if err := ValidateAccountCostMultiplierExtra(input.Extra); err != nil {
 		return nil, err
 	}
