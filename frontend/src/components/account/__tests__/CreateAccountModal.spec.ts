@@ -30,6 +30,7 @@ const {
   exchangeCodeMock,
   refreshOpenAITokenMock,
   probeUpstreamBillingMock,
+  previewUpstreamGroup,
   syncUpstreamModelsMock,
   showWarningMock,
   importCodexSessionMock,
@@ -42,6 +43,7 @@ const {
   exchangeCodeMock: vi.fn(),
   refreshOpenAITokenMock: vi.fn(),
   probeUpstreamBillingMock: vi.fn(),
+  previewUpstreamGroup: vi.fn(),
   syncUpstreamModelsMock: vi.fn(),
   showWarningMock: vi.fn(),
   importCodexSessionMock: vi.fn(),
@@ -79,6 +81,7 @@ vi.mock('@/api/admin', () => ({
       exchangeCode: exchangeCodeMock,
       refreshOpenAIToken: refreshOpenAITokenMock,
       probeUpstreamBilling: probeUpstreamBillingMock,
+      previewUpstreamGroup,
       syncUpstreamModels: syncUpstreamModelsMock,
       checkMixedChannelRisk: vi.fn().mockResolvedValue({ has_risk: false }),
       importCodexSession: importCodexSessionMock,
@@ -1111,6 +1114,25 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
       wrapper.unmount()
       await flushPromises()
     }
+  })
+
+  it('fills the name and notes from the unsaved API key and its adaptive Chat URL', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'Kimi')
+    await wrapper.get('[data-testid="cn-adaptive-base-url-chat_completions"]').setValue('https://relay.example/v1')
+    await wrapper.get('form input[type="password"]').setValue('test-key')
+    previewUpstreamGroup.mockResolvedValue({ name: '标准组', notes: '共享账号' })
+
+    await selectButtonByText(wrapper, 'admin.accounts.upstreamBilling.syncGroup')
+    await flushPromises()
+
+    expect(previewUpstreamGroup).toHaveBeenCalledWith({
+      platform: 'kimi', base_url: 'https://relay.example/v1', api_key: 'test-key', proxy_id: null
+    }, expect.anything())
+    expect(wrapper.get<HTMLInputElement>('[data-tour="account-form-name"]').element.value).toBe('标准组')
+    expect(wrapper.get<HTMLTextAreaElement>('textarea').element.value).toBe('共享账号')
+    expect(createAccountMock).not.toHaveBeenCalled()
+    wrapper.unmount()
   })
 
   it('can create a passthrough account with model filtering enabled', async () => {

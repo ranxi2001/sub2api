@@ -456,6 +456,12 @@ export default {
         }
       },
       upstreamBilling: {
+        syncGroup: 'Sync upstream group name and notes',
+        saveGroup: 'Sync and save upstream group name and notes',
+        groupCredentials: 'Enter the upstream URL and API key. Re-enter the key after changing the URL or proxy.',
+        groupUnavailable: 'The upstream returned no group name or description to sync.',
+        groupFailed: 'Failed to sync upstream group details',
+        groupSynced: 'Account name and notes synced',
         newAPI: {
           upstreamVerificationFailed: "The upstream query could not be completed. Check site connectivity, the user ID, and the access token, including permission to read the wallet and complete token inventory.",
           keyNotOwned: "This account API key was not found in this user token inventory.",

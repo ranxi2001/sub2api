@@ -19,11 +19,12 @@ import {
   setPlatformCatalog
 } from '@/constants/platformCatalog'
 
-const { updateAccountMock, syncUpstreamModelsMock, checkMixedChannelRiskMock, authIsSimpleMode, showErrorMock, showWarningMock } = vi.hoisted(() => ({
+const { updateAccountMock, syncUpstreamModelsMock, previewUpstreamGroup, checkMixedChannelRiskMock, authIsSimpleMode, showErrorMock, showWarningMock } = vi.hoisted(() => ({
   showErrorMock: vi.fn(),
   showWarningMock: vi.fn(),
   updateAccountMock: vi.fn(),
   syncUpstreamModelsMock: vi.fn(),
+  previewUpstreamGroup: vi.fn(),
   checkMixedChannelRiskMock: vi.fn(),
   authIsSimpleMode: { value: true }
 }))
@@ -56,6 +57,7 @@ vi.mock('@/api/admin', () => ({
       getManagementCapabilities: vi.fn().mockResolvedValue({ web_search_enabled: false, account_quota_notify_enabled: false }),
       update: updateAccountMock,
       syncUpstreamModels: syncUpstreamModelsMock,
+      previewUpstreamGroup,
       checkMixedChannelRisk: checkMixedChannelRiskMock
     },
     settings: {
@@ -1446,6 +1448,28 @@ describe('EditAccountModal', () => {
     await flushPromises()
     expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.openai_copilot_sdk).toBeUndefined()
     expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.unrelated_setting).toBe('keep')
+  })
+
+  it('uses the saved connection until the administrator changes the upstream', async () => {
+    const account = buildAccount()
+    account.notes = 'local notes'
+    const wrapper = mountModal(account)
+    const sync = wrapper.getComponent({ name: 'UpstreamGroupSyncButton' }).get('button')
+    previewUpstreamGroup.mockResolvedValue({ name: 'Updated group' })
+    await sync.trigger('click')
+    await flushPromises()
+    expect(previewUpstreamGroup).toHaveBeenLastCalledWith({ account_id: account.id }, expect.anything())
+    expect(wrapper.get<HTMLInputElement>('[data-tour="edit-account-form-name"]').element.value).toBe('Updated group')
+    expect(wrapper.get<HTMLTextAreaElement>('textarea').element.value).toBe('local notes')
+
+    await wrapper.get('input[placeholder="https://api.openai.com"]').setValue('https://new-relay.example')
+    expect(sync.element.disabled).toBe(true)
+    await wrapper.get('input[type="password"]').setValue('replacement-key')
+    await sync.trigger('click')
+    expect(previewUpstreamGroup).toHaveBeenLastCalledWith({
+      platform: 'openai', base_url: 'https://new-relay.example', api_key: 'replacement-key', proxy_id: null
+    }, expect.anything())
+    wrapper.unmount()
   })
 
   it.each(['apikey', 'oauth'])('can opt a passthrough %s account into model filtering without changing groups', async (type) => {

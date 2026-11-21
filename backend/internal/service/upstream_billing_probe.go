@@ -629,28 +629,18 @@ func (s *UpstreamBillingProbeService) SetAccountEnabled(ctx context.Context, acc
 	return s.accountRepo.UpdateExtra(ctx, accountID, updates)
 }
 
-func (s *UpstreamBillingProbeService) probeLoadedAccount(ctx context.Context, account *Account, intervalMinutes int) (*UpstreamBillingProbeSnapshot, error) {
-	now := s.currentTime().UTC()
-	if s.newAPIRepo != nil && (!account.IsGateway() || account.GetCredential(GatewayUpstreamKindCredentialKey) == "new_api") {
-		binding, err := s.newAPIRepo.GetBinding(ctx, account.ID)
-		if err != nil {
-			return nil, newAPIError("storage_unavailable")
-		}
-		if binding != nil && binding.Fingerprint == NewAPIAccountFingerprint(account) {
-			return s.probeNewAPIAccount(ctx, account, binding, intervalMinutes)
-		}
-	}
-	if account.IsGateway() && account.GetCredential(GatewayUpstreamKindCredentialKey) == "new_api" {
-		return s.persistProbeFailure(ctx, account, intervalMinutes, now, 0, "new_api_authorization_required", 0)
-	}
+var errBillingUnsupported = errors.New("unsupported")
+
+func (s *UpstreamBillingProbeService) billingProbeTarget(account *Account) (upstreamBillingProbeTarget, string, error) {
+	var result upstreamBillingProbeTarget
 	if s.accountTestService == nil || s.accountTestService.httpUpstream == nil {
-		return s.persistProbeFailure(ctx, account, intervalMinutes, now, 0, "transport_unavailable", 0)
+		return result, "", errors.New("transport_unavailable")
 	}
 	// 平台放宽后取数直读 credentials：所有 API-key 平台的密钥与自定义上游
 	// 统一存放在 credentials.api_key / credentials.base_url。
 	apiKey := account.GetCredential("api_key")
 	if apiKey == "" {
-		return s.persistProbeFailure(ctx, account, intervalMinutes, now, 0, "missing_api_key", 0)
+		return result, "", errors.New("missing_api_key")
 	}
 	baseURL := account.GetCredential("base_url")
 	if account.RoutesProtocolByInbound() && account.IsAdaptiveAPIProtocol() {
@@ -666,23 +656,79 @@ func (s *UpstreamBillingProbeService) probeLoadedAccount(ctx context.Context, ac
 		// 填成官方默认域，且提供 us-east-1.api.x.ai 等官方区域预设）⇒
 		// 必无 /v1/sub2api/billing；不发请求，直接记 unsupported，避免
 		// 拿账号 Key 周期性请求官方域的不存在路径。
-		return s.persistProbeFailure(ctx, account, intervalMinutes, now, 0, "unsupported", 0)
+		return result, "", errBillingUnsupported
 	}
 	normalizedBaseURL, err := s.accountTestService.validateUpstreamBaseURL(baseURL)
 	if err != nil {
-		return s.persistProbeFailure(ctx, account, intervalMinutes, now, 0, "invalid_base_url", 0)
+		return result, "", errors.New("invalid_base_url")
 	}
 	proxyURL := ""
 	if account.ProxyID != nil {
 		if account.Proxy == nil {
-			return s.persistProbeFailure(ctx, account, intervalMinutes, now, 0, "proxy_unavailable", 0)
+			return result, "", errors.New("proxy_unavailable")
 		}
 		if account.Proxy.ID != *account.ProxyID {
-			return nil, ErrUpstreamBillingProbeIdentityChanged
+			return result, "", ErrUpstreamBillingProbeIdentityChanged
 		}
 		proxyURL = account.Proxy.URL()
 	}
-	target := upstreamBillingProbeTarget{apiKey: apiKey, proxyURL: proxyURL}
+	return upstreamBillingProbeTarget{apiKey: apiKey, proxyURL: proxyURL}, normalizedBaseURL, nil
+}
+
+// PreviewGroup fetches only the display text for the account editor. It does not persist probe results.
+func (s *UpstreamBillingProbeService) PreviewGroup(ctx context.Context, account *Account) (*BillingGroupInfo, error) {
+	// Older Antigravity relays store the same static credentials under type "upstream".
+	legacyRelay := account != nil && account.Platform == PlatformAntigravity && account.Type == AccountTypeUpstream
+	if !isUpstreamBillingProbeAccount(account) && !legacyRelay {
+		return nil, ErrUpstreamBillingProbeAccountInvalid
+	}
+	target, baseURL, err := s.billingProbeTarget(account)
+	if errors.Is(err, errBillingUnsupported) {
+		return &BillingGroupInfo{}, nil
+	}
+	if err != nil {
+		return nil, infraerrors.New(http.StatusBadGateway, "UPSTREAM_GROUP_PREVIEW_FAILED", "Could not read group information from the upstream")
+	}
+	reply := s.fetchUpstreamProbeBody(ctx, account, target, buildOpenAIEndpointURL(baseURL, "/v1/sub2api/billing")+"?include=group", upstreamBillingProbeMaxBodyBytes, upstreamBillingProbeRequestTimeout)
+	if reply.failure == "" && (reply.statusCode == http.StatusNotFound || reply.statusCode == http.StatusMethodNotAllowed) {
+		return &BillingGroupInfo{}, nil
+	}
+	if reply.failure != "" || reply.statusCode < 200 || reply.statusCode >= 300 {
+		return nil, infraerrors.New(http.StatusBadGateway, "UPSTREAM_GROUP_PREVIEW_FAILED", "Could not read group information from the upstream")
+	}
+	var info struct {
+		BillingGroupInfo
+		Object        string `json:"object"`
+		SchemaVersion int    `json:"schema_version"`
+		BillingScope  string `json:"billing_scope"`
+	}
+	if json.Unmarshal(reply.body, &info) != nil || info.Object != "sub2api.key_billing" || info.SchemaVersion != 1 || info.BillingScope != "token" {
+		return nil, infraerrors.New(http.StatusBadGateway, "UPSTREAM_GROUP_PREVIEW_INVALID", "Invalid upstream billing response")
+	}
+	return &info.BillingGroupInfo, nil
+}
+
+func (s *UpstreamBillingProbeService) probeLoadedAccount(ctx context.Context, account *Account, intervalMinutes int) (*UpstreamBillingProbeSnapshot, error) {
+	now := s.currentTime().UTC()
+	if s.newAPIRepo != nil && (!account.IsGateway() || account.GetCredential(GatewayUpstreamKindCredentialKey) == "new_api") {
+		binding, err := s.newAPIRepo.GetBinding(ctx, account.ID)
+		if err != nil {
+			return nil, newAPIError("storage_unavailable")
+		}
+		if binding != nil && binding.Fingerprint == NewAPIAccountFingerprint(account) {
+			return s.probeNewAPIAccount(ctx, account, binding, intervalMinutes)
+		}
+	}
+	if account.IsGateway() && account.GetCredential(GatewayUpstreamKindCredentialKey) == "new_api" {
+		return s.persistProbeFailure(ctx, account, intervalMinutes, now, 0, "new_api_authorization_required", 0)
+	}
+	target, normalizedBaseURL, err := s.billingProbeTarget(account)
+	if errors.Is(err, ErrUpstreamBillingProbeIdentityChanged) {
+		return nil, err
+	}
+	if err != nil {
+		return s.persistProbeFailure(ctx, account, intervalMinutes, now, 0, err.Error(), 0)
+	}
 	rateResult := s.fetchUpstreamProbeBody(ctx, account, target,
 		buildOpenAIEndpointURL(normalizedBaseURL, "/v1/sub2api/billing"), upstreamBillingProbeMaxBodyBytes, upstreamBillingProbeRequestTimeout)
 	previousRate := account.BillingRateMultiplier()

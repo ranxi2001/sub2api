@@ -50,7 +50,15 @@
       class="space-y-5"
     >
       <div>
-        <label class="input-label">{{ t('admin.accounts.accountName') }}</label>
+        <div class="mb-1 flex flex-wrap items-center justify-between gap-2">
+          <label class="input-label mb-0">{{ t('admin.accounts.accountName') }}</label>
+          <UpstreamGroupSyncButton
+            v-if="form.type === 'apikey'"
+            v-model:name="form.name"
+            v-model:notes="form.notes"
+            :source="upstreamGroupSource"
+          />
+        </div>
         <input
           v-model="form.name"
           type="text"
@@ -4445,6 +4453,7 @@ import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
 import OpenAIProxySettings from '@/components/account/OpenAIProxySettings.vue'
 import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import UpstreamRequestIdHeaderField from '@/components/account/UpstreamRequestIdHeaderField.vue'
+import UpstreamGroupSyncButton from '@/components/account/UpstreamGroupSyncButton.vue'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
@@ -4973,11 +4982,23 @@ function onCnPresetSelect(preset: { mode: CnAccountMode; protocol: CnApiProtocol
   apiKeyBaseUrl.value = preset.url
 }
 
-const syncPreviewCredentials = computed(() => {
-  if (!apiKeyValue.value.trim()) return undefined
-  const baseUrl = isMultiProtocolPlatform.value && apiProtocol.value === 'adaptive'
+const previewBaseUrl = computed(() =>
+  isMultiProtocolPlatform.value && apiProtocol.value === 'adaptive'
     ? adaptiveBaseUrls.value.chat_completions.trim() || apiKeyBaseUrl.value.trim()
     : apiKeyBaseUrl.value.trim()
+)
+
+const upstreamGroupSource = computed(() => {
+  const antigravity = form.platform === 'antigravity'
+  const baseURL = antigravity ? upstreamBaseUrl.value.trim() : previewBaseUrl.value
+  const apiKey = (antigravity ? upstreamApiKey.value : apiKeyValue.value).trim()
+  return baseURL && apiKey
+    ? { platform: form.platform, base_url: baseURL, api_key: apiKey, proxy_id: form.proxy_id }
+    : null
+})
+
+const syncPreviewCredentials = computed(() => {
+  if (!apiKeyValue.value.trim()) return undefined
   const modelMapping = buildModelMappingObject(
     modelRestrictionMode.value,
     allowedModels.value,
@@ -4986,7 +5007,7 @@ const syncPreviewCredentials = computed(() => {
   return {
     platform: form.platform,
     type: form.type,
-    base_url: baseUrl || undefined,
+    base_url: previewBaseUrl.value || undefined,
     api_key: apiKeyValue.value.trim(),
     proxy_id: authStore.isObserver ? undefined : form.proxy_id ?? undefined,
     ...(modelMapping ? { model_mapping: modelMapping } : {})

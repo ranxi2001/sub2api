@@ -293,6 +293,12 @@ export default {
         }
       },
       upstreamBilling: {
+        syncGroup: '同步上游分组名称与备注',
+        saveGroup: '同步并保存上游分组名称与备注',
+        groupCredentials: '请填写上游地址和 API Key。更换地址或代理后需重新输入密钥。',
+        groupUnavailable: '上游没有返回可同步的分组名称或描述。',
+        groupFailed: '同步上游分组信息失败',
+        groupSynced: '账号名称与备注已同步',
         newAPI: {
           upstreamVerificationFailed: "无法完成上游查询。请检查站点是否可访问、用户 ID 和访问令牌是否有效，以及令牌是否允许查询钱包和完整令牌列表。",
           keyNotOwned: "该账号的 API Key 未出现在此用户的令牌列表中。",
