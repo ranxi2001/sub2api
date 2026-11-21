@@ -14,7 +14,8 @@ import (
 )
 
 type usageBillingRepository struct {
-	db *sql.DB
+	db        *sql.DB
+	admission billingAdmission
 }
 
 func NewUsageBillingRepository(_ *dbent.Client, sqlDB *sql.DB) service.UsageBillingBatchRepository {
