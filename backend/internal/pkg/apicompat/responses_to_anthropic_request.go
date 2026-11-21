@@ -236,7 +236,10 @@ func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMess
 
 		case item.Type == "function_call_output":
 			// function_call_output → user message with tool_result block
-			contentJSON := responsesFunctionOutputToAnthropicContent(item)
+			contentJSON, err := responsesFunctionOutputToAnthropicContent(item)
+			if err != nil {
+				return nil, nil, err
+			}
 			block := AnthropicContentBlock{
 				Type:      "tool_result",
 				ToolUseID: fromResponsesCallIDToAnthropic(item.CallID),
@@ -340,14 +343,14 @@ func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMess
 	return system, messages, nil
 }
 
-func responsesFunctionOutputToAnthropicContent(item ResponsesInputItem) json.RawMessage {
+func responsesFunctionOutputToAnthropicContent(item ResponsesInputItem) (json.RawMessage, error) {
 	if len(item.outputRaw) == 0 {
 		output := item.Output
 		if output == "" {
 			output = "(empty)"
 		}
 		content, _ := json.Marshal(output)
-		return content
+		return content, nil
 	}
 
 	var parts []ResponsesContentPart
@@ -359,24 +362,32 @@ func responsesFunctionOutputToAnthropicContent(item ResponsesInputItem) json.Raw
 				if part.Text != "" {
 					blocks = append(blocks, AnthropicContentBlock{Type: "text", Text: part.Text})
 				}
-			case "input_image":
-				if source := dataURIToAnthropicImageSource(part.ImageURL); source != nil {
-					blocks = append(blocks, AnthropicContentBlock{Type: "image", Source: source})
+			case "input_image", "input_file":
+				uri := part.ImageURL
+				if part.Type == "input_file" {
+					uri = part.FileData
+				}
+				block, err := dataURIToAnthropicMediaBlock(uri)
+				if err != nil {
+					return nil, err
+				}
+				if block != nil {
+					blocks = append(blocks, *block)
 				}
 			}
 		}
 		if len(blocks) > 0 {
 			content, _ := json.Marshal(blocks)
-			return content
+			return content, nil
 		}
 		if len(parts) == 0 {
 			content, _ := json.Marshal("(empty)")
-			return content
+			return content, nil
 		}
 	}
 
 	content, _ := json.Marshal(item.Output)
-	return content
+	return content, nil
 }
 
 // normalizeAnthropicToolPairing rebuilds the message sequence so it satisfies
@@ -575,21 +586,17 @@ func convertResponsesUserToAnthropicContent(raw json.RawMessage) (json.RawMessag
 					Text: p.Text,
 				})
 			}
-		case "input_image":
-			src := dataURIToAnthropicImageSource(p.ImageURL)
-			if src != nil {
-				blocks = append(blocks, AnthropicContentBlock{
-					Type:   "image",
-					Source: src,
-				})
+		case "input_image", "input_file":
+			uri := p.ImageURL
+			if p.Type == "input_file" {
+				uri = p.FileData
 			}
-		case "input_file":
-			src := dataURIToAnthropicFileSource(p.FileData)
-			if src != nil {
-				blocks = append(blocks, AnthropicContentBlock{
-					Type:   "document",
-					Source: src,
-				})
+			block, err := dataURIToAnthropicMediaBlock(uri)
+			if err != nil {
+				return nil, err
+			}
+			if block != nil {
+				blocks = append(blocks, *block)
 			}
 		}
 	}
@@ -652,36 +659,6 @@ func fromResponsesCallIDToAnthropic(id string) string {
 		return "toolu_" + id
 	}
 	return id
-}
-
-// dataURIToAnthropicImageSource parses a data URI into an AnthropicImageSource.
-func dataURIToAnthropicImageSource(dataURI string) *AnthropicImageSource {
-	if !strings.HasPrefix(dataURI, "data:") {
-		return nil
-	}
-	// Format: data:<media_type>;base64,<data>
-	rest := strings.TrimPrefix(dataURI, "data:")
-	semicolonIdx := strings.Index(rest, ";")
-	if semicolonIdx < 0 {
-		return nil
-	}
-	mediaType := rest[:semicolonIdx]
-	rest = rest[semicolonIdx+1:]
-	if !strings.HasPrefix(rest, "base64,") {
-		return nil
-	}
-	data := strings.TrimPrefix(rest, "base64,")
-	return &AnthropicImageSource{
-		Type:      "base64",
-		MediaType: mediaType,
-		Data:      data,
-	}
-}
-
-// dataURIToAnthropicFileSource parses a data URI into a document source.
-// file_id-only parts are not convertible here and stay dropped.
-func dataURIToAnthropicFileSource(fileData string) *AnthropicImageSource {
-	return dataURIToAnthropicImageSource(fileData)
 }
 
 // mergeConsecutiveMessages merges consecutive messages with the same role

@@ -3670,8 +3670,14 @@ func convertClaudeMessagesToGeminiContents(messages any, toolUseIDToName map[str
 						toolImageParts = append(toolImageParts, images...)
 					}
 					parts = append(parts, map[string]any{"functionResponse": response})
-				case "image":
+				case "image", "document":
 					if src, ok := bm["source"].(map[string]any); ok {
+						if src["type"] == "text" && src["media_type"] == "text/plain" {
+							if data, ok := src["data"].(string); ok {
+								parts = append(parts, map[string]any{"text": data})
+							}
+							continue
+						}
 						if srcType, _ := src["type"].(string); srcType == "base64" {
 							mediaType, _ := src["media_type"].(string)
 							data, _ := src["data"].(string)
@@ -3753,6 +3759,13 @@ func extractClaudeContentText(v any) string {
 					_, _ = sb.WriteString(text)
 				}
 			}
+			if pm["type"] == "document" {
+				if source, ok := pm["source"].(map[string]any); ok && source["type"] == "text" && source["media_type"] == "text/plain" {
+					if text, ok := source["data"].(string); ok {
+						_, _ = sb.WriteString(text)
+					}
+				}
+			}
 		}
 		return sb.String()
 	default:
@@ -3770,7 +3783,7 @@ func extractClaudeToolResultImageParts(v any) []any {
 	parts := make([]any, 0)
 	for _, part := range arr {
 		pm, ok := part.(map[string]any)
-		if !ok || pm["type"] != "image" {
+		if !ok || (pm["type"] != "image" && pm["type"] != "document") {
 			continue
 		}
 		source, ok := pm["source"].(map[string]any)

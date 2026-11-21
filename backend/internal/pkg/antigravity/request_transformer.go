@@ -535,6 +535,10 @@ func buildParts(content json.RawMessage, toolIDToName map[string]string, allowDu
 			parts = append(parts, part)
 
 		case "image", "document":
+			if block.Type == "document" && block.Source != nil && block.Source.Type == "text" && block.Source.MediaType == "text/plain" {
+				parts = append(parts, GeminiPart{Text: block.Source.Data})
+				continue
+			}
 			if block.Source != nil && block.Source.Type == "base64" && strings.TrimSpace(block.Source.Data) != "" {
 				parts = append(parts, GeminiPart{
 					InlineData: &GeminiInlineData{
@@ -632,6 +636,13 @@ func parseToolResultContent(content json.RawMessage, isError bool) string {
 		for _, item := range arr {
 			if text, ok := item["text"].(string); ok {
 				texts = append(texts, text)
+			}
+			if item["type"] == "document" {
+				if source, ok := item["source"].(map[string]any); ok && source["type"] == "text" && source["media_type"] == "text/plain" {
+					if text, ok := source["data"].(string); ok {
+						texts = append(texts, text)
+					}
+				}
 			}
 		}
 		result := strings.Join(texts, "\n")
