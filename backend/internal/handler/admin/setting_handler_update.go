@@ -382,9 +382,10 @@ type UpdateSettingsRequest struct {
 	SubscriptionEnabled *bool `json:"subscription_enabled"`
 
 	// Model Plaza feature switches + description
-	ModelPlazaEnabled     *bool   `json:"model_plaza_enabled"`
-	ModelPlazaRequireAuth *bool   `json:"model_plaza_require_auth"`
-	ModelPlazaDescription *string `json:"model_plaza_description"`
+	ModelPlazaEnabled      *bool    `json:"model_plaza_enabled"`
+	ModelPlazaRequireAuth  *bool    `json:"model_plaza_require_auth"`
+	ModelPlazaDescription  *string  `json:"model_plaza_description"`
+	ModelPlazaUSDToCNYRate *float64 `json:"model_plaza_usd_to_cny_rate" binding:"omitempty,gt=0"`
 
 	// Plugin management menu visibility switch; plugin runtime is unaffected.
 	PluginManagementEnabled *bool `json:"plugin_management_enabled"`
@@ -2397,6 +2398,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.ModelPlazaRequireAuth
 		}(),
+		ModelPlazaUSDToCNYRate: func() float64 {
+			if req.ModelPlazaUSDToCNYRate != nil {
+				return *req.ModelPlazaUSDToCNYRate
+			}
+			return previousSettings.ModelPlazaUSDToCNYRate
+		}(),
 		ModelPlazaDescription: func() string {
 			if req.ModelPlazaDescription != nil {
 				return *req.ModelPlazaDescription
@@ -2890,6 +2897,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		ModelPlazaEnabled:       updatedSettings.ModelPlazaEnabled,
 		ModelPlazaRequireAuth:   updatedSettings.ModelPlazaRequireAuth,
 		ModelPlazaDescription:   updatedSettings.ModelPlazaDescription,
+		ModelPlazaUSDToCNYRate:  updatedSettings.ModelPlazaUSDToCNYRate,
 		PluginManagementEnabled: updatedSettings.PluginManagementEnabled,
 
 		SupportTicketEnabled: updatedSettings.SupportTicketEnabled,

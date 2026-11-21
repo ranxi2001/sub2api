@@ -124,6 +124,8 @@ export default {
           enabledHint: '开启后顶栏显示入口，页面可通过 /model-plaza 独立访问。',
           requireAuth: '需要登录才可访问',
           requireAuthHint: '开启后未登录访问将跳转登录页；关闭则公开可见，匿名访客仅展示非专属分组。',
+          displayExchangeRate: '广场美元／人民币展示汇率',
+          displayExchangeRateHint: '1 USD 对应的 CNY，默认 7.00。固定参考值，仅供广场币种切换；不修改充值、订阅、渠道价或扣费。',
           priceDescription: '价格说明（Markdown）',
           priceDescriptionHint: '展示在模型广场页面顶部，可用于说明计费规则、汇率、优惠活动等。',
         },

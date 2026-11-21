@@ -83,6 +83,10 @@ export interface ModelPlazaGroup {
 }
 
 export interface ModelPlazaResponse {
+  /** Display reference only: CNY per real USD, independent of wallet credits. */
+  usd_to_cny_rate?: number
+  /** Wallet credits received per CNY before recharge bonuses and fees. */
+  credit_per_cny?: number
   /** 管理员配置的全局价格说明（Markdown）。 */
   description: string
   groups: ModelPlazaGroup[]

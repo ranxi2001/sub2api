@@ -102,8 +102,10 @@ type modelPlazaGroup struct {
 
 // modelPlazaResponse 广场页响应。
 type modelPlazaResponse struct {
-	Description string            `json:"description"`
-	Groups      []modelPlazaGroup `json:"groups"`
+	Description  string            `json:"description"`
+	USDToCNYRate float64           `json:"usd_to_cny_rate"`
+	CreditPerCNY float64           `json:"credit_per_cny"`
+	Groups       []modelPlazaGroup `json:"groups"`
 }
 
 // Get 返回模型广场数据。
@@ -163,8 +165,10 @@ func (h *ModelPlazaHandler) Get(c *gin.Context) {
 	c.Writer.Header().Add("Vary", "Accept-Language")
 	out := toLocalizedModelPlazaGroups(visible, userRates, c.GetHeader("Accept-Language"), deniedModels)
 	response.Success(c, modelPlazaResponse{
-		Description: rt.Description,
-		Groups:      out,
+		Description:  rt.Description,
+		USDToCNYRate: rt.USDToCNYRate,
+		CreditPerCNY: rt.CreditPerCNY,
+		Groups:       out,
 	})
 }
 

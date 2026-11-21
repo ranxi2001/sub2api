@@ -85,6 +85,16 @@ describe.each([
     expect(wrapper.text()).not.toContain('modelPlaza.table.')
   })
 
+  it.each(['image', 'video', 'per_request'] as const)('converts %s prices with its applicable media rate', (mode) => {
+    const wrapper = render(mediaModel(mode), {
+      imageRateIndependent: true, imageRateMultiplier: 2,
+      videoRateIndependent: true, videoRateMultiplier: 3,
+      priceDisplay: { currency: 'CNY', usdToCny: 7, creditPerCny: 2 }
+    })
+    const price = wrapper.findAll('tbody td')[1].text()
+    expect(price).toContain(mode === 'image' ? '¥0.54' : mode === 'video' ? '¥0.81' : '¥0.135')
+  })
+
   it.each(['image', 'per_request'] as const)('preserves %s labels, units and prices', (mode) => {
     const cells = render(mediaModel(mode)).findAll('tbody td')
     expect(cells[0].text()).toContain(mode === 'image' ? language.imageLabel : language.requestLabel)
@@ -108,7 +118,7 @@ describe.each([
     expect(cells[2].text()).toBe('$2.00')
     expect(cells[3].text()).toContain('$1.00')
     expect(cells[3].text()).toContain('$0.25')
-    expect(wrapper.find('thead').text()).toContain(language.locale === 'zh' ? '$ / 1M token' : '$ / 1M tokens')
+    expect(wrapper.find('thead').text()).toContain(language.locale === 'zh' ? '/ 1M token' : '/ 1M tokens')
     expect(wrapper.find('tbody').text()).not.toContain(language.suffix)
     expect(cells[7].text()).toContain('0.25x')
   })

@@ -6,6 +6,26 @@
       <p class="mt-1.5 text-sm text-gray-500 dark:text-dark-400">{{ t('modelPlaza.description') }}</p>
     </div>
 
+    <div v-if="!loading && !error && response" class="rounded-2xl border border-gray-100 bg-white px-5 py-4 dark:border-dark-700 dark:bg-dark-800/50" data-testid="plaza-currency">
+      <div v-if="priceDisplay" class="flex flex-wrap items-center justify-between gap-3">
+        <div class="flex flex-wrap items-center gap-3">
+          <span class="text-sm font-medium text-gray-700 dark:text-dark-200">{{ t('modelPlaza.currency.label') }}</span>
+          <div class="inline-flex rounded-lg bg-gray-100 p-1 dark:bg-dark-900" role="group" :aria-label="t('modelPlaza.currency.label')">
+            <button v-for="code in currencies" :key="code" type="button"
+              class="rounded-md px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
+              :class="currency === code ? 'bg-white text-primary-700 shadow-sm dark:bg-dark-700 dark:text-primary-300' : 'text-gray-500 hover:text-gray-900 dark:text-dark-400 dark:hover:text-white'"
+              :aria-pressed="currency === code" :data-currency="code" @click="currency = code">
+              {{ code === 'CNY' ? '¥' : '$' }} {{ t(`modelPlaza.currency.${code}`) }}
+            </button>
+          </div>
+        </div>
+        <span class="text-xs text-gray-500 dark:text-dark-400">{{ t('modelPlaza.currency.reference', { rate: exchangeRateLabel }) }}</span>
+      </div>
+      <p class="text-xs leading-5 text-gray-500 dark:text-dark-400" :class="{ 'mt-2': priceDisplay }">
+        {{ priceDisplay ? t('modelPlaza.currency.explanation', { credits: priceDisplay.creditPerCny }) : t('modelPlaza.currency.unavailable') }}
+      </p>
+    </div>
+
     <!-- 全局价格说明(管理员配置,Markdown) -->
     <div
       v-if="descriptionHtml"
@@ -50,7 +70,7 @@
 
       <!-- 分组分节的模型清单(默认按生效倍率升序) -->
       <div v-if="filteredGroups.length > 0" class="space-y-5">
-        <PlazaGroupSection v-for="g in filteredGroups" :key="g.id" :group="g" />
+        <PlazaGroupSection v-for="g in filteredGroups" :key="g.id" :group="g" :price-display="priceDisplay" />
       </div>
       <div
         v-else
@@ -72,6 +92,7 @@ import PlazaFilterBar from './PlazaFilterBar.vue'
 import PlazaGroupSection from './PlazaGroupSection.vue'
 import type { ModelPlazaGroup, ModelPlazaResponse } from '@/api/modelPlaza'
 import { useAuthStore } from '@/stores/auth'
+import { hasPlazaCurrencyRates, type PlazaCurrency, type PlazaPriceDisplay } from '@/utils/plazaCurrency'
 
 const props = defineProps<{
   response: ModelPlazaResponse | null
@@ -84,6 +105,16 @@ const props = defineProps<{
 const { t } = useI18n()
 const authStore = useAuthStore()
 const isAuthenticated = computed(() => authStore.isAuthenticated)
+
+const currency = ref<PlazaCurrency>('CNY')
+const currencies: PlazaCurrency[] = ['CNY', 'USD']
+const priceDisplay = computed<PlazaPriceDisplay | undefined>(() => {
+  const usdToCny = props.response?.usd_to_cny_rate
+  const creditPerCny = props.response?.credit_per_cny
+  if (!hasPlazaCurrencyRates(usdToCny, creditPerCny)) return undefined
+  return { currency: currency.value, usdToCny: usdToCny!, creditPerCny: creditPerCny! }
+})
+const exchangeRateLabel = computed(() => priceDisplay.value?.usdToCny.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 }))
 
 const selectedPlatform = ref<string>('all')
 const selectedGroupId = ref<number | 'all'>('all')

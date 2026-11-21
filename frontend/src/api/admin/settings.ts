@@ -777,6 +777,7 @@ export interface SystemSettings {
   model_plaza_enabled: boolean;
   model_plaza_require_auth: boolean;
   model_plaza_description: string;
+  model_plaza_usd_to_cny_rate?: number;
   plugin_management_enabled: boolean;
 
   // Support tickets (网站工单) switch + form config
@@ -1139,6 +1140,7 @@ export interface UpdateSettingsRequest {
   model_plaza_enabled?: boolean;
   model_plaza_require_auth?: boolean;
   model_plaza_description?: string;
+  model_plaza_usd_to_cny_rate?: number;
   plugin_management_enabled?: boolean;
 
   // Support tickets (网站工单) switch + form config

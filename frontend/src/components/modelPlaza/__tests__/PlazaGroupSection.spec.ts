@@ -92,6 +92,14 @@ function mountSection(g: ModelPlazaGroup) {
 const NOTE = 'modelPlaza.detail.longContextDisabledNote'
 
 describe('PlazaGroupSection 长上下文说明', () => {
+  it('passes display currency to the table without changing group rates', async () => {
+    const wrapper = mountSection(group({ rate_multiplier: 0.5 }))
+    const priceDisplay = { currency: 'CNY' as const, usdToCny: 7, creditPerCny: 1 }
+    await wrapper.setProps({ priceDisplay })
+    expect(wrapper.findComponent(PlazaModelPricingTable).props()).toMatchObject({ priceDisplay, rateMultiplier: 0.5 })
+    wrapper.unmount()
+  })
+
   it('passes video-specific rates to the pricing table', () => {
     const wrapper = mountSection(group({ video_rate_independent: true, video_rate_multiplier: 0 }))
     expect(wrapper.findComponent(PlazaModelPricingTable).props()).toMatchObject({

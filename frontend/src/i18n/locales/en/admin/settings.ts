@@ -124,6 +124,8 @@ export default {
           enabledHint: 'When enabled, an entry appears in the header and the page is reachable at /model-plaza.',
           requireAuth: 'Require sign-in to access',
           requireAuthHint: 'When on, anonymous visitors are redirected to the login page; when off, the page is public and anonymous visitors only see non-exclusive groups.',
+          displayExchangeRate: 'Plaza USD/CNY display rate',
+          displayExchangeRateHint: 'CNY per USD, default 7.00. A fixed reference for plaza display only; recharge, subscriptions, channel prices and billing are unchanged.',
           priceDescription: 'Pricing notes (Markdown)',
           priceDescriptionHint: 'Rendered at the top of the plaza page. Use it for billing rules, exchange rates, promotions, etc.',
         },

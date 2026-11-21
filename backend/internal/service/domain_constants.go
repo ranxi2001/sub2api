@@ -592,7 +592,8 @@ const (
 
 	// SettingKeyModelPlazaDescription stores the Markdown blurb rendered at the top of
 	// the Model Plaza page (global pricing notes, exchange rate, promotions, ...).
-	SettingKeyModelPlazaDescription = "model_plaza_description"
+	SettingKeyModelPlazaDescription  = "model_plaza_description"
+	SettingKeyModelPlazaUSDToCNYRate = "model_plaza_usd_to_cny_rate"
 
 	// SettingKeyPluginManagementEnabled controls sidebar visibility only; it does
 	// not stop or otherwise change already loaded plugin runtimes.

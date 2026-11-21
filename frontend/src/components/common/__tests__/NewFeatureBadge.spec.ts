@@ -23,6 +23,7 @@ describe('NewFeatureBadge', () => {
 
 
   it.each([
+    ['model plaza currency', NEW_FEATURE_NOTICES.modelPlazaCurrency],
     ['image usage billing', NEW_FEATURE_NOTICES.imageUsageBilling],
     ['channel UltraFast pricing', NEW_FEATURE_NOTICES.channelUltrafastPricing],
     ['user live load', NEW_FEATURE_NOTICES.userLiveLoad],

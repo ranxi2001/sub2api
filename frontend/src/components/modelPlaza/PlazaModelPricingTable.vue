@@ -23,7 +23,7 @@
           </th>
           <th colspan="3" class="pz-bg pt-2 text-center">
             <div class="pz-title border-b pb-2 font-semibold">
-              {{ t('modelPlaza.table.paidPrice') }}
+              {{ t('modelPlaza.table.paidPrice') }} · {{ paidCurrencyLabel }}
               <span v-if="hasTokenPricing" class="pz-unit ml-1 normal-case font-normal">{{ t('modelPlaza.table.unitPerMillion') }}</span>
             </div>
           </th>
@@ -32,7 +32,7 @@
             class="border-l border-gray-100 pt-2 text-center dark:border-dark-700/60"
           >
             <div class="border-b border-gray-200 pb-2 text-gray-400 dark:border-dark-600 dark:text-dark-500">
-              {{ t('modelPlaza.table.officialPrice') }}
+              {{ t('modelPlaza.table.officialPrice') }} · {{ officialCurrencyLabel }}
               <span v-if="hasTokenPricing" class="ml-1 normal-case font-normal text-gray-400 dark:text-dark-500">{{ t('modelPlaza.table.unitPerMillion') }}</span>
             </div>
           </th>
@@ -80,7 +80,7 @@
               <span v-if="billingMode(m) === BILLING_MODE_TOKEN && (m.pricing?.image_minimum_charge ?? 0) > 0"
                 class="rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-700 dark:bg-amber-900/20 dark:text-amber-300"
                 data-image-minimum-charge :title="t('imageUsage.minimumHelp')">
-                {{ t('imageUsage.minimumBadge', { amount: m.pricing?.image_minimum_charge }) }}
+                {{ t('modelPlaza.currency.minimumCharge', { amount: formatPlazaPrice(m.pricing?.image_minimum_charge, 1, 'credit', props.priceDisplay) }) }}
               </span>
               <!-- 时段徽章紧跟模型名,其余徽章排在后面,空间不足时先换行的是它们 -->
               <span
@@ -338,7 +338,8 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import { useClipboard } from '@/composables/useClipboard'
-import { formatScaled, resolveIntervalPrices } from '@/utils/pricing'
+import { resolveIntervalPrices } from '@/utils/pricing'
+import { formatPlazaPrice, type PlazaPriceDisplay } from '@/utils/plazaCurrency'
 import { platformAccentColor, platformBadgeLightClass, platformLabel } from '@/utils/platformColors'
 import {
   BILLING_MODE_TOKEN,
@@ -361,6 +362,7 @@ function reasoningEffortMultipliers(model: PlazaModel): [string, number][] {
 }
 
 const props = defineProps<{
+  priceDisplay?: PlazaPriceDisplay
   models: PlazaModel[]
   /** 分组平台;实付分区底色随平台着色,未知平台回退品牌青。 */
   platform?: string
@@ -430,7 +432,8 @@ function billingModeLabel(m: PlazaModel): string {
 }
 
 /** 价格统一保底 2 位小数,更长的有效小数原样保留。 */
-const MIN_DECIMALS = 2
+const paidCurrencyLabel = computed(() => props.priceDisplay?.currency ?? t('modelPlaza.currency.credits'))
+const officialCurrencyLabel = computed(() => props.priceDisplay?.currency ?? 'USD')
 
 /** 表格行:每个模型一行标准价;配置了分时倍率的模型再按时段各加一行。 */
 interface PlazaRow {
@@ -460,7 +463,7 @@ function periodRate(period: PlazaTimePricingPeriod): number {
 function paidPerMillion(value: number | null | undefined, period: PlazaTimePricingPeriod | null = null): string {
   if (value == null) return '-'
   const rate = period ? periodRate(period) : effectiveRate.value
-  return formatScaled(value * rate, PER_MILLION, MIN_DECIMALS)
+  return formatPlazaPrice(value * rate, PER_MILLION, 'credit', props.priceDisplay)
 }
 
 /** 图片和视频分别使用对应的独立倍率开关。 */
@@ -482,13 +485,13 @@ function requestRate(m: PlazaModel): number {
 /** 非 token 单价乘该行生效倍率，不换算为每百万 token。 */
 function paidRequestPrice(m: PlazaModel, value: number | null | undefined): string {
   if (value == null) return '-'
-  return formatScaled(value * requestRate(m), 1, MIN_DECIMALS)
+  return formatPlazaPrice(value * requestRate(m), 1, 'credit', props.priceDisplay)
 }
 
 /** 官方参考价不乘倍率。 */
 function official(value: number | null | undefined): string {
   if (value == null) return '-'
-  return formatScaled(value, PER_MILLION, MIN_DECIMALS)
+  return formatPlazaPrice(value, PER_MILLION, 'usd', props.priceDisplay)
 }
 
 /** 非 token 计费的单位后缀:按图片 → “/ 张”,按视频 → “/ 秒”,按次 → “/ 次”。 */
