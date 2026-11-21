@@ -1,8 +1,6 @@
 name: Legend DeepSeek SSE hotfix
 
 on:
-  push:
-    branches: [hotfix/legend-deepseek-sse-prefix-20261121]
   workflow_dispatch:
 
 permissions:
