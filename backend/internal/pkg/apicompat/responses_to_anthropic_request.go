@@ -9,17 +9,30 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 )
 
-// ResponsesToAnthropicRequest converts a Responses API request into an
-// Anthropic Messages request. This is the reverse of AnthropicToResponses and
-// enables Anthropic platform groups to accept OpenAI Responses API requests
-// by converting them to the native /v1/messages format before forwarding upstream.
+// ResponsesToAnthropicOptions separates actual Anthropic targets from callers
+// that use Anthropic blocks only as an intermediate representation.
+type ResponsesToAnthropicOptions struct {
+	// StrictMedia validates MIME and encoding for an actual Anthropic target.
+	// Leave false when these blocks are only an intermediate representation.
+	StrictMedia bool
+}
+
+// ResponsesToAnthropicRequest retains the permissive media carrier policy for
+// existing intermediate-protocol callers. Anthropic targets must opt into strict
+// media validation with ResponsesToAnthropicRequestWithOptions.
 func ResponsesToAnthropicRequest(req *ResponsesRequest) (*AnthropicRequest, error) {
+	return ResponsesToAnthropicRequestWithOptions(req, ResponsesToAnthropicOptions{})
+}
+
+// ResponsesToAnthropicRequestWithOptions converts a request with an explicit
+// target media policy; all other request conversion semantics are shared.
+func ResponsesToAnthropicRequestWithOptions(req *ResponsesRequest, opts ResponsesToAnthropicOptions) (*AnthropicRequest, error) {
 	isOpus55 := claude.IsOpus55(req.Model)
 	isSonnet55 := claude.IsSonnet55(req.Model)
 	isHaiku55 := claude.IsHaiku55(req.Model)
 	isFableOrMythos52 := claude.IsFable52(req.Model) || claude.IsMythos52(req.Model)
 	isAdaptiveModel := isOpus55 || isSonnet55 || isHaiku55 || isFableOrMythos52
-	system, messages, err := convertResponsesInputToAnthropic(req.Instructions, req.Input, isAdaptiveModel)
+	system, messages, err := convertResponsesInputToAnthropicWithOptions(req.Instructions, req.Input, isAdaptiveModel, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -185,6 +198,10 @@ func mapResponsesEffortToAnthropic(effort string) string {
 // a Responses API instructions + input array. Returns the system as raw JSON
 // (for Anthropic's polymorphic system field) and a list of Anthropic messages.
 func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMessage, preserveThinking bool) (json.RawMessage, []AnthropicMessage, error) {
+	return convertResponsesInputToAnthropicWithOptions(instructions, inputRaw, preserveThinking, ResponsesToAnthropicOptions{})
+}
+
+func convertResponsesInputToAnthropicWithOptions(instructions string, inputRaw json.RawMessage, preserveThinking bool, opts ResponsesToAnthropicOptions) (json.RawMessage, []AnthropicMessage, error) {
 	var systemParts []string
 	if strings.TrimSpace(instructions) != "" {
 		systemParts = append(systemParts, strings.TrimSpace(instructions))
@@ -236,7 +253,10 @@ func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMess
 
 		case item.Type == "function_call_output":
 			// function_call_output → user message with tool_result block
-			contentJSON := responsesFunctionOutputToAnthropicContent(item)
+			contentJSON, err := responsesFunctionOutputToAnthropicContent(item, opts)
+			if err != nil {
+				return nil, nil, err
+			}
 			block := AnthropicContentBlock{
 				Type:      "tool_result",
 				ToolUseID: fromResponsesCallIDToAnthropic(item.CallID),
@@ -271,7 +291,7 @@ func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMess
 			}
 
 		case item.Role == "user":
-			content, err := convertResponsesUserToAnthropicContent(item.Content)
+			content, err := convertResponsesUserToAnthropicContent(item.Content, opts)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -309,7 +329,7 @@ func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMess
 			if item.Content == nil {
 				continue
 			}
-			content, err := convertResponsesUserToAnthropicContent(item.Content)
+			content, err := convertResponsesUserToAnthropicContent(item.Content, opts)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -340,14 +360,14 @@ func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMess
 	return system, messages, nil
 }
 
-func responsesFunctionOutputToAnthropicContent(item ResponsesInputItem) json.RawMessage {
+func responsesFunctionOutputToAnthropicContent(item ResponsesInputItem, opts ResponsesToAnthropicOptions) (json.RawMessage, error) {
 	if len(item.outputRaw) == 0 {
 		output := item.Output
 		if output == "" {
 			output = "(empty)"
 		}
 		content, _ := json.Marshal(output)
-		return content
+		return content, nil
 	}
 
 	var parts []ResponsesContentPart
@@ -359,24 +379,32 @@ func responsesFunctionOutputToAnthropicContent(item ResponsesInputItem) json.Raw
 				if part.Text != "" {
 					blocks = append(blocks, AnthropicContentBlock{Type: "text", Text: part.Text})
 				}
-			case "input_image":
-				if source := dataURIToAnthropicImageSource(part.ImageURL); source != nil {
-					blocks = append(blocks, AnthropicContentBlock{Type: "image", Source: source})
+			case "input_image", "input_file":
+				if part.Type == "input_file" && !opts.StrictMedia {
+					// Legacy intermediate tool outputs recognized images only.
+					continue
+				}
+				block, err := responsesMediaPartToAnthropicBlock(part, opts)
+				if err != nil {
+					return nil, err
+				}
+				if block != nil {
+					blocks = append(blocks, *block)
 				}
 			}
 		}
 		if len(blocks) > 0 {
 			content, _ := json.Marshal(blocks)
-			return content
+			return content, nil
 		}
 		if len(parts) == 0 {
 			content, _ := json.Marshal("(empty)")
-			return content
+			return content, nil
 		}
 	}
 
 	content, _ := json.Marshal(item.Output)
-	return content
+	return content, nil
 }
 
 // normalizeAnthropicToolPairing rebuilds the message sequence so it satisfies
@@ -547,7 +575,7 @@ func anthropicContentIsOnlyBlankText(content json.RawMessage) bool {
 	return true
 }
 
-func convertResponsesUserToAnthropicContent(raw json.RawMessage) (json.RawMessage, error) {
+func convertResponsesUserToAnthropicContent(raw json.RawMessage, opts ResponsesToAnthropicOptions) (json.RawMessage, error) {
 	if len(raw) == 0 {
 		return json.Marshal("") // empty string content
 	}
@@ -575,21 +603,13 @@ func convertResponsesUserToAnthropicContent(raw json.RawMessage) (json.RawMessag
 					Text: p.Text,
 				})
 			}
-		case "input_image":
-			src := dataURIToAnthropicImageSource(p.ImageURL)
-			if src != nil {
-				blocks = append(blocks, AnthropicContentBlock{
-					Type:   "image",
-					Source: src,
-				})
+		case "input_image", "input_file":
+			block, err := responsesMediaPartToAnthropicBlock(p, opts)
+			if err != nil {
+				return nil, err
 			}
-		case "input_file":
-			src := dataURIToAnthropicFileSource(p.FileData)
-			if src != nil {
-				blocks = append(blocks, AnthropicContentBlock{
-					Type:   "document",
-					Source: src,
-				})
+			if block != nil {
+				blocks = append(blocks, *block)
 			}
 		}
 	}
@@ -652,36 +672,6 @@ func fromResponsesCallIDToAnthropic(id string) string {
 		return "toolu_" + id
 	}
 	return id
-}
-
-// dataURIToAnthropicImageSource parses a data URI into an AnthropicImageSource.
-func dataURIToAnthropicImageSource(dataURI string) *AnthropicImageSource {
-	if !strings.HasPrefix(dataURI, "data:") {
-		return nil
-	}
-	// Format: data:<media_type>;base64,<data>
-	rest := strings.TrimPrefix(dataURI, "data:")
-	semicolonIdx := strings.Index(rest, ";")
-	if semicolonIdx < 0 {
-		return nil
-	}
-	mediaType := rest[:semicolonIdx]
-	rest = rest[semicolonIdx+1:]
-	if !strings.HasPrefix(rest, "base64,") {
-		return nil
-	}
-	data := strings.TrimPrefix(rest, "base64,")
-	return &AnthropicImageSource{
-		Type:      "base64",
-		MediaType: mediaType,
-		Data:      data,
-	}
-}
-
-// dataURIToAnthropicFileSource parses a data URI into a document source.
-// file_id-only parts are not convertible here and stay dropped.
-func dataURIToAnthropicFileSource(fileData string) *AnthropicImageSource {
-	return dataURIToAnthropicImageSource(fileData)
 }
 
 // mergeConsecutiveMessages merges consecutive messages with the same role
