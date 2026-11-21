@@ -198,7 +198,7 @@ const profitRequestCostMultiplierSQL = `CASE WHEN u.procurement_cost_snapshot IS
  CASE WHEN u.procurement_cost_snapshot->>'version'='1'
   AND u.procurement_cost_snapshot->>'basis'='total_cost'
   AND u.procurement_cost_snapshot->>'account_type'='gateway'
-  AND u.procurement_cost_snapshot->>'provider'='new_api'
+  AND u.procurement_cost_snapshot->>'provider' IN ('new_api','sub2api')
   AND u.procurement_cost_snapshot->>'target_platform'=u.platform
   AND u.platform<>'' AND u.platform<>'composite'
   AND jsonb_typeof(u.procurement_cost_snapshot->'cost_multiplier')='number'

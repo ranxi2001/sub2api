@@ -198,6 +198,7 @@ func gatewayProtocolAccountFromSnapshot(ctx context.Context, selected, current *
 	view := scope
 	view.gatewayProtocolSource = &scope
 	view.gatewayProtocolModel = model
+	view.gatewayBindingModel = selectionModel
 	view.Type = AccountTypeAPIKey
 	view.Platform = string(family)
 	// Provider-specific alternate credentials/endpoints are not gateway inputs.

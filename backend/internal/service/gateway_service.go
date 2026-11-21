@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -1519,6 +1520,17 @@ func mixedListingModelAllowed(groupPlatform, model string) bool {
 }
 
 func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64, platform string) []string {
+	legacy := s.cachedAvailableModels(ctx, groupID, platform)
+	models, err := s.gatewayCatalogModels(ctx, groupID, platform)
+	if err != nil || len(models) == 0 {
+		return legacy
+	}
+	combined := append(slices.Clone(legacy), models...)
+	slices.Sort(combined)
+	return slices.Compact(combined)
+}
+
+func (s *GatewayService) cachedAvailableModels(ctx context.Context, groupID *int64, platform string) []string {
 	cacheKey := modelsListCacheKey(groupID, platform)
 	if s.modelsListCache != nil {
 		if cached, found := s.modelsListCache.Get(cacheKey); found {

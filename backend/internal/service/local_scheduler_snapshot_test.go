@@ -46,7 +46,7 @@ func TestLocalSchedulerSnapshotFailsClosed(t *testing.T) {
 	if _, _, err := svc.ListSchedulableAccounts(context.Background(), nil, PlatformOpenAI, false); !errors.Is(err, ErrLocalSchedulerSnapshotUnavailable) {
 		t.Fatal(err)
 	}
-	bucket := svc.bucketFor(nil, PlatformOpenAI, schedulerModeForPlatform(PlatformOpenAI, false))
+	bucket := svc.bucketFor(nil, PlatformOpenAI, svc.resolveMode(PlatformOpenAI, false))
 	if err := store.Publish(bucket, 1, now.Add(time.Minute), []*Account{}); err != nil {
 		t.Fatal(err)
 	}

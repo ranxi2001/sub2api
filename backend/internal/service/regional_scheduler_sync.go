@@ -403,7 +403,7 @@ func (r *RegionalSchedulerReader) ListGatewayRequestCandidates(ctx context.Conte
 		return nil, nil, ErrGatewayAccountGroup
 	}
 	forced, _ := ctx.Value(ctxkey.ForcePlatform).(string)
-	bucket := SchedulerBucket{GroupID: groupID, Platform: target, Mode: schedulerModeForPlatform(target, forced != "")}
+	bucket := SchedulerBucket{GroupID: groupID, Platform: target, Mode: (&SchedulerSnapshotService{}).resolveMode(target, forced != "")}
 	var accounts []Account
 	for _, entry := range doc.Buckets {
 		if entry.Bucket == bucket {

@@ -83,6 +83,7 @@ type Account struct {
 	// admission compares the neutral gateway identity before rebuilding a view.
 	gatewayProtocolSource  *Account
 	gatewayProtocolModel   string
+	gatewayBindingModel    string
 	gatewayMessagesView    *Account
 	gatewaySelectionTarget string
 

@@ -98,6 +98,9 @@ func (a *Account) IsModelAllowedInGroup(groupID *int64, requestedModel string) b
 	if a == nil || groupID == nil {
 		return true
 	}
+	if a.gatewayBindingModel != "" {
+		requestedModel = a.gatewayBindingModel
+	}
 	allowed := a.GroupAllowedModels(*groupID)
 	if len(allowed) == 0 {
 		return true

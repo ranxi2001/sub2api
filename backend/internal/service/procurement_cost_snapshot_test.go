@@ -93,3 +93,17 @@ func TestProcurementSnapshotZeroDisabledConversionAndUnresolvedTarget(t *testing
 		require.Nil(t, log.ProcurementCostSnapshot.CostMultiplier, "composite cannot decide the currency scale")
 	}
 }
+
+func TestProcurementSnapshotSub2APIDeclaredRate(t *testing.T) {
+	account := &Account{Type: AccountTypeGateway, Credentials: map[string]any{GatewayUpstreamKindCredentialKey: "sub2api"},
+		Extra: map[string]any{UpstreamBillingProbeExtraKey: &UpstreamBillingProbeSnapshot{
+			Status: UpstreamBillingProbeStatusOK, LastAttemptAt: time.Now(),
+			Data: map[string]any{"billing_scope": "token", "resolved_rate_multiplier": .14, "peak_rate_enabled": false},
+		}}}
+	for _, target := range []string{PlatformKimi, PlatformOpenAI} {
+		log := &UsageLog{Platform: target}
+		captureGatewayProcurementCost(log, account)
+		require.NotNil(t, log.ProcurementCostSnapshot.CostMultiplier)
+		require.Equal(t, .14, *log.ProcurementCostSnapshot.CostMultiplier)
+	}
+}

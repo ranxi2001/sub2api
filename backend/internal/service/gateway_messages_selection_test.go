@@ -175,3 +175,35 @@ func TestGatewayProtocolRegionalAssignmentAndRemoval(t *testing.T) {
 	_, err = (&OpenAIGatewayService{schedulerSnapshot: snapshot}).openAIGatewaySelectionView(ctx, &accounts[0])
 	require.Error(t, err)
 }
+
+func (r *gatewayMessagesCandidateRepo) ListSchedulableByGroupID(context.Context, int64) ([]Account, error) {
+	return nil, nil
+}
+
+func TestGatewayProtocolCatalogFollowsLiveBindings(t *testing.T) {
+	base, ctx := gatewayProtocolFixture(PlatformOpenAI)
+	base.account.Credentials["model_mapping"] = map[string]any{"public-alias": "upstream", "other": "hidden"}
+	base.account.AccountGroups[0].AllowedModels = []string{"public-alias"}
+	svc := &GatewayService{accountRepo: &gatewayMessagesCandidateRepo{gatewayProtocolAdmissionRepo: base}}
+	want := []string{"public-alias"}
+	require.Equal(t, want, svc.GetAvailableModels(ctx, &base.group.ID, PlatformOpenAI))
+	models, err := svc.GetGroupModelCatalog(ctx, base.group.ID, PlatformOpenAI)
+	require.NoError(t, err)
+	require.Equal(t, want, models)
+	base.account.GroupIDs, base.account.AccountGroups = nil, nil
+	require.Empty(t, svc.GetAvailableModels(ctx, &base.group.ID, PlatformOpenAI))
+}
+
+func TestGatewayProtocolOpenAIChannelModelKeepsBinding(t *testing.T) {
+	base, ctx := gatewayProtocolFixture(PlatformOpenAI)
+	ctx = WithGatewayOpenAISelection(ctx, "public", "public")
+	base.account.AccountGroups[0].AllowedModels = []string{"public"}
+	base.account.Credentials["model_mapping"] = map[string]any{"public": "mapped"}
+	view, err := prepareGatewayProtocolAccount(ctx, base.account, base, "openai", "channel-model")
+	require.NoError(t, err)
+	require.True(t, view.IsModelAllowedInGroup(&base.group.ID, "channel-model"))
+	require.True(t, supportsOpenAIRequestModel(view, "channel-model", false))
+	base.account.AccountGroups[0].AllowedModels = []string{"channel-model"}
+	_, err = prepareGatewayProtocolAccount(ctx, base.account, base, "openai", "channel-model")
+	require.Error(t, err)
+}

@@ -3,11 +3,71 @@ package service
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/domain"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 )
+
+// gatewayCatalogModels enumerates configured names and platform defaults using
+// the same live group, membership and model admission as a forwarded request.
+func (s *GatewayService) gatewayCatalogModels(ctx context.Context, groupID *int64, target string) ([]string, error) {
+	spec, concrete := domain.LookupPlatform(target)
+	reader, _ := s.accountRepo.(GatewayRequestCandidateReader)
+	if groupID == nil || *groupID <= 0 || !concrete {
+		return nil, nil
+	}
+	family := spec.Gateway
+	if target == PlatformAntigravity {
+		family = domain.PlatformGatewayAnthropic
+	}
+	if snap := s.schedulerSnapshot; snap != nil && snap.localSnapshotReader != nil {
+		reader, _ = snap.localSnapshotReader.(GatewayRequestCandidateReader)
+		group, err := snap.GetGroupByIDLite(ctx, *groupID)
+		if err != nil {
+			return nil, err
+		}
+		ctx = context.WithValue(ctx, ctxkey.Group, group)
+		ctx = WithResolvedTargetPlatform(ctx, target)
+		ctx = withGatewaySelection(ctx, "catalog", "catalog", family)
+	}
+	if reader == nil {
+		return nil, nil
+	}
+	candidates, group, err := reader.ListGatewayRequestCandidates(ctx, *groupID, target)
+	if err != nil || len(candidates) == 0 || group == nil || group.ID != *groupID {
+		return nil, err
+	}
+	ctx = context.WithValue(ctx, ctxkey.Group, group)
+	ctx = WithResolvedTargetPlatform(ctx, target)
+	var result []string
+	for i := range candidates {
+		account := &candidates[i]
+		models := groupAllowedConcreteModels(account, groupID)
+		for name := range account.GetModelMapping() {
+			models = append(models, name)
+		}
+		if len(models) == 0 {
+			models = append(models, group.ModelAllowlist.Models...)
+			if !IsMultiProtocolAPIKeyProvider(target) {
+				models = append(models, DefaultModelIDsForPlatform(target)...)
+			}
+		}
+		for _, model := range models {
+			if model == "" || strings.Contains(model, "*") {
+				continue
+			}
+			modelCtx := withGatewaySelection(ctx, model, model, family)
+			if _, err := gatewayProtocolAccountFromSnapshot(modelCtx, account, account, group, family, model); err == nil {
+				result = append(result, model)
+			}
+		}
+	}
+	slices.Sort(result)
+	return slices.Compact(result), nil
+}
 
 // GetGroupModelCatalog is the fail-closed source for multi-group discovery.
 // Unlike the legacy listing API, an error or missing accounts never means
@@ -25,7 +85,16 @@ func (s *GatewayService) GetGroupModelCatalog(ctx context.Context, groupID int64
 		platforms = domain.CompositePrecedencePlatformIDs()
 	}
 	seen := make(map[string]struct{})
+	gatewayModels := make(map[string][]string)
 	for _, concrete := range platforms {
+		names, err := s.gatewayCatalogModels(ctx, &groupID, concrete)
+		if err != nil {
+			return nil, err
+		}
+		gatewayModels[concrete] = names
+		for _, model := range names {
+			seen[model] = struct{}{}
+		}
 		var visible []Account
 		for _, account := range accounts {
 			if account.Platform == concrete || mixedListingAccountAllowed(concrete, &account) {
@@ -106,6 +175,10 @@ func (s *GatewayService) GetGroupModelCatalog(ctx context.Context, groupID int64
 				upstream := strings.TrimSpace(route.UpstreamModel)
 				if upstream == "" {
 					upstream = model
+				}
+				if slices.Contains(gatewayModels[route.TargetPlatform], upstream) {
+					available[model] = struct{}{}
+					break
 				}
 				for _, account := range accounts {
 					if account.Platform == route.TargetPlatform && account.IsModelAllowedInGroup(&groupID, upstream) && account.IsModelSupported(upstream) {

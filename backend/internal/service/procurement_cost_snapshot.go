@@ -1,5 +1,7 @@
 package service
 
+import "github.com/Wei-Shaw/sub2api/internal/domain"
+
 // ProcurementCostSnapshot is request-time evidence, independent of the user
 // charge and account debit multiplier. A nil CostMultiplier means unknown, not
 // zero. A nil snapshot denotes history/legacy accounts, not a current estimate.
@@ -19,9 +21,17 @@ func captureGatewayProcurementCost(log *UsageLog, account *Account) {
 	provider := account.GetCredential(GatewayUpstreamKindCredentialKey)
 	snapshot := &ProcurementCostSnapshot{Version: 1, AccountType: AccountTypeGateway,
 		Provider: provider, TargetPlatform: log.Platform, Basis: "total_cost"}
-	if provider == "new_api" {
+	switch provider {
+	case "new_api":
 		if factor, ok := NewAPIGatewayCostForRequest(account, log.Platform); ok {
 			snapshot.CostMultiplier = &factor
+		}
+	case "sub2api":
+		if domain.IsConcretePlatform(log.Platform) && account.CostMultiplierAutoSyncEnabled() {
+			declaration := decodeUpstreamBillingProbeSnapshot(account.Extra)
+			if factor, ok := declaration.CostMultiplierToSync(); ok {
+				snapshot.CostMultiplier = &factor
+			}
 		}
 	}
 	log.ProcurementCostSnapshot = snapshot
