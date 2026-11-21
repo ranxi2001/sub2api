@@ -30,10 +30,13 @@ def required_tests(mode):
 def validate(mode, root):
     raw = (root / f'{mode}.jsonl').read_text()
     stderr = (root / f'{mode}.stderr').read_text()
-    events = [json.loads(line) for line in raw.splitlines() if line.startswith('{')]
+    try:
+        events = [json.loads(line) for line in raw.splitlines() if line.strip()]
+    except ValueError as exc:
+        raise AssertionError('non-JSON/corrupt Go test output') from exc
     output = ''.join(event.get('Output', '') for event in events) + stderr
     (root / f'{mode}.log').write_text(output)
-    assert not re.search(r'WARNING: DATA RACE|build failed|setup failed|no tests to run|panic:|fatal error:|test timed out', output), output[-8000:]
+    assert not re.search(r'WARNING: DATA RACE|build failed|setup failed|no tests to run|panic[: ]|fatal error:|runtime error:|SIGSEGV|test timed out', output), output[-8000:]
     assert not any(event.get('Action') == 'skip' for event in events), 'skip contamination'
     outcomes = {event['Test']: event['Action'] for event in events if event.get('Test') and event.get('Action') in ('pass', 'fail')}
     expected = {test: 'pass' for test in required_tests(mode)}

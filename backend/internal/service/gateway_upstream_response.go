@@ -1210,9 +1210,11 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 				continue
 			}
 			if _, err := io.WriteString(w, reverseToolNamesIfPresentString(c, block)); err != nil {
+				status.clientDisconnected = true
 				return err
 			}
 			if err := FlushGatewayResponse(w); err != nil {
+				status.clientDisconnected = true
 				return err
 			}
 			lastDataAt = time.Now()
@@ -1243,6 +1245,9 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 			}
 			if !ok {
 				if err := consumePending(); err != nil {
+					if status.clientDisconnected {
+						return clientGone(err)
+					}
 					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, err
 				}
 				status.readErr = io.EOF
@@ -1299,6 +1304,9 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 			line := ev.line
 			if line == "" {
 				if err := consumePending(); err != nil {
+					if status.clientDisconnected {
+						return clientGone(err)
+					}
 					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, err
 				}
 				continue

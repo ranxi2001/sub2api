@@ -1,5 +1,4 @@
 """Negative controls for the strict remote evidence validator (no Go needed)."""
-import copy
 import importlib.util
 import json
 import pathlib
@@ -30,13 +29,22 @@ class EvidenceControls(unittest.TestCase):
             self.exercise(lambda rows: rows.pop())
 
     def test_pollution(self):
-        for text in ['panic: injected', 'WARNING: DATA RACE', 'build failed', 'fatal error: crash', 'no tests to run', 'test timed out']:
+        for text in ['panic: injected', 'http: panic serving fixture', 'runtime error: injected', 'SIGSEGV', 'WARNING: DATA RACE', 'build failed', 'fatal error: crash', 'no tests to run', 'test timed out']:
             with self.subTest(text=text), self.assertRaises(AssertionError):
                 self.exercise(lambda rows: rows.append({'Output': text}))
 
     def test_skipped(self):
         with self.assertRaises(AssertionError):
             self.exercise(lambda rows: rows.append({'Action': 'skip', 'Test': 'extra'}))
+
+    def test_corrupt_output(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = pathlib.Path(d)
+            (root / 'green.jsonl').write_text('panic: injected outside JSON\n')
+            (root / 'green.stderr').write_text('')
+            (root / 'green.exitcode').write_text('0')
+            with self.assertRaises(AssertionError):
+                validator.validate('green', root)
 
     def test_nonzero(self):
         with self.assertRaises(AssertionError):

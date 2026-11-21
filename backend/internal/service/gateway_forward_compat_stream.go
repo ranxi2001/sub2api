@@ -272,14 +272,17 @@ func (st *anthropicCompatStream) failure() *anthropicCompatStreamFailure {
 func finishAnthropicCompatStreamFailure(c *gin.Context, writerSizeBeforeStream int, failure *anthropicCompatStreamFailure, result *ForwardResult, writeFailure func()) (*ForwardResult, error) {
 	var sseErr *sseStreamErrorEventError
 	isSSEError := errors.As(failure.err, &sseErr)
-	if !result.ClientDisconnect && (!isSSEError || c.Writer.Size() != writerSizeBeforeStream || result.Usage.hasObservedTokens()) {
+	clientDisconnected := result.ClientDisconnect
+	wroteFailure := false
+	if !clientDisconnected && (!isSSEError || c.Writer.Size() != writerSizeBeforeStream || result.Usage.hasObservedTokens()) {
 		writeFailure()
+		wroteFailure = true
 	}
 	if !result.Usage.hasObservedTokens() {
 		result = nil
 	}
 	if isAnthropicCompatSafetyRejection([]byte(extractCompatFailurePayload(failure.err))) {
-		if !isSSEError || c.Writer.Size() == writerSizeBeforeStream {
+		if !clientDisconnected && !wroteFailure {
 			writeFailure()
 		}
 		return result, fmt.Errorf("upstream safety rejection: %s", failure.message)
