@@ -460,5 +460,9 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 		}
 	}
 
+	if streamStatus.clientDisconnected {
+		return resultWithUsage(), streamStatus.failure().err
+	}
+
 	return resultWithUsage(), nil
 }

@@ -4,7 +4,9 @@ package service
 
 import (
 	"bufio"
+	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -200,5 +202,69 @@ func TestIssue985NativeRelays(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestIssue985CancellationResources(t *testing.T) {
+	for _, cancelClient := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cancel=%t", cancelClient), func(t *testing.T) {
+			reader, writer := io.Pipe()
+			defer writer.Close()
+			scanner := bufio.NewScanner(reader)
+			st := &anthropicCompatStream{body: reader, pump: newAnthropicNativeLinePump(scanner, 30*time.Millisecond), maxLineSize: 128}
+			if cancelClient {
+				gone := make(chan struct{})
+				close(gone)
+				st.clientGone = gone
+			}
+			_, _, ok := st.nextEvent()
+			require.False(t, ok)
+			failure := st.failure()
+			require.NotNil(t, failure)
+			if cancelClient {
+				require.ErrorIs(t, failure.err, context.Canceled)
+			} else {
+				require.ErrorIs(t, failure.err, errAnthropicNativeStreamIdle)
+			}
+			st.stop()
+			_, err := io.WriteString(writer, "fixture")
+			require.Error(t, err, "upstream body remains open")
+			timer := time.NewTimer(time.Second)
+			defer timer.Stop()
+			for {
+				select {
+				case _, ok := <-st.pump.events:
+					if !ok {
+						return
+					}
+				case <-timer.C:
+					t.Fatal("reader goroutine leaked")
+					return
+				}
+			}
+		})
+	}
+}
+
+func TestIssue985FinalWriteFailure(t *testing.T) {
+	for route, handle := range compatStreamHandlers() {
+		t.Run(route, func(t *testing.T) {
+			marker := `"finish_reason":"stop"`
+			if route == "responses" {
+				marker = "response.completed"
+			}
+			writer := &disconnectOnMarkerResponseWriter{ResponseRecorder: httptest.NewRecorder(), marker: marker}
+			c, _ := gin.CreateTestContext(writer)
+			c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+			result, err := handle(&GatewayService{}, &http.Response{Header: http.Header{}, Body: io.NopCloser(strings.NewReader(issue985Stream()))}, c)
+			require.ErrorIs(t, err, context.Canceled)
+			require.NotNil(t, result)
+			require.True(t, result.ClientDisconnect)
+			require.Equal(t, 17, result.Usage.InputTokens)
+			require.Equal(t, 3, result.Usage.OutputTokens)
+			require.Zero(t, writer.writesAfterError)
+			require.Zero(t, writer.flushesAfterError)
+			require.NotContains(t, writer.Body.String(), "[DONE]")
+		})
 	}
 }

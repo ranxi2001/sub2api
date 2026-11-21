@@ -347,7 +347,7 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 		out := reverseToolNamesIfPresentString(c, sse)
 		if _, err := fmt.Fprint(c.Writer, out); err != nil {
 			streamStatus.markClientDisconnected()
-			return false
+			return true
 		}
 		return false
 	}
@@ -382,7 +382,9 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 		for _, resEvt := range responsesEvents {
 			ccChunks := apicompat.ResponsesEventToChatChunks(&resEvt, ccState)
 			for _, chunk := range ccChunks {
-				writeChunk(chunk)
+				if writeChunk(chunk) {
+					return false
+				}
 			}
 		}
 		if len(responsesEvents) > 0 {
@@ -436,16 +438,25 @@ func (s *OpenAIGatewayService) handleCCStreamingFromNativeAnthropic(
 	for _, resEvt := range finalResEvents {
 		ccChunks := apicompat.ResponsesEventToChatChunks(&resEvt, ccState)
 		for _, chunk := range ccChunks {
-			writeChunk(chunk) //nolint:errcheck
+			if writeChunk(chunk) {
+				streamStatus.markClientDisconnected()
+				return resultWithUsage(), streamStatus.failure().err
+			}
 		}
 	}
 	finalCCChunks := apicompat.FinalizeResponsesChatStream(ccState)
 	for _, chunk := range finalCCChunks {
-		writeChunk(chunk) //nolint:errcheck
+		if writeChunk(chunk) {
+			streamStatus.markClientDisconnected()
+			return resultWithUsage(), streamStatus.failure().err
+		}
 	}
 
 	if !streamStatus.clientDisconnected {
-		fmt.Fprint(c.Writer, "data: [DONE]\n\n") //nolint:errcheck
+		if _, err := fmt.Fprint(c.Writer, "data: [DONE]\n\n"); err != nil {
+			streamStatus.markClientDisconnected()
+			return resultWithUsage(), streamStatus.failure().err
+		}
 		c.Writer.Flush()
 	}
 

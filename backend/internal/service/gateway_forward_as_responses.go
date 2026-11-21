@@ -742,7 +742,10 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 					continue
 				}
 				out := reverseToolNamesIfPresentString(c, sse)
-				fmt.Fprint(c.Writer, out) //nolint:errcheck
+				if _, err := fmt.Fprint(c.Writer, out); err != nil {
+					stream.markClientDisconnected()
+					return resultWithUsage(), stream.failure().err
+				}
 			}
 			c.Writer.Flush()
 		}
