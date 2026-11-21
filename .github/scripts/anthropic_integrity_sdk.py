@@ -3,13 +3,12 @@ import json
 import sys
 from urllib.parse import urlparse
 
-import httpx
 import openai
 
 endpoint, scenario, stream_flag = sys.argv[1:]
 assert urlparse(endpoint).hostname in ('127.0.0.1', 'localhost')
 streaming = stream_flag == 'true'
-with httpx.Client(trust_env=False, timeout=20) as transport:
+with openai.DefaultHttpx2Client(trust_env=False, timeout=20) as transport:
     with openai.OpenAI(api_key='synthetic-fixture', base_url=endpoint + '/v1', max_retries=0, http_client=transport) as client:
         messages = [{'role': 'user', 'content': scenario}]
         tools = [{'type': 'function', 'function': {'name': 'weather', 'parameters': {
