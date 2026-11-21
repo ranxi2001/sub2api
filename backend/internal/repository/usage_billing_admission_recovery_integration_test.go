@@ -79,8 +79,8 @@ func requireBillingOwnerRefs(t *testing.T, repo *usageBillingRepository, user in
 
 type admissionRecoverySnapshot struct {
 	State, Failure, Payload, Result, Balance, Quota string
-	Attempts, Logs, Claims                        int
-	NextAttempt, StagedAt                         time.Time
+	Attempts, Logs, Claims                          int
+	NextAttempt, StagedAt                           time.Time
 }
 
 func readAdmissionRecoverySnapshot(t *testing.T, repo *usageBillingRepository, cmd service.UsageBillingCommand) admissionRecoverySnapshot {

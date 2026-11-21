@@ -110,5 +110,8 @@ func supportsOpenAIRequestModel(account *Account, requestedModel string, require
 	if isRetiredOpenAISubscriptionModel(account, target) {
 		return false
 	}
+	if account.gatewayBindingModel != "" {
+		return account.gatewayProtocolSource.isModelMappingSupported(account.gatewayBindingModel)
+	}
 	return account.isModelMappingSupported(requestedModel)
 }

@@ -250,6 +250,12 @@
             <PlatformIcon platform="opencode_go" size="sm" />
             OpenCode
           </button>
+          <div class="flex items-center gap-1">
+            <button type="button" class="rounded-md px-3 py-2.5 text-sm font-medium" data-testid="platform-button-gateway"
+              :aria-pressed="form.platform === 'gateway'" :class="{ 'bg-white text-primary-600 shadow-sm dark:bg-dark-600': form.platform === 'gateway' }"
+              @click="form.platform = 'gateway'">Sub2API / New API</button>
+            <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.crossPlatformGatewayAccounts" :user-id="authStore.user?.id" />
+          </div>
           <!-- 没有专属界面的多协议供应商：通用表单（模式 / 协议 / 端点来自 profile） -->
           <button
             v-for="spec in extraMultiProtocolPlatforms"
@@ -272,6 +278,8 @@
         </div>
       </div>
 
+      <GatewayAccountFields v-if="form.platform === 'gateway'" v-model:kind="gatewayKind" v-model:base-url="gatewayBaseUrl"
+        v-model:api-key="gatewayApiKey" v-model:probe="upstreamBillingAutoProbeEnabled" />
       <QwenPlatformNotice :user-id="authStore.user?.id" />
       <QwenCacheSettings v-if="form.platform === 'qwen'" v-model:session-cache="qwenSessionCache" v-model:strict-affinity="qwenStrictAffinity" :user-id="authStore.user?.id" @base-url="setQwenBaseUrl" />
 
@@ -4430,6 +4438,7 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select from '@/components/common/Select.vue'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import MatureProviderImport, { type ProviderSelection } from './MatureProviderImport.vue'
+import GatewayAccountFields from './GatewayAccountFields.vue'
 import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
 import OpenAIProxySettings from '@/components/account/OpenAIProxySettings.vue'
 import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
@@ -4619,6 +4628,9 @@ const emit = defineEmits<{
 
 const appStore = useAppStore()
 const authStore = useAuthStore()
+const gatewayKind = ref<'sub2api' | 'new_api'>('sub2api')
+const gatewayBaseUrl = ref('')
+const gatewayApiKey = ref('')
 
 const hideAccountLongContextBilling = computed(() => {
   return allSelectedGroupsEnableLongContextPricing(form.group_ids, props.groups)
@@ -5448,6 +5460,7 @@ const form = reactive({
 
 // Helper to check if current type needs OAuth flow
 const isOAuthFlow = computed(() => {
+  if (form.platform === 'gateway') return false
   // Antigravity upstream 类型不需要 OAuth 流程
   if (form.platform === 'antigravity' && antigravityAccountType.value === 'upstream') {
     return false
@@ -5522,6 +5535,10 @@ watch(
 watch(
   [accountCategory, addMethod, antigravityAccountType, () => form.platform],
   ([category, method, agType]) => {
+    if (form.platform === 'gateway') {
+      form.type = 'gateway'
+      return
+    }
     // Antigravity upstream 类型（实际创建为 apikey）
     if (form.platform === 'antigravity' && agType === 'upstream') {
       form.type = 'apikey'
@@ -6238,6 +6255,9 @@ const resetForm = () => {
   allowOverages.value = false
   antigravityAccountType.value = 'oauth'
   antigravityProjectId.value = ''
+  gatewayKind.value = 'sub2api'
+  gatewayBaseUrl.value = ''
+  gatewayApiKey.value = ''
   upstreamBaseUrl.value = ''
   upstreamApiKey.value = ''
   vertexServiceAccountJson.value = ''
@@ -6534,6 +6554,14 @@ const handleVertexServiceAccountDrop = async (event: DragEvent) => {
 }
 
 const handleSubmit = async () => {
+  if (form.platform === 'gateway') {
+    await createAccountAndFinish('gateway', 'gateway', {
+      upstream_kind: gatewayKind.value,
+      base_url: gatewayBaseUrl.value,
+      api_key: gatewayApiKey.value
+    })
+    return
+  }
   if (!validateOpenAIRequestProxies()) return
   if (isOpenAIBPSOAuth.value && !bpsOAuthModels.value.some(model => model.trim())) {
     appStore.showError(t('admin.accounts.oauth.openai.excelModelsRequired'))
@@ -6979,7 +7007,7 @@ const createAccountAndFinish = async (
     expires_at: form.expires_at,
     // 上游倍率探测对全部 API-key 平台开放（antigravity upstream 走本 helper）；
     // 非 apikey 类型（bedrock/oauth）不传，后端不动作。
-    upstream_billing_probe_enabled: type === 'apikey' ? upstreamBillingAutoProbeEnabled.value : undefined,
+    upstream_billing_probe_enabled: type === 'apikey' || (type === 'gateway' && gatewayKind.value === 'sub2api') ? upstreamBillingAutoProbeEnabled.value : undefined,
     auto_pause_on_expired: autoPauseOnExpired.value
   })
 }

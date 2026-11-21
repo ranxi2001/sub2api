@@ -13,10 +13,12 @@ type newAPIAccounts struct {
 	*upstreamBillingProbeAccountRepo
 }
 
-func (r *newAPIAccounts) ListAllWithFilters(context.Context, string, string, string, string, int64, string) ([]Account, error) {
+func (r *newAPIAccounts) ListAllWithFilters(_ context.Context, platform, kind, _, _ string, _ int64, _ string) ([]Account, error) {
 	out := []Account{}
 	for _, a := range r.accounts {
-		out = append(out, *a)
+		if (platform == "" || platform == a.Platform) && (kind == "" || kind == a.Type) {
+			out = append(out, *a)
+		}
 	}
 	return out, nil
 }
@@ -67,6 +69,26 @@ func TestNewAPIConfigNoSaveForForeignOrUnmatchedAccounts(t *testing.T) {
 		require.Empty(t, r.bindings)
 	}
 }
+func TestNewAPIGatewayAuthorizationUsesDeclaredProvider(t *testing.T) {
+	s, auth, _, repo := newAPIConfigFixture()
+	gateway := repo.accounts[1]
+	gateway.Platform, gateway.Type = PlatformGateway, AccountTypeGateway
+	gateway.Credentials[GatewayUpstreamKindCredentialKey] = "sub2api"
+	_, err := s.GetNewAPIConfig(context.Background(), gateway.ID)
+	require.ErrorIs(t, err, ErrUpstreamBillingProbeAccountInvalid)
+
+	gateway.Credentials[GatewayUpstreamKindCredentialKey] = "new_api"
+	preview, err := s.SaveNewAPIConfig(context.Background(), gateway.ID, NewAPIConfigRequest{UserID: 7, AccountIDs: []int64{gateway.ID}, AccessToken: "synthetic-management-token"})
+	require.NoError(t, err)
+	require.Len(t, preview.Accounts, 1)
+	require.Nil(t, preview.Accounts[0].CostMultiplier)
+	require.Equal(t, 2.5, preview.Wallet.Amount)
+	config, err := s.GetNewAPIConfig(context.Background(), repo.accounts[2].ID)
+	require.NoError(t, err)
+	require.Len(t, config.Accounts, 2)
+	require.NotNil(t, auth.bindings[gateway.ID])
+}
+
 func TestNewAPIConfigSharedEncryptedAuthAndSafeRead(t *testing.T) {
 	s, r, h, accounts := newAPIConfigFixture()
 	h.bodies["GET /api/token/?p=0&page_size=100"] = `{"success":true,"data":{"items":[{"id":3,"key":"abcd**********wxyz","group":"vip"},{"id":4,"key":"nope**********xxxx","group":"auto"}],"total":2,"page":1,"page_size":100}}`

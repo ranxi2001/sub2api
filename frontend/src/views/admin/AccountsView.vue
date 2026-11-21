@@ -705,7 +705,9 @@ const selTypes = computed<AccountType[]>(() => {
 })
 const newAPIConfigAccount = ref<Account | null>(null)
 const handleConfigureNewAPIUpstream = (account: Account) => {
-  if (authStore.isAdmin && account.type === 'apikey') newAPIConfigAccount.value = account
+  if (authStore.isAdmin && (account.type === 'apikey' || (account.type === 'gateway' && account.credentials?.upstream_kind === 'new_api'))) {
+    newAPIConfigAccount.value = account
+  }
 }
 const showCreate = ref(false)
 const showEdit = ref(false)

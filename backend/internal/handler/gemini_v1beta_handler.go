@@ -392,6 +392,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		return
 	}
 
+	c.Request = c.Request.WithContext(service.WithGatewayGeminiSelection(c.Request.Context(), modelName))
 	stream := action == gemini.ActionStreamGenerateContent
 	reqLog = reqLog.With(zap.String("model", modelName), zap.String("action", action), zap.Bool("stream", stream))
 
@@ -817,8 +818,15 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 					return
 				}
 			}
-			// 转发层已写出错误响应；客户端断开时转发层不写，响应未提交则标记 499。
-			failoverClientGone(c)
+			// Fresh admission can fail before the forwarder writes a response.
+			// Preserve committed responses and client cancellation; never replay an ordinary error.
+			if !failoverClientGone(c) && !c.Writer.Written() && !service.IsResponseCommitted(c) {
+				// A stream read failure may leave headers staged before its first byte.
+				for _, header := range []string{"Content-Type", "Content-Length", "Content-Encoding", "Cache-Control", "Connection", "X-Accel-Buffering"} {
+					c.Writer.Header().Del(header)
+				}
+				googleError(c, http.StatusBadGateway, "Unable to forward request to upstream")
+			}
 			reqLog.Error("gemini.forward_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 			return
 		}

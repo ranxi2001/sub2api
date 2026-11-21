@@ -237,7 +237,7 @@ func (r *groupRepository) CreateFromSource(ctx context.Context, groupIn *service
 		 JOIN accounts a ON a.id = ag.account_id
 		 WHERE ag.group_id = $1
 		   AND a.deleted_at IS NULL
-		   AND (NOT $3 OR a.type <> $4)
+		   AND (NOT $3 OR (a.type <> $4 AND a.type <> 'gateway' AND a.platform <> 'gateway'))
 		 ON CONFLICT (account_id, group_id) DO NOTHING`,
 		sourceGroupID,
 		groupIn.ID,
@@ -289,11 +289,53 @@ func (r *groupRepository) GetByIDLite(ctx context.Context, id int64) (*service.G
 }
 
 func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) error {
+	client := r.client
+	var gatewayTx *dbent.Tx
+	if groupIn.RequireOAuthOnly {
+		var err error
+		gatewayTx, err = client.Tx(ctx)
+		if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
+			return err
+		}
+		if gatewayTx != nil {
+			defer func() { _ = gatewayTx.Rollback() }()
+			client = gatewayTx.Client()
+		}
+		// Membership writers hold FOR SHARE on this group. Serialize an OAuth
+		// restriction edit with them so neither side can bypass the new policy.
+		rows, err := client.QueryContext(ctx, `SELECT id FROM groups WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, groupIn.ID)
+		if err != nil {
+			return err
+		}
+		found := rows.Next()
+		rowErr := rows.Err()
+		_ = rows.Close()
+		if rowErr != nil {
+			return rowErr
+		}
+		if !found {
+			return service.ErrGroupNotFound
+		}
+		rows, err = client.QueryContext(ctx, `SELECT 1 FROM account_groups ag JOIN accounts a ON a.id=ag.account_id
+			WHERE ag.group_id=$1 AND a.deleted_at IS NULL AND (a.type='gateway' OR a.platform='gateway') LIMIT 1`, groupIn.ID)
+		if err != nil {
+			return err
+		}
+		hasGateway := rows.Next()
+		rowErr = rows.Err()
+		_ = rows.Close()
+		if rowErr != nil {
+			return rowErr
+		}
+		if hasGateway {
+			return service.ErrGatewayAccountGroup
+		}
+	}
 	modelPricing, err := json.Marshal(groupIn.ModelPricing)
 	if err != nil {
 		return fmt.Errorf("marshal group model pricing: %w", err)
 	}
-	builder := r.client.Group.UpdateOneID(groupIn.ID).
+	builder := client.Group.UpdateOneID(groupIn.ID).
 		SetName(groupIn.Name).
 		SetDescription(groupIn.Description).
 		SetPlatform(groupIn.Platform).
@@ -459,6 +501,12 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		return translatePersistenceError(err, service.ErrGroupNotFound, service.ErrGroupExists)
 	}
 	groupIn.UpdatedAt = updated.UpdatedAt
+	if gatewayTx != nil {
+		if err := enqueueSchedulerOutbox(ctx, client, service.SchedulerOutboxEventGroupChanged, nil, &groupIn.ID, nil); err != nil {
+			return err
+		}
+		return gatewayTx.Commit()
+	}
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventGroupChanged, nil, &groupIn.ID, nil); err != nil {
 		logger.LegacyPrintf("repository.group", "[SchedulerOutbox] enqueue group update failed: group=%d err=%v", groupIn.ID, err)
 	}

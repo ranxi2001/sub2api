@@ -621,7 +621,10 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 	}
 
 	account, err := s.getSchedulableAccount(ctx, accountID)
-	if err != nil || account == nil {
+	if err != nil {
+		return 0, nil, "", nil
+	}
+	if account == nil {
 		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
 		return 0, nil, "", nil
 	}
@@ -659,9 +662,21 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 	if vetoed, _ := openAIProfitControlVetoReason(ctx, account); vetoed {
 		return 0, nil, "", nil
 	}
-	if s.schedulerSnapshot != nil && s.accountRepo != nil {
-		latest, latestErr := s.accountRepo.GetByID(ctx, account.ID)
-		if latestErr != nil || latest == nil {
+	if s.schedulerSnapshot != nil && (s.accountRepo != nil || s.schedulerSnapshot.localSnapshotReader != nil) {
+		var latest *Account
+		var latestErr error
+		switch {
+		case account.gatewayProtocolSource != nil:
+			latest, latestErr = s.openAIGatewaySelectionView(ctx, account)
+		case s.schedulerSnapshot.localSnapshotReader != nil:
+			latest, latestErr = s.schedulerSnapshot.GetAccount(ctx, account.ID)
+		default:
+			latest, latestErr = s.accountRepo.GetByID(ctx, account.ID)
+		}
+		if latestErr != nil {
+			return 0, nil, "", nil
+		}
+		if latest == nil {
 			_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
 			return 0, nil, "", nil
 		}
