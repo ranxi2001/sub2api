@@ -31,7 +31,7 @@ func TestModelPlazaCurrencyRuntime(t *testing.T) {
 
 func TestModelPlazaCurrencyValidation(t *testing.T) {
 	for _, v := range []ModelPlazaCurrencySettings{
-		{WalletCurrency: "EUR"}, {CustomerCurrency: "invalid"}, {WalletUnitValue: -1},
+		{WalletCurrency: "EUR"}, {WalletCurrency: "USD", WalletUnitValue: 0}, {CustomerCurrency: "invalid"}, {WalletUnitValue: -1},
 		{OfficialPlatformCurrencies: map[string]string{"": "CNY"}},
 		{OfficialModelCurrencies: map[string]string{"model": "invalid"}},
 		{OfficialModelCurrencies: map[string]string{"model": "USD", " Model ": "CNY"}},

@@ -18,6 +18,7 @@ describe('configurable plaza currencies', () => {
     expect(plazaOfficialCurrency({ name:'custom/exception', platform:'custom-provider' }, display)).toBe('USD')
     expect(plazaOfficialCurrency({ name:'custom/exception-preview', platform:'custom-provider' }, display)).toBe('CNY')
     expect(plazaOfficialCurrency({ name:'example', platform:'another-provider' }, display)).toBe('USD')
+    expect(plazaOfficialCurrency({ name:'constructor', platform:'custom-provider' }, display)).toBe('CNY')
     expect(formatPlazaPrice(2.25e-6, 1e6, 'credit', { ...display, settings:{...settings,wallet_unit_value:0.5} })).toBe('¥1.125')
     expect(formatPlazaPrice(0, 1, 'credit', display)).toBe('¥0.00')
     expect(formatPlazaPrice(null, 1, 'credit', display)).toBe('-')

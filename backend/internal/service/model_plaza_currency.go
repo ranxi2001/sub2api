@@ -30,6 +30,9 @@ type ModelPlazaCurrencySettings struct {
 }
 
 func NormalizeModelPlazaCurrency(v ModelPlazaCurrencySettings) (ModelPlazaCurrencySettings, error) {
+	if strings.TrimSpace(v.WalletCurrency) != "" && v.WalletUnitValue == 0 {
+		return v, fmt.Errorf("wallet reference value must be positive when its currency is specified")
+	}
 	currency := func(raw string) (string, error) {
 		value := strings.ToUpper(strings.TrimSpace(raw))
 		if value == "" {

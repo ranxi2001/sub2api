@@ -19,8 +19,10 @@ export function hasPlazaCurrencyRates(usdToCny?: number, settings?: PlazaCurrenc
 
 export function plazaOfficialCurrency(model: Pick<PlazaModel, 'name' | 'platform'>, display?: PlazaPriceDisplay): PlazaCurrency {
   const settings = display?.settings
-  const currency = settings?.official_model_currencies?.[model.name.trim().toLowerCase()] ??
-    settings?.official_platform_currencies?.[model.platform.trim().toLowerCase()] ?? settings?.official_currency
+  const own = (map: Record<string, PlazaCurrency> | undefined, key: string) =>
+    map && Object.prototype.hasOwnProperty.call(map, key) ? map[key] : undefined
+  const currency = own(settings?.official_model_currencies, model.name.trim().toLowerCase()) ??
+    own(settings?.official_platform_currencies, model.platform.trim().toLowerCase()) ?? settings?.official_currency
   return currency === 'CNY' ? 'CNY' : 'USD'
 }
 
