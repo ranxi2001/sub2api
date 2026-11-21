@@ -19,6 +19,10 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+func withAnthropicFixtureContent(wire string) string {
+	return strings.Replace(wire, "\n\n", "\n\n"+anthropicFixtureTextSSE, 1)
+}
+
 func TestAnthropicPromptTotalSnapshots(t *testing.T) {
 	for _, test := range []struct {
 		name   string
@@ -121,6 +125,7 @@ func TestAnthropicPromptTotalCacheReadZeroForwardBoundary(t *testing.T) {
 			for _, terminal := range []string{"stop", "eof"} {
 				t.Run(field+"/"+route+"/"+terminal, func(t *testing.T) {
 					payload := "event: message_start\ndata: " + `{"type":"message_start","message":{"id":"msg_zero","type":"message","role":"assistant","model":"claude-sonnet-4","content":[],"usage":{"input_tokens":100,"prompt_tokens":100,"cache_read_input_tokens":20,"cache_creation_input_tokens":10}}}` + "\n\n"
+					payload = withAnthropicFixtureContent(payload)
 					for range 2 {
 						payload += "event: message_delta\ndata: " + `{"type":"message_delta","usage":{"` + field + `":0}}` + "\n\n"
 					}
@@ -150,7 +155,7 @@ func TestAnthropicPromptTotalCacheReadZeroForwardBoundary(t *testing.T) {
 						require.NotNil(t, result)
 						usage = result.usage
 					}
-					if terminal == "eof" && route != "typed" {
+					if terminal == "eof" {
 						require.ErrorContains(t, err, "missing terminal event")
 					} else {
 						require.NoError(t, err)
@@ -210,6 +215,7 @@ func TestAnthropicPromptTotalForwardBoundary(t *testing.T) {
 						inputField, wantInput = `"input_tokens":100,"prompt_tokens":100`, 50
 					}
 					payload := "event: message_start\ndata: " + `{"type":"message_start","message":{"id":"msg_total","type":"message","role":"assistant","model":"claude-sonnet-4","content":[],"usage":{` + inputField + `,"cache_creation":{"ephemeral_5m_input_tokens":20}}}}` + "\n\n"
+					payload = withAnthropicFixtureContent(payload)
 					for range 2 {
 						payload += "event: message_delta\ndata: " + `{"type":"message_delta","usage":{"cache_creation":{"ephemeral_1h_input_tokens":30}}}` + "\n\n"
 					}
@@ -255,7 +261,7 @@ func TestAnthropicPromptTotalForwardBoundary(t *testing.T) {
 					case "buffered native chat":
 						nativeResult, err = native.handleCCBufferedFromNativeAnthropic(response, ctx, "claude-sonnet-4", "claude-sonnet-4", "claude-sonnet-4", nil, time.Now())
 					}
-					if terminal == "eof" && (route == "messages" || route == "passthrough" || route == "native messages") {
+					if terminal == "eof" {
 						require.ErrorContains(t, err, "missing terminal event")
 					} else {
 						require.NoError(t, err)
@@ -275,7 +281,7 @@ func TestAnthropicPromptTotalForwardBoundary(t *testing.T) {
 					require.Equal(t, 30, result.Usage.CacheCreation1hTokens)
 					result.Model = "claude-sonnet-4"
 					assertAnthropicCacheCreationResultCosts(t, result, 0.16)
-					if strings.Contains(route, "messages") || route == "passthrough" {
+					if terminal == "eof" || strings.Contains(route, "messages") || route == "passthrough" {
 						return
 					}
 					var clientUsage gjson.Result

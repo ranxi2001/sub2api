@@ -87,6 +87,7 @@ func TestCompositeRouteRestoresPublicModelOnAnthropicForward(t *testing.T) {
 						"",
 						"",
 					}, "\n")
+					upstreamBody = withAnthropicFixtureContent(upstreamBody)
 					contentType = "text/event-stream"
 				}
 				upstream := &anthropicHTTPUpstreamRecorder{resp: &http.Response{
@@ -177,6 +178,7 @@ func TestCompositeRouteRestoresPublicModelOnChatCompletionsBridge(t *testing.T) 
 					"data: [DONE]",
 					"",
 				}, "\n")
+				upstreamBody = withAnthropicFixtureContent(upstreamBody)
 				contentType = "text/event-stream"
 			}
 			upstream := &httpUpstreamRecorder{resp: &http.Response{
@@ -227,7 +229,7 @@ func forwardCompositeAnthropicStream(t *testing.T, newAccount func() *Account, u
 	upstream := &anthropicHTTPUpstreamRecorder{resp: &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
-		Body:       io.NopCloser(strings.NewReader(upstreamSSE)),
+		Body:       io.NopCloser(strings.NewReader(withAnthropicFixtureContent(upstreamSSE))),
 	}}
 	svc := newForwardPartialUsageServiceForTest(upstream)
 
@@ -287,7 +289,7 @@ func TestCompositeRouteStreamRewritesOnlyMessageStartModel(t *testing.T) {
 func TestCompositeRoutePassthroughStreamKeepsMessageStartWithoutModel(t *testing.T) {
 	sse := forwardCompositeAnthropicStream(t, newAnthropicAPIKeyAccountForTest, strings.Join([]string{
 		`event: message_start`,
-		`data:{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","content":[],"usage":{"input_tokens":1}}}`,
+		`data:{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","content":[],"usage":{"input_tokens":1,"output_tokens":0}}}`,
 		"",
 		`event: message_stop`,
 		`data: {"type":"message_stop"}`,

@@ -26,6 +26,7 @@ func TestAnthropicCompatUpstreamObservation(t *testing.T) {
 					c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
 					beginUpstreamResponseModelObservation(c).Observe("stale-model", false)
 					body := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"actual-model\",\"usage\":{\"input_tokens\":3,\"speed\":\"fast\"}}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+					body = withAnthropicFixtureContent(body)
 
 					expectedModel, expectedTier := "actual-model", "fast"
 					switch scenario {

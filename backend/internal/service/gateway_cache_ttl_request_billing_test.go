@@ -81,7 +81,7 @@ func TestForward_PassthroughRecordsRequestedCacheTTL(t *testing.T) {
 			upstream := &anthropicHTTPUpstreamRecorder{resp: &http.Response{
 				StatusCode: http.StatusOK,
 				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
-				Body:       io.NopCloser(strings.NewReader(upstreamSSE)),
+				Body:       io.NopCloser(strings.NewReader(withAnthropicFixtureContent(upstreamSSE))),
 			}}
 			cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
 			svc := &GatewayService{

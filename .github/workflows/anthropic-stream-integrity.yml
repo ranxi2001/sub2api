@@ -1,0 +1,84 @@
+name: Anthropic stream integrity
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/internal/service/*anthropic*'
+      - 'backend/internal/service/gateway_forward*'
+      - 'backend/internal/service/gateway_upstream_response.go'
+      - 'backend/internal/service/gateway_service.go'
+      - 'backend/internal/handler/gateway_compat_stream_usage_test.go'
+      - 'backend/go.mod'
+      - 'backend/go.sum'
+      - 'backend/internal/handler/*985*'
+      - 'backend/internal/pkg/apicompat/**'
+      - '.github/workflows/anthropic-stream-integrity.yml'
+      - '.github/scripts/anthropic_integrity*'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: anthropic-integrity-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: fixture
+          POSTGRES_PASSWORD: fixture
+          POSTGRES_DB: issue985_fixture
+        ports: ['15432:5432']
+        options: >-
+          --health-cmd "pg_isready -U fixture -d issue985_fixture"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      ISSUE985_TEST_POSTGRES_DSN: 'postgres://fixture:fixture@127.0.0.1:15432/issue985_fixture?sslmode=disable'
+      CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      GOFLAGS: -p=2
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Install pinned official SDK for loopback accumulator
+        run: python3 -m pip install -r .github/scripts/anthropic_integrity_sdk_requirements.txt
+      - name: Evidence validator negative controls
+        run: python3 .github/scripts/anthropic_integrity_evidence_test.py
+      - name: Clean candidate GREEN and race
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test -z "$(git status --porcelain)"
+          evidence="$RUNNER_TEMP/anthropic-integrity"
+          mkdir -p "$evidence"
+          printf 'candidate=%s\noracle=%s\n' "$CANDIDATE_SHA" "$(git hash-object backend/internal/service/anthropic_stream_integrity_test.go)" > "$evidence/identity.txt"
+          cd backend
+          set +e
+          go test -race -json -tags=unit,issue985pg,issue985sdk ./internal/service ./internal/handler -run '^TestIssue985' -count=1 -timeout=10m > "$evidence/green.jsonl" 2> "$evidence/green.stderr"
+          rc=$?
+          set -e
+          printf '%s\n' "$rc" > "$evidence/green.exitcode"
+          python3 ../.github/scripts/anthropic_integrity_evidence.py green "$evidence"
+      - name: Ordinary server build
+        working-directory: backend
+        env:
+          CGO_ENABLED: '0'
+        run: go build -trimpath -o "$RUNNER_TEMP/anthropic-server" ./cmd/server
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: anthropic-integrity-${{ env.CANDIDATE_SHA }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/anthropic-integrity
+          if-no-files-found: error
+          retention-days: 14

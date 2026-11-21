@@ -260,6 +260,9 @@ func TestHandleResponsesBufferedStreamingResponse_PreservesMessageStartCacheUsag
 			`event: message_delta`,
 			`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":7}}`,
 			``,
+			`event: message_stop`,
+			`data: {"type":"message_stop"}`,
+			``,
 		}, "\n"))),
 	}
 
@@ -410,6 +413,9 @@ func TestHandleResponsesStreamingResponse_NormalizesTerminalUsage(t *testing.T) 
 					`event: message_start`,
 					`data: {"type":"message_start","message":{"id":"msg_usage","type":"message","role":"assistant","content":[],"model":"k3","stop_reason":"","usage":{` + tt.startUsage + `}}}`,
 					``,
+					`event: content_block_start`,
+					`data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":"fixture"}}`,
+					``,
 					`event: message_delta`,
 					`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{` + tt.deltaUsage + `}}`,
 					``,
@@ -420,11 +426,20 @@ func TestHandleResponsesStreamingResponse_NormalizesTerminalUsage(t *testing.T) 
 				resp := &http.Response{Body: io.NopCloser(strings.NewReader(strings.Join(lines, "\n")))}
 
 				result, err := (&GatewayService{}).handleResponsesStreamingResponse(resp, c, "k3", "k3", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
-				require.NoError(t, err)
+				if terminal == "eof" {
+					require.ErrorContains(t, err, "missing terminal event")
+				} else {
+					require.NoError(t, err)
+				}
+				require.Equal(t, tt.wantOutput, result.Usage.OutputTokens)
 				require.Equal(t, tt.wantInput, result.Usage.InputTokens)
 				require.Equal(t, tt.wantCached, result.Usage.CacheReadInputTokens)
 				require.Equal(t, tt.wantCacheCreation, result.Usage.CacheCreationInputTokens)
 
+				if terminal == "eof" {
+					require.NotContains(t, rec.Body.String(), "response.completed")
+					return
+				}
 				var completed apicompat.ResponsesStreamEvent
 				for _, line := range strings.Split(rec.Body.String(), "\n") {
 					if !strings.HasPrefix(line, "data: ") {
@@ -452,79 +467,27 @@ func TestHandleResponsesStreamingResponse_NormalizesTerminalUsage(t *testing.T) 
 	}
 }
 
-func TestParseAnthropicSSEField(t *testing.T) {
+func TestAnthropicSSEFieldFrames(t *testing.T) {
 	t.Parallel()
-
-	tests := []struct {
-		name      string
-		line      string
-		field     string
-		wantValue string
-		wantOK    bool
-	}{
-		{
-			name:      "standard format with space",
-			line:      "event: message_start",
-			field:     "event",
-			wantValue: "message_start",
-			wantOK:    true,
-		},
-		{
-			name:      "compact format without space",
-			line:      "event:message_start",
-			field:     "event",
-			wantValue: "message_start",
-			wantOK:    true,
-		},
-		{
-			name:      "data field with space",
-			line:      "data: {\"type\":\"message_start\"}",
-			field:     "data",
-			wantValue: "{\"type\":\"message_start\"}",
-			wantOK:    true,
-		},
-		{
-			name:      "data field without space",
-			line:      "data:{\"type\":\"message_start\"}",
-			field:     "data",
-			wantValue: "{\"type\":\"message_start\"}",
-			wantOK:    true,
-		},
-		{
-			name:      "field with multiple spaces after colon",
-			line:      "event:  message_delta",
-			field:     "event",
-			wantValue: "message_delta",
-			wantOK:    true,
-		},
-		{
-			name:      "wrong field name",
-			line:      "event: message_start",
-			field:     "data",
-			wantValue: "",
-			wantOK:    false,
-		},
-		{
-			name:      "empty line",
-			line:      "",
-			field:     "event",
-			wantValue: "",
-			wantOK:    false,
-		},
-		{
-			name:      "line without colon",
-			line:      "invalid line",
-			field:     "event",
-			wantValue: "",
-			wantOK:    false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			gotValue, gotOK := parseAnthropicSSEField(tt.line, tt.field)
-			require.Equal(t, tt.wantOK, gotOK, "parseAnthropicSSEField() ok")
-			require.Equal(t, tt.wantValue, gotValue, "parseAnthropicSSEField() value")
+	for _, tc := range []struct{ name, wire, event, data string }{
+		{"standard", "event: message_start\ndata: {}", "message_start", "{}"},
+		{"compact", "event:message_start\ndata:{}", "message_start", "{}"},
+		{"one_optional_space", "event:  message_delta\ndata:  {}", " message_delta", " {}"},
+		{"unknown_fields", "retry: 1000\nid: fixture\n:comment\ndata: {}", "", "{}"},
+		{"multidata", "data: {\ndata: }\nevent: ping", "ping", "{\n}"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var assembler anthropicSSEFrameAssembler
+			for _, line := range strings.Split(tc.wire, "\n") {
+				_, _, ready, err := assembler.line(line, 1024)
+				require.NoError(t, err)
+				require.False(t, ready)
+			}
+			event, data, ready, err := assembler.line("", 1024)
+			require.NoError(t, err)
+			require.True(t, ready)
+			require.Equal(t, tc.event, event)
+			require.Equal(t, tc.data, data)
 		})
 	}
 }
@@ -548,6 +511,9 @@ func TestHandleResponsesBufferedStreamingResponse_CompactSSEFormat(t *testing.T)
 			``,
 			`event:message_delta`,
 			`data:{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`,
+			``,
+			`event: message_stop`,
+			`data: {"type":"message_stop"}`,
 			``,
 		}, "\n"))),
 	}

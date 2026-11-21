@@ -43,7 +43,8 @@
       "deploy/tests/docker-compose-trusted-proxies-env-test.sh",
       "deploy/docker-compose*",
       ".github/ci/go_tests.py",
-      ".github/ci/go-test-weights.json"
+      ".github/ci/go-test-weights.json",
+      ".github/scripts/anthropic_integrity_sdk*"
     ]
   },
   "security-scan.yml": {

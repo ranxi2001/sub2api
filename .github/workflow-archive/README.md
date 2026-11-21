@@ -42,3 +42,19 @@
 主 CI 同时移除已合并分支的 `issue854-behavior`、`pelican-round-evidence`、`pr612-regressions`、`pr612-regressions-red` 以及质量模板、用户启用和 Issue854 的条件步骤；VIP 入账工作流也清除旧分支的两段 RED 步骤和 `source-format` job，保留 PostgreSQL GREEN 回归。原定义可从上述归档基线的 `.github/workflows/backend-ci.yml` 查阅。
 
 上述 32 个入口已在 GitHub 登记为停用，历史运行记录保留。需要重跑历史验收时，在任务分支恢复所需文件到 `.github/workflows/`，先核对固定 SHA、分支条件、工具链、runner 和脚本路径，再按任务范围重新启用对应工作流。归档文件保留当时配置，不保证在新代码上直接可运行。常规回归优先并入主 CI；确需专用工作流时按相关路径触发，临时 RED/GREEN、截图或试用构建在任务完成后归档。
+
+## Issue 985 Anthropic SSE integrity
+
+[anthropic-stream-integrity-red-green.yml](anthropic-stream-integrity-red-green.yml)
+retains the temporary fixed-production `dfcc6623` RED/GREEN workflow used by
+[PR #987](https://github.com/ranxi2001/sub2api/pull/987). The immutable oracle ran
+against the original checkout and clean candidates, with raw identity/test logs
+in [run 44907259566](https://github.com/ranxi2001/sub2api/actions/runs/44907259566).
+That run passed the strict RED/GREEN validator, race, real handlers, official SDK
+accumulation, isolated PostgreSQL billing and ordinary server build.
+
+The active `anthropic-stream-integrity.yml` retains the reusable path-triggered
+GREEN/race/SDK/PostgreSQL/build gate and validator negative controls. Unit tests
+also remain selected by main CI, whose integration job explicitly runs the PG
+and official SDK fixtures. Archiving the fixed baseline does not mark PR review
+or the current full CI complete; the PR stays Draft pending those gates.

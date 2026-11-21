@@ -256,7 +256,7 @@ func TestCCBufferedFromNativeAnthropic_HangTimesOut(t *testing.T) {
 	if elapsed := time.Since(start); elapsed > 5*time.Second {
 		t.Fatalf("handler did not respect interval bound: %v", elapsed)
 	}
-	if !strings.Contains(rec.Body.String(), "Upstream stream data interval timeout") {
+	if !strings.Contains(rec.Body.String(), "stream_timeout") {
 		t.Fatalf("expected 502 error body, got %q", rec.Body.String())
 	}
 }

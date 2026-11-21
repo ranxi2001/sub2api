@@ -254,6 +254,15 @@ func TestHTTP2NativeRelayRequiresCompleteTerminal(t *testing.T) {
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 			result, err := (&OpenAIGatewayService{cfg: rawChatCompletionsTestConfig()}).handleNativeAnthropicStreamingResponse(context.Background(), resp, c, nativeAnthropicTestAccount(), "model", "model", "model", nil, time.Now())
 			require.Error(t, err, "F5 incomplete native message_stop must not swallow a later HTTP2 reset: %s", name)
+			if name == "invalid_json" || name == "wrong_data_type" {
+				require.Contains(t, rec.Body.String(), "stream_protocol_error")
+				require.NotContains(t, rec.Body.String(), "message_stop")
+				require.Equal(t, 1, strings.Count(rec.Body.String(), "event: error"))
+				require.NotNil(t, result)
+				require.Equal(t, 3, result.Usage.InputTokens)
+				require.Equal(t, 1, result.Usage.OutputTokens)
+				return
+			}
 			code, _, reset := OpenAIUpstreamStreamReadErrorDetails(err)
 			require.True(t, reset)
 			require.Equal(t, OpenAIUpstreamHTTP2StreamErrorCode, code)
@@ -292,16 +301,19 @@ func TestHTTP2NativeRelayCompleteTerminalControls(t *testing.T) {
 				require.Equal(t, "context_length_exceeded", marker.Code)
 				assertHTTP2FollowupTerminal(t, rec.Body.String(), "messages", "context_length_exceeded")
 			} else {
-				require.NoError(t, err)
-				_, marked := GetOpsStreamError(c)
-				require.False(t, marked)
-				require.Equal(t, 1, strings.Count(rec.Body.String(), `"type":"message_stop"`))
-				require.NotContains(t, rec.Body.String(), "event: error")
+				require.Error(t, err)
+				code, _, reset := OpenAIUpstreamStreamReadErrorDetails(err)
+				require.True(t, reset)
+				require.Equal(t, OpenAIUpstreamHTTP2StreamErrorCode, code)
+				require.NotContains(t, rec.Body.String(), `"type":"message_stop"`)
+				require.Equal(t, 1, strings.Count(rec.Body.String(), "event: error"))
 			}
 			require.NotNil(t, result)
 			require.Equal(t, 3, result.Usage.InputTokens)
 			require.Equal(t, 1, result.Usage.OutputTokens)
-			require.NotContains(t, rec.Body.String(), "upstream_http2_stream_error")
+			if name == "semantic_error" {
+				require.NotContains(t, rec.Body.String(), "upstream_http2_stream_error")
+			}
 		})
 	}
 }

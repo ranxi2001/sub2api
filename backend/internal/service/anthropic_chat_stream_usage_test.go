@@ -45,6 +45,7 @@ func TestAnthropicChatStreamAuthoritativeUsage(t *testing.T) {
 				for _, terminal := range []string{"stop", "eof"} {
 					t.Run(adapter+"/"+options+"/"+tc.name+"/"+terminal, func(t *testing.T) {
 						sse := fmt.Sprintf("event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"k3\",\"content\":[]%s}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}%s}\n\n", tc.start, tc.delta)
+						sse = strings.Replace(sse, "event: message_delta", "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"fixture\"}}\n\nevent: message_delta", 1)
 						if tc.repeatDelta != "" {
 							sse += fmt.Sprintf("event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}%s}\n\n", tc.repeatDelta)
 						}
@@ -64,6 +65,11 @@ func TestAnthropicChatStreamAuthoritativeUsage(t *testing.T) {
 						if adapter == "native" {
 							svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
 							result, err := svc.forwardChatCompletionsViaNativeAnthropic(context.Background(), c, nativeAnthropicTestAccount(), body, "")
+							if terminal == "eof" || !tc.want {
+								require.Error(t, err)
+								require.NotContains(t, rec.Body.String(), "[DONE]")
+								return
+							}
 							require.NoError(t, err)
 							require.Equal(t, tc.totalInput, result.Usage.InputTokens)
 							require.Equal(t, tc.output, result.Usage.OutputTokens)
@@ -73,6 +79,11 @@ func TestAnthropicChatStreamAuthoritativeUsage(t *testing.T) {
 							svc := &GatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
 							account := &Account{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "sk-test"}}
 							result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, nil)
+							if terminal == "eof" || !tc.want {
+								require.Error(t, err)
+								require.NotContains(t, rec.Body.String(), "[DONE]")
+								return
+							}
 							require.NoError(t, err)
 							require.Equal(t, tc.billableInput, result.Usage.InputTokens)
 							require.Equal(t, tc.output, result.Usage.OutputTokens)
