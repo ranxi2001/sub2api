@@ -71,7 +71,7 @@ func TestIssue758CooldownUsesLastResetAndPreservesRoute(t *testing.T) {
 	}
 }
 
-func TestEncryptedOwnerModelCooldownReportsRetryDeadline(t *testing.T) {
+func TestIssue758OwnerModelCooldownReportsRetryDeadline(t *testing.T) {
 	service, scheduler, ctx, request, account := issue758WaitFixture(t, nil)
 	recovery := openAIAgentRecoveryFromContext(ctx)
 	now := time.Now()
