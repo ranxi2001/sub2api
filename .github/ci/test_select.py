@@ -159,6 +159,18 @@ class SelectionTests(unittest.TestCase):
                 return {'backend'}
         self.assertTrue(self.select(head, Evidence())['backend'][0])
 
+    def test_official_sdk_fixture_change_selects_backend_integration(self):
+        actual = json.loads((REPO / '.github/ci/scopes.json').read_text())
+        self.scopes['backend'] = actual['backend-ci.yml']['integration-test']
+        for path in ('.github/scripts/anthropic_integrity_sdk.py',
+                     '.github/scripts/anthropic_integrity_sdk_requirements.txt'):
+            with self.subTest(path=path):
+                self.write(path, 'changed SDK fixture\n')
+                head = self.save()
+                result = self.select(head)
+                self.assertTrue(result['backend'][0])
+                self.assertFalse(result['frontend'][0])
+
     def test_other_pr_and_other_repository_results_are_not_candidates(self):
         evidence = ci.Evidence('fixture/repo', 'unused')
         common = {'head_sha': 'a' * 40, 'head_repository': {'full_name': 'fixture/repo'}, 'pull_requests': [{'number': 7}]}

@@ -110,6 +110,13 @@ func (st *anthropicCompatStream) markClientDisconnected() {
 // 上游流结束时请求 ctx 已取消的，按客户端已断开收尾。
 func (st *anthropicCompatStream) nextLine() (string, bool) {
 	for {
+		if st.clientGone != nil {
+			select {
+			case <-st.clientGone:
+				st.markClientDisconnected()
+			default:
+			}
+		}
 		line, err := st.pump.nextOrClientGone(st.clientGone)
 		if err == nil {
 			return line, true

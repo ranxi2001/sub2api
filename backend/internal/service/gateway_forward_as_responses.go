@@ -534,6 +534,7 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 			UpstreamModel:               mappedModel,
 			ReasoningEffort:             reasoningEffort,
 			Stream:                      false,
+			ClientDisconnect:            streamStatus.clientDisconnected,
 			Duration:                    time.Since(startTime),
 		}
 		applyObservedGatewayResponseModel(c, result)
@@ -597,6 +598,7 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 		UpstreamModel:               mappedModel,
 		ReasoningEffort:             reasoningEffort,
 		Stream:                      false,
+		ClientDisconnect:            streamStatus.clientDisconnected,
 		Duration:                    time.Since(startTime),
 	}
 	applyObservedGatewayResponseModel(c, result)

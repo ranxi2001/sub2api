@@ -176,7 +176,7 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 		result := &OpenAIForwardResult{RequestID: requestID, UpstreamHeaders: resp.Header,
 			Usage: claudeUsageToOpenAIUsage(&usage), Model: originalModel, BillingModel: billingModel,
 			UpstreamModel: upstreamModel, UpstreamEndpoint: "/v1/messages", ReasoningEffort: reasoningEffort,
-			Stream: false, Duration: time.Since(startTime)}
+			Stream: false, ClientDisconnect: streamStatus.clientDisconnected, Duration: time.Since(startTime)}
 		applyObservedUpstreamResponseModel(c, result)
 		return result
 	}
@@ -236,7 +236,9 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 
 	if failure := streamStatus.failure(); failure != nil {
 		_ = resp.Body.Close()
-		writeResponsesError(c, http.StatusBadGateway, failure.errType, failure.message)
+		if !streamStatus.clientDisconnected {
+			writeResponsesError(c, http.StatusBadGateway, failure.errType, failure.message)
+		}
 		return resultWithUsage(), failure.err
 	}
 
