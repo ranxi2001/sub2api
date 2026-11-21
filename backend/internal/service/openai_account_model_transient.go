@@ -139,9 +139,13 @@ func (s *openAIAccountModelTransientState) recordSuccess(accountID int64, model 
 }
 
 func (s *openAIAccountModelTransientState) isBlocked(accountID int64, model string, now time.Time) bool {
+	return !s.blockedUntil(accountID, model, now).IsZero()
+}
+
+func (s *openAIAccountModelTransientState) blockedUntil(accountID int64, model string, now time.Time) time.Time {
 	key, ok := openAIAccountModelTransientKey(accountID, model)
 	if s == nil || !ok {
-		return false
+		return time.Time{}
 	}
 	if now.IsZero() {
 		now = time.Now()
@@ -151,15 +155,18 @@ func (s *openAIAccountModelTransientState) isBlocked(accountID int64, model stri
 	defer s.mu.Unlock()
 	entry, exists := s.entries[key]
 	if !exists {
-		return false
+		return time.Time{}
 	}
 	if !entry.lastFailure.IsZero() && now.Sub(entry.lastFailure) > openAIModelTransientStreakTTL {
 		delete(s.entries, key)
-		return false
+		return time.Time{}
 	}
 	entry.lastTouched = now
 	s.entries[key] = entry
-	return !entry.blockUntil.IsZero() && now.Before(entry.blockUntil)
+	if now.Before(entry.blockUntil) {
+		return entry.blockUntil
+	}
+	return time.Time{}
 }
 
 func (s *openAIAccountModelTransientState) size() int {
