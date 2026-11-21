@@ -25,22 +25,14 @@ func TestGatewayRoutesRejectConflictingFieldsMountedOnEveryGatewayRoute(t *testi
 	source := string(routeSource)
 
 	// 每一处白名单挂载点后面都紧跟着字段歧义拒绝，两者数量一致。
-	allowlistUses := regexp.MustCompile(`\bgroupModelAllowlist\b`).FindAllStringIndex(source, -1)
+	allowlistUses := regexp.MustCompile(`(?:\.Use\(|, )groupModelAllowlist\b`).FindAllStringIndex(source, -1)
 	followedByConflict := regexp.MustCompile(`\bgroupModelAllowlist(\)\s+\w+\.Use\(|, )rejectConflictingFields\b`).FindAllStringIndex(source, -1)
-	// allowlistUses 里有一处是变量定义本身。
-	require.Len(t, followedByConflict, len(allowlistUses)-1,
+	require.Len(t, followedByConflict, len(allowlistUses),
 		"every chain that mounts groupModelAllowlist must mount rejectConflictingFields right after it")
 	require.GreaterOrEqual(t, len(followedByConflict), 6, "gateway, gemini, root aliases, codexDirect and both antigravity chains")
 
-	// 带合成路由改写的链：歧义拒绝必须在改写之前。
-	for _, chain := range []string{
-		`gateway.Use(rejectConflictingFields)` + "\n\t" + `gateway.Use(compositeTarget)`,
-		`gemini.Use(rejectConflictingFields)` + "\n\t" + `gemini.Use(compositeGeminiTarget)`,
-		`groupModelAllowlist, rejectConflictingFields, compositeTarget, requireGroupAnthropic, handler)`,
-		`groupModelAllowlist, rejectConflictingFields, compositeTarget, requireGroupAnthropic)`,
-	} {
-		require.Contains(t, source, chain)
-	}
+	// TestGatewayRoutesGroupModelAllowlistMountedOnEveryGatewayRoute separately
+	// verifies the position of each admission chain before target rewriting.
 }
 
 // TestGatewayRoutesRejectConflictingFieldsCoversGatewayRoutes 用没有开启白名单
