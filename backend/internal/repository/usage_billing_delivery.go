@@ -101,12 +101,12 @@ func (r *usageBillingRepository) ApplyStagedUsageBilling(ctx context.Context, ke
 		FROM usage_billing_events WHERE request_id=$1 AND api_key_id=$2`, key.RequestID, key.APIKeyID).Scan(&owner); err != nil {
 		return nil, err
 	}
-	release, err := r.admission.acquire(ctx, owner, r.db.Stats().MaxOpenConnections)
-	if err != nil {
-		// The staged event remains eligible for recovery.
-		return nil, err
-	}
-	defer release()
+	var release func()
+	defer func() {
+		if release != nil {
+			release()
+		}
+	}()
 	defer func() {
 		if err == nil {
 			return
@@ -123,6 +123,12 @@ func (r *usageBillingRepository) ApplyStagedUsageBilling(ctx context.Context, ke
 			attempts=attempts+1,next_attempt_at=NOW()+INTERVAL '30 seconds'
 			WHERE request_id=$1 AND api_key_id=$2 AND state='pending'`, key.RequestID, key.APIKeyID, state, code)
 	}()
+	// Admission can consume the recovery cycle's deadline before a transaction
+	// starts. Back off that pending event too, so the next cycle can move on.
+	release, err = r.admission.acquire(ctx, owner, r.db.Stats().MaxOpenConnections)
+	if err != nil {
+		return nil, err
+	}
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
