@@ -55,7 +55,9 @@ func gatewayProtocolOpenAIForward(t *testing.T, route string, stream bool, repo 
 	}
 	content := `{"id":"resp_fixture","object":"response","status":"completed","model":"upstream-model","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"OK"}]}],"usage":{"input_tokens":10,"output_tokens":2,"total_tokens":12}}`
 	contentType := "application/json"
-	if stream {
+	// Chat/Messages bridges always request upstream Responses SSE, including
+	// buffered downstream clients. Their fixture must supply a terminal event.
+	if stream || route == "chat" || route == "messages" {
 		contentType = "text/event-stream"
 		content = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"OK\"}\n\ndata: {\"type\":\"response.completed\",\"response\":" + content + "}\n\ndata: [DONE]\n\n"
 	}
@@ -103,6 +105,11 @@ func TestGatewayProtocolOpenAIAuthoritativeAdmission(t *testing.T) {
 			require.GreaterOrEqual(t, repo.turnReads, 2, "initial and actual-send admission must both read authority")
 			require.NotNil(t, upstream.lastReq)
 			require.Equal(t, "upstream-model", gjson.GetBytes(upstream.lastBody, "model").String())
+			require.Equal(t, route != "responses", gjson.GetBytes(upstream.lastBody, "stream").Bool())
+			require.False(t, result.Stream, "buffered downstream stays buffered while bridges consume upstream SSE")
+			require.Equal(t, "public-model", result.Model)
+			require.Equal(t, "upstream-model", result.UpstreamModel)
+			require.Equal(t, 10, result.Usage.InputTokens)
 			require.Equal(t, int64(959), upstream.accountID)
 			require.Equal(t, 2, upstream.concurrency)
 			require.Equal(t, "http://proxy.invalid:8080", upstream.proxyURL)

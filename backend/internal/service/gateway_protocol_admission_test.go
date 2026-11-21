@@ -53,7 +53,7 @@ func TestGatewayProtocolAdmissionAllFamiliesKeepOneIdentity(t *testing.T) {
 				require.Equal(t, AccountTypeAPIKey, view.Type)
 				require.Equal(t, "synthetic-only", view.GetCredential("api_key"))
 				wantBase := "https://gateway.example/tenant/v1"
-				if family == domain.PlatformGatewayGemini {
+				if family == domain.PlatformGatewayGemini || family == domain.PlatformGatewayAnthropic {
 					wantBase = "https://gateway.example/tenant"
 				}
 				require.Equal(t, wantBase, view.GetCredential("base_url"))
