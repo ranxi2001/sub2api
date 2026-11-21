@@ -107,3 +107,17 @@ func TestProcurementSnapshotSub2APIDeclaredRate(t *testing.T) {
 		require.Equal(t, .14, *log.ProcurementCostSnapshot.CostMultiplier)
 	}
 }
+
+func TestProcurementSnapshotSub2APIManualRate(t *testing.T) {
+	account := &Account{Type: AccountTypeGateway, Credentials: map[string]any{GatewayUpstreamKindCredentialKey: "sub2api"},
+		Extra: map[string]any{AccountCostAutoSyncExtraKey: false}}
+	log := &UsageLog{Platform: PlatformOpenAI}
+	captureGatewayProcurementCost(log, account)
+	require.Nil(t, log.ProcurementCostSnapshot.CostMultiplier)
+	for _, factor := range []float64{0, .25} {
+		account.Extra[AccountCostMultiplierExtraKey] = factor
+		captureGatewayProcurementCost(log, account)
+		require.NotNil(t, log.ProcurementCostSnapshot.CostMultiplier)
+		require.Equal(t, factor, *log.ProcurementCostSnapshot.CostMultiplier)
+	}
+}

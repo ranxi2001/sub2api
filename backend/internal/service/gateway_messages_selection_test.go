@@ -207,3 +207,18 @@ func TestGatewayProtocolOpenAIChannelModelKeepsBinding(t *testing.T) {
 	_, err = prepareGatewayProtocolAccount(ctx, base.account, base, "openai", "channel-model")
 	require.Error(t, err)
 }
+
+func TestGatewayProtocolCatalogCompositePublicAlias(t *testing.T) {
+	base, ctx := gatewayProtocolFixture(PlatformComposite)
+	base.group.ModelAllowlist = GroupModelAllowlist{Enabled: true, Models: []string{"public"}}
+	base.account.AccountGroups[0].AllowedModels = []string{"upstream"}
+	base.account.Credentials["model_mapping"] = map[string]any{"upstream": "wire"}
+	svc := &GatewayService{accountRepo: &gatewayMessagesCandidateRepo{gatewayProtocolAdmissionRepo: base},
+		compositeResolver: NewCompositeRouteResolver(compositeRouteRepoStub{routes: []CompositeModelRoute{
+			{GroupID: base.group.ID, PublicModel: "public", UpstreamModel: "upstream", TargetPlatform: PlatformOpenAI,
+				Endpoint: CompositeRouteEndpointAny, MatchType: CompositeRouteMatchExact, Enabled: true},
+		}})}
+	models, err := svc.GetGroupModelCatalog(ctx, base.group.ID, PlatformComposite)
+	require.NoError(t, err)
+	require.Equal(t, []string{"public"}, models)
+}

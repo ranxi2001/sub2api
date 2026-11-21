@@ -13,7 +13,7 @@ import (
 
 // gatewayCatalogModels enumerates configured names and platform defaults using
 // the same live group, membership and model admission as a forwarded request.
-func (s *GatewayService) gatewayCatalogModels(ctx context.Context, groupID *int64, target string) ([]string, error) {
+func (s *GatewayService) gatewayCatalogModels(ctx context.Context, groupID *int64, target string, routes ...CompositeModelRoute) ([]string, error) {
 	spec, concrete := domain.LookupPlatform(target)
 	reader, _ := s.accountRepo.(GatewayRequestCandidateReader)
 	if groupID == nil || *groupID <= 0 || !concrete {
@@ -55,6 +55,20 @@ func (s *GatewayService) gatewayCatalogModels(ctx context.Context, groupID *int6
 				models = append(models, DefaultModelIDsForPlatform(target)...)
 			}
 		}
+		for _, route := range routes {
+			if !route.Enabled || route.TargetPlatform != target || normalizeCompositeRouteMatchType(route.MatchType) != CompositeRouteMatchExact {
+				continue
+			}
+			publicModel := strings.TrimSpace(route.PublicModel)
+			upstream := strings.TrimSpace(route.UpstreamModel)
+			if upstream == "" {
+				upstream = publicModel
+			}
+			modelCtx := withGatewaySelection(ctx, publicModel, upstream, family)
+			if _, err := gatewayProtocolAccountFromSnapshot(modelCtx, account, account, group, family, upstream); err == nil {
+				result = append(result, publicModel)
+			}
+		}
 		for _, model := range models {
 			if model == "" || strings.Contains(model, "*") {
 				continue
@@ -85,9 +99,16 @@ func (s *GatewayService) GetGroupModelCatalog(ctx context.Context, groupID int64
 		platforms = domain.CompositePrecedencePlatformIDs()
 	}
 	seen := make(map[string]struct{})
+	var routes []CompositeModelRoute
+	if platform == PlatformComposite && s.compositeResolver != nil && s.compositeResolver.repo != nil {
+		routes, err = s.compositeResolver.repo.ListByGroup(ctx, groupID, false)
+		if err != nil {
+			return nil, err
+		}
+	}
 	gatewayModels := make(map[string][]string)
 	for _, concrete := range platforms {
-		names, err := s.gatewayCatalogModels(ctx, &groupID, concrete)
+		names, err := s.gatewayCatalogModels(ctx, &groupID, concrete, routes...)
 		if err != nil {
 			return nil, err
 		}
@@ -135,11 +156,7 @@ func (s *GatewayService) GetGroupModelCatalog(ctx context.Context, groupID int64
 			}
 		}
 	}
-	if platform == PlatformComposite && s.compositeResolver != nil && s.compositeResolver.repo != nil {
-		routes, err := s.compositeResolver.repo.ListByGroup(ctx, groupID, false)
-		if err != nil {
-			return nil, err
-		}
+	if len(routes) > 0 {
 		activeRoutes := make([]CompositeModelRoute, 0, len(routes))
 		candidates := make(map[string]struct{}, len(seen)+len(routes))
 		for model := range seen {
@@ -176,7 +193,7 @@ func (s *GatewayService) GetGroupModelCatalog(ctx context.Context, groupID int64
 				if upstream == "" {
 					upstream = model
 				}
-				if slices.Contains(gatewayModels[route.TargetPlatform], upstream) {
+				if slices.Contains(gatewayModels[route.TargetPlatform], model) {
 					available[model] = struct{}{}
 					break
 				}

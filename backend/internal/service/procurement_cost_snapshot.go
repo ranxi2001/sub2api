@@ -27,7 +27,14 @@ func captureGatewayProcurementCost(log *UsageLog, account *Account) {
 			snapshot.CostMultiplier = &factor
 		}
 	case "sub2api":
-		if domain.IsConcretePlatform(log.Platform) && account.CostMultiplierAutoSyncEnabled() {
+		if !domain.IsConcretePlatform(log.Platform) {
+			break
+		}
+		if !account.CostMultiplierAutoSyncEnabled() {
+			if factor, ok := accountCostMultiplierNumber(account.Extra[AccountCostMultiplierExtraKey]); ok {
+				snapshot.CostMultiplier = &factor
+			}
+		} else {
 			declaration := decodeUpstreamBillingProbeSnapshot(account.Extra)
 			if factor, ok := declaration.CostMultiplierToSync(); ok {
 				snapshot.CostMultiplier = &factor
