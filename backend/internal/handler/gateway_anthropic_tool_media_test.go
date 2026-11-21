@@ -64,14 +64,13 @@ func testAnthropicChatToolMedia(t *testing.T, native bool) {
 						platform, model := service.PlatformAnthropic, "claude-sonnet-4-5"
 						if native {
 							platform, model = service.PlatformKimi, "k3"
-							cfg.Security.URLAllowlist.AllowInsecureHTTP = true
 						}
 						groupID := int64(3131)
 						group := &service.Group{ID: groupID, Hydrated: true, Platform: platform, Status: service.StatusActive, RateMultiplier: 1}
 						account := &service.Account{
 							ID: 9811, Platform: platform, Type: service.AccountTypeAPIKey, Status: service.StatusActive,
 							Schedulable: true, Concurrency: 1, GroupIDs: []int64{groupID},
-							Credentials:   map[string]any{"api_key": "test-key", "api_protocol": service.APIProtocolAnthropic, "base_url": "http://anthropic.example"},
+							Credentials:   map[string]any{"api_key": "test-key", "api_protocol": service.APIProtocolAnthropic, "base_url": "https://anthropic.example"},
 							AccountGroups: []service.AccountGroup{{AccountID: 9811, GroupID: groupID}},
 						}
 						upstream := &anthropicToolMediaUpstream{}
