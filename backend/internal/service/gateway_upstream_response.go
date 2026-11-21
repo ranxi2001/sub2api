@@ -853,6 +853,7 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 	usage := &ClaudeUsage{}
 	var firstTokenMs *int
 	scanner := bufio.NewScanner(resp.Body)
+	scanner.Split(anthropicSSELineSplit())
 	// 设置更大的buffer以处理长行
 	maxLineSize := defaultMaxLineSize
 	if s.cfg != nil && s.cfg.Gateway.MaxLineSize > 0 {
@@ -966,7 +967,9 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 
 	needModelReplace := originalModel != mappedModel
 	clientModel := compositeClientModel(ctx, "")
-	sawTerminalEvent := false
+	status := &anthropicCompatStream{body: resp.Body, maxLineSize: maxLineSize, pump: &anthropicNativeLinePump{interval: streamInterval}}
+	var terminalFrames strings.Builder
+	pendingBytes := 0
 	useNoopDeltaKeepalive := c != nil && c.Request != nil && shouldUseClaudeCodeNoopDeltaKeepalive(c.GetHeader("User-Agent"))
 	noopDeltaKeepaliveBlockIndex := -1
 	noopDeltaKeepaliveDeltaType := ""
@@ -978,35 +981,39 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 			return nil, "", nil, nil
 		}
 
-		eventName := ""
-		dataLine := ""
+		var assembler anthropicSSEFrameAssembler
 		for _, line := range lines {
-			trimmed := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmed, "event:") {
-				eventName = strings.TrimSpace(strings.TrimPrefix(trimmed, "event:"))
-				continue
-			}
-			if dataLine == "" && strings.HasPrefix(trimmed, "data:") {
-				dataLine = strings.TrimLeft(strings.TrimPrefix(trimmed, "data:"), " \t\n\f\r")
+			if _, _, _, err := assembler.line(line, maxLineSize); err != nil {
+				return nil, "", nil, err
 			}
 		}
-
-		if eventName == "error" {
-			return nil, dataLine, nil, &sseStreamErrorEventError{RawData: dataLine}
-		}
-
-		if dataLine == "" {
+		eventName, dataLine, ready, _ := assembler.line("", maxLineSize)
+		if !ready {
+			if knownAnthropicStreamEvent(eventName) {
+				return nil, "", nil, nil
+			}
 			return []string{strings.Join(lines, "\n") + "\n\n"}, "", nil, nil
 		}
-
-		if dataLine == "[DONE]" {
-			sawTerminalEvent = true
-			block := ""
-			if eventName != "" {
-				block = "event: " + eventName + "\n"
+		if strings.TrimSpace(dataLine) == "[DONE]" {
+			return nil, "", nil, nil
+		}
+		decoded, known := status.decodeFrame(eventName, dataLine)
+		if status.protocolFailure != "" {
+			return nil, "", nil, errors.New("stream usage incomplete: " + status.protocolFailure)
+		}
+		if !known {
+			return []string{strings.Join(lines, "\n") + "\n\n"}, "", nil, nil
+		}
+		if known {
+			status.observe(&decoded, dataLine)
+			if decoded.Type == "error" {
+				return nil, dataLine, nil, &sseStreamErrorEventError{RawData: dataLine}
 			}
-			block += "data: " + dataLine + "\n\n"
-			return []string{block}, dataLine, nil, nil
+		}
+		// Canonical single data line preserves valid SSE after multi-data input.
+		var compact bytes.Buffer
+		if err := json.Compact(&compact, []byte(dataLine)); err == nil && strings.ContainsAny(dataLine, "\n\r") {
+			dataLine = compact.String()
 		}
 
 		dataLineBytes := []byte(dataLine)
@@ -1018,7 +1025,7 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 			}
 			if strings.EqualFold(eventName, "message_stop") || bytes.Contains(dataLineBytes, sseMessageStopValueBytes) {
 				if anthropicStreamEventIsTerminal(eventName, dataLine) {
-					sawTerminalEvent = true
+					status.sawTerminal = true
 				}
 			}
 			block := ""
@@ -1132,7 +1139,7 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 
 		usagePatch := s.extractSSEUsagePatch(event)
 		if anthropicStreamEventIsTerminal(eventName, dataLine) {
-			sawTerminalEvent = true
+			status.sawTerminal = true
 		}
 		if !eventChanged {
 			block := ""
@@ -1165,10 +1172,61 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 	clientGone := func(cause error) (*streamingResult, error) {
 		logger.LegacyPrintf("service.gateway", "Client disconnected; stopping upstream stream: account=%d observed_input=%d observed_output=%d", account.ID, usage.InputTokens, usage.OutputTokens)
 		result := &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}
-		if sawTerminalEvent {
-			return result, nil
-		}
 		return result, fmt.Errorf("stream usage incomplete: client disconnected: %w", cause)
+	}
+	consumePending := func() error {
+		if len(pendingEventLines) == 0 {
+			return nil
+		}
+		outputBlocks, data, usagePatch, err := processSSEEvent(pendingEventLines)
+		pendingEventLines = pendingEventLines[:0]
+		pendingBytes = 0
+		if err != nil {
+			var sseErr *sseStreamErrorEventError
+			if !errors.As(err, &sseErr) || c.Writer.Written() || usage.hasObservedTokens() {
+				message := "upstream stream protocol failure"
+				kind := "stream_protocol_error"
+				if sseErr != nil {
+					kind = status.upstreamErrType
+					message = status.upstreamErrMessage
+				}
+				MarkOpsStreamError(c, kind, message, http.StatusBadGateway)
+				MarkResponseCommitted(c)
+				sendErrorEvent(kind, message)
+			}
+			return err
+		}
+		if data != "" {
+			if firstTokenMs == nil && status.semanticContent {
+				ms := int(time.Since(startTime).Milliseconds())
+				firstTokenMs = &ms
+			}
+			if usagePatch != nil {
+				mergeSSEUsagePatch(usage, usagePatch)
+			}
+		}
+		kind := gjson.Get(data, "type").String()
+		hold := kind == "message_stop" || (kind == "message_delta" && gjson.Get(data, "delta.stop_reason").String() != "")
+		for _, block := range outputBlocks {
+			if hold {
+				if len(block) > 2*maxLineSize-terminalFrames.Len() {
+					return errAnthropicSSEFrameTooLarge
+				}
+				_, _ = terminalFrames.WriteString(block)
+				continue
+			}
+			if _, err := io.WriteString(w, reverseToolNamesIfPresentString(c, block)); err != nil {
+				status.clientDisconnected = true
+				return err
+			}
+			if err := FlushGatewayResponse(w); err != nil {
+				status.clientDisconnected = true
+				return err
+			}
+			lastDataAt = time.Now()
+			resetKeepaliveTimer()
+		}
+		return nil
 	}
 	clientCtx := c.Request.Context()
 	for {
@@ -1192,16 +1250,28 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 				return clientGone(err)
 			}
 			if !ok {
-				// 上游完成，返回结果
-				if !sawTerminalEvent {
-					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: false}, fmt.Errorf("stream usage incomplete: missing terminal event")
+				if err := consumePending(); err != nil {
+					if status.clientDisconnected {
+						return clientGone(err)
+					}
+					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, err
 				}
-				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: false}, nil
+				status.readErr = io.EOF
+				if failure := status.failure(); failure != nil {
+					MarkOpsStreamError(c, failure.errType, failure.message, http.StatusBadGateway)
+					MarkResponseCommitted(c)
+					sendErrorEvent(failure.errType, failure.message)
+					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, failure.err
+				}
+				if _, err := io.WriteString(w, reverseToolNamesIfPresentString(c, terminalFrames.String())); err != nil {
+					return clientGone(err)
+				}
+				if err := FlushGatewayResponse(w); err != nil {
+					return clientGone(err)
+				}
+				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, nil
 			}
 			if ev.err != nil {
-				if sawTerminalEvent {
-					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: false}, nil
-				}
 				// 检测 context 取消（客户端断开会导致 context 取消，进而影响上游读取）
 				if errors.Is(ev.err, context.Canceled) || errors.Is(ev.err, context.DeadlineExceeded) {
 					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, fmt.Errorf("stream usage incomplete: %w", ev.err)
@@ -1219,7 +1289,7 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 				// 默认 *net.OpError 的 Error() 会泄露内部 IP/端口和上游地址。完整 ev.err
 				// 仅在下方 LegacyPrintf 内部日志中保留供运维诊断。
 				disconnectMsg := "upstream stream disconnected: " + sanitizeStreamError(ev.err)
-				if !c.Writer.Written() {
+				if !c.Writer.Written() && !usage.hasObservedTokens() {
 					logger.LegacyPrintf("service.gateway", "Upstream stream read error before any client output (account=%d), failing over: %v", account.ID, ev.err)
 					body, _ := json.Marshal(map[string]any{
 						"type": "error",
@@ -1238,44 +1308,20 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, fmt.Errorf("stream read error: %w", ev.err)
 			}
 			line := ev.line
-			trimmed := strings.TrimSpace(line)
-
-			if trimmed == "" {
-				if len(pendingEventLines) == 0 {
-					continue
-				}
-
-				outputBlocks, data, usagePatch, err := processSSEEvent(pendingEventLines)
-				pendingEventLines = pendingEventLines[:0]
-				if err != nil {
-					return nil, err
-				}
-
-				// Merge the current event before writing: even a failed write may carry
-				// upstream-metered usage. Do not read future events after disconnect.
-				if data != "" {
-					if firstTokenMs == nil && data != "[DONE]" {
-						ms := int(time.Since(startTime).Milliseconds())
-						firstTokenMs = &ms
-					}
-					if usagePatch != nil {
-						mergeSSEUsagePatch(usage, usagePatch)
-					}
-				}
-				for _, block := range outputBlocks {
-					restored := reverseToolNamesIfPresentString(c, block)
-					if _, werr := io.WriteString(w, restored); werr != nil {
-						return clientGone(werr)
-					}
-					if err := FlushGatewayResponse(w); err != nil {
+			if line == "" {
+				if err := consumePending(); err != nil {
+					if status.clientDisconnected {
 						return clientGone(err)
 					}
-					lastDataAt = time.Now()
-					resetKeepaliveTimer()
+					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, err
 				}
 				continue
 			}
-
+			if len(line)+1 > maxLineSize-pendingBytes {
+				sendErrorEvent("response_too_large", "upstream SSE frame exceeds size limit")
+				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, errAnthropicSSEFrameTooLarge
+			}
+			pendingBytes += len(line) + 1
 			pendingEventLines = append(pendingEventLines, line)
 
 		case <-intervalCh:

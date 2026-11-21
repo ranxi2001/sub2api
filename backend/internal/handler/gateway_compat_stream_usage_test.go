@@ -227,7 +227,7 @@ func TestGatewayCompatibilityHandlers_IdleBeforeAnyEventWritesStreamError(t *tes
 	}
 }
 
-func TestGatewayCompatibilityHandlers_UpstreamErrorEventAfterOutputIsNotBilled(t *testing.T) {
+func TestGatewayCompatibilityHandlers_UpstreamErrorPreservesPartialBilling(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	upstreamError := "event: error\n" + `data: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}` + "\n\n"
 	for _, endpoint := range []string{"chat/completions", "responses"} {
@@ -246,8 +246,12 @@ func TestGatewayCompatibilityHandlers_UpstreamErrorEventAfterOutputIsNotBilled(t
 
 			run.billingRepo.mu.Lock()
 			defer run.billingRepo.mu.Unlock()
-			require.Empty(t, run.billingRepo.commands, "an upstream error event is not billed while the client is online")
-			require.Empty(t, run.usageRepo.created)
+			require.Len(t, run.billingRepo.commands, 1, "known partial usage must survive the failure")
+			require.Greater(t, run.billingRepo.commands[0].BalanceCost, 0.0)
+			require.Len(t, run.usageRepo.created, 1)
+			usage := <-run.usageRepo.created
+			require.Equal(t, 12, usage.InputTokens)
+			require.Equal(t, 1, usage.OutputTokens)
 		})
 	}
 }

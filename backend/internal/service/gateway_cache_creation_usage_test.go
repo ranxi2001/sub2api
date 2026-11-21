@@ -150,6 +150,7 @@ func TestAnthropicCacheCreationMissingDetailForwardBillingBoundary(t *testing.T)
 			for _, terminal := range []string{"stop", "eof"} {
 				t.Run(test.name+"/"+route+"/"+terminal, func(t *testing.T) {
 					payload := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_cache\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4\",\"content\":[],\"usage\":{\"input_tokens\":10,\"output_tokens\":2," + test.start + "}}}\n\n"
+					payload += "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"fixture\"}}\n\n"
 					for range 2 {
 						payload += "event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":" + test.delta + "}\n\n"
 					}
@@ -173,7 +174,11 @@ func TestAnthropicCacheCreationMissingDetailForwardBillingBoundary(t *testing.T)
 							streamed, err = service.handleStreamingResponse(context.Background(), response, ctx, &Account{ID: 701}, time.Now(), "claude-sonnet-4", "claude-sonnet-4", false)
 						} else {
 							streamed, err = service.handleStreamingResponseAnthropicAPIKeyPassthrough(context.Background(), response, ctx, &Account{ID: 701}, time.Now(), "claude-sonnet-4")
-							require.Equal(t, payload, recorder.Body.String())
+							if terminal == "stop" {
+								require.Equal(t, payload, recorder.Body.String())
+							} else {
+								require.Contains(t, recorder.Body.String(), "event: error")
+							}
 						}
 						require.NotNil(t, streamed)
 						result = &ForwardResult{RequestID: "cache_creation", Model: "claude-sonnet-4", Usage: *streamed.usage, Duration: time.Second}
@@ -186,7 +191,7 @@ func TestAnthropicCacheCreationMissingDetailForwardBillingBoundary(t *testing.T)
 					case "buffered chat":
 						result, err = service.handleCCBufferedFromAnthropic(response, ctx, "claude-sonnet-4", "claude-sonnet-4", nil, time.Now())
 					}
-					if terminal == "eof" && (route == "standard" || route == "passthrough") {
+					if terminal == "eof" {
 						require.ErrorContains(t, err, "missing terminal event")
 					} else {
 						require.NoError(t, err)
@@ -200,7 +205,15 @@ func TestAnthropicCacheCreationMissingDetailForwardBillingBoundary(t *testing.T)
 					require.True(t, result.Usage.cacheCreationInputTokensPresent)
 					require.Equal(t, test.ttl5m, result.Usage.CacheCreation5mTokens)
 					require.Equal(t, test.ttl1h, result.Usage.CacheCreation1hTokens)
-					if route != "standard" && route != "passthrough" {
+					if terminal == "eof" && route != "standard" && route != "passthrough" {
+						wire := recorder.Body.String()
+						require.Contains(t, wire, "stream_incomplete")
+						require.NotContains(t, wire, "response.completed")
+						require.NotContains(t, wire, "[DONE]")
+						if strings.HasPrefix(route, "buffered") {
+							require.Equal(t, http.StatusBadGateway, recorder.Code)
+						}
+					} else if route != "standard" && route != "passthrough" {
 						var usage gjson.Result
 						if strings.HasPrefix(route, "buffered") {
 							usage = gjson.Get(recorder.Body.String(), "usage")
@@ -399,7 +412,7 @@ func TestAnthropicCacheCreationMarshaledSSEBoundary(t *testing.T) {
 			t.Run(test.name+"/"+terminal, func(t *testing.T) {
 				cache5m, cache1h := 20, 30
 				events := []apicompat.AnthropicStreamEvent{
-					{Type: "message_start", Message: &apicompat.AnthropicResponse{ID: "msg_cache", Type: "message", Role: "assistant", Model: "claude-sonnet-4", Usage: apicompat.AnthropicUsage{
+					{Type: "message_start", Message: &apicompat.AnthropicResponse{ID: "msg_cache", Type: "message", Role: "assistant", Model: "claude-sonnet-4", Content: []apicompat.AnthropicContentBlock{{Type: "text", Text: "fixture"}}, Usage: apicompat.AnthropicUsage{
 						InputTokens: 10, CacheCreationInputTokens: test.aggregate, CacheCreationInputTokensPresent: test.present,
 						CacheCreation: &apicompat.AnthropicCacheCreation{Ephemeral5mInputTokens: &cache5m},
 					}}},
@@ -419,8 +432,17 @@ func TestAnthropicCacheCreationMarshaledSSEBoundary(t *testing.T) {
 				ctx, _ := gin.CreateTestContext(recorder)
 				response := &http.Response{Body: io.NopCloser(strings.NewReader(stream.String()))}
 				result, err := (&GatewayService{}).handleResponsesStreamingResponse(response, ctx, "claude-sonnet-4", "claude-sonnet-4", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
-				require.NoError(t, err)
+				if terminal == "eof" {
+					require.Error(t, err)
+				} else {
+					require.NoError(t, err)
+				}
 				require.Equal(t, test.wantAggregate, result.Usage.CacheCreationInputTokens)
+				assertAnthropicCacheCreationRecordCosts(t, result.Usage, test.wantCacheCost)
+				if terminal == "eof" {
+					require.NotContains(t, recorder.Body.String(), "response.completed")
+					return
+				}
 				var completed apicompat.ResponsesStreamEvent
 				for _, line := range strings.Split(recorder.Body.String(), "\n") {
 					if strings.HasPrefix(line, "data: ") {
@@ -643,7 +665,8 @@ func TestAnthropicCacheOnlyBufferedSSEUsage(t *testing.T) {
 		for _, adapter := range []string{"responses", "chat", "native responses", "native chat"} {
 			for _, terminal := range []string{"message_stop", "eof"} {
 				t.Run(test.name+"/"+adapter+"/"+terminal, func(t *testing.T) {
-					stream := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_cache\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4\",\"content\":[],\"usage\":" + test.start + "}}\n\n"
+					stream := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_cache\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4\",\"content\":[],\"usage\":" + strings.Replace(test.start, "{", `{"input_tokens":0,"output_tokens":0,`, 1) + "}}\n\n"
+					stream = withAnthropicFixtureContent(stream)
 					for range 2 {
 						stream += "event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":" + test.delta + "}\n\n"
 					}
@@ -659,23 +682,39 @@ func TestAnthropicCacheOnlyBufferedSSEUsage(t *testing.T) {
 					case "responses":
 						var result *ForwardResult
 						result, err = (&GatewayService{}).handleResponsesBufferedStreamingResponse(response, ctx, "claude-sonnet-4", "claude-sonnet-4", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
-						require.NotNil(t, result)
-						aggregate = result.Usage.CacheCreationInputTokens
+						if result == nil {
+							require.Equal(t, "eof", terminal)
+							require.Zero(t, test.wantAggregate)
+						} else {
+							aggregate = result.Usage.CacheCreationInputTokens
+						}
 					case "chat":
 						var result *ForwardResult
 						result, err = (&GatewayService{}).handleCCBufferedFromAnthropic(response, ctx, "claude-sonnet-4", "claude-sonnet-4", nil, time.Now())
-						require.NotNil(t, result)
-						aggregate = result.Usage.CacheCreationInputTokens
+						if result == nil {
+							require.Equal(t, "eof", terminal)
+							require.Zero(t, test.wantAggregate)
+						} else {
+							aggregate = result.Usage.CacheCreationInputTokens
+						}
 					case "native responses":
 						var result *OpenAIForwardResult
 						result, err = (&OpenAIGatewayService{}).handleResponsesBufferedFromNativeAnthropic(response, ctx, "claude-sonnet-4", "claude-sonnet-4", "claude-sonnet-4", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
-						require.NotNil(t, result)
-						aggregate = result.Usage.CacheCreationInputTokens
+						if result == nil {
+							require.Equal(t, "eof", terminal)
+							require.Zero(t, test.wantAggregate)
+						} else {
+							aggregate = result.Usage.CacheCreationInputTokens
+						}
 					case "native chat":
 						var result *OpenAIForwardResult
 						result, err = (&OpenAIGatewayService{}).handleCCBufferedFromNativeAnthropic(response, ctx, "claude-sonnet-4", "claude-sonnet-4", "claude-sonnet-4", nil, time.Now())
-						require.NotNil(t, result)
-						aggregate = result.Usage.CacheCreationInputTokens
+						if result == nil {
+							require.Equal(t, "eof", terminal)
+							require.Zero(t, test.wantAggregate)
+						} else {
+							aggregate = result.Usage.CacheCreationInputTokens
+						}
 					}
 					require.Equal(t, test.wantAggregate, aggregate)
 					// Incomplete streams retain collected usage but must not report success.
