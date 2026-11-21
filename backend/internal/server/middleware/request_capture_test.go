@@ -125,7 +125,7 @@ func (w *captureFlushFailureRecorder) FlushError() error {
 	if w.flushes == w.failAt {
 		return io.ErrClosedPipe
 	}
-	w.ResponseRecorder.Flush()
+	w.Flush()
 	return nil
 }
 
