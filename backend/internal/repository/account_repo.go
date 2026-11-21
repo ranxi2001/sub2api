@@ -957,18 +957,6 @@ func lockAndMergeAccountProbeExtra(
 		}
 	}
 
-	// Omitted cost means an unrelated edit. Keep the value under the row lock,
-	// including a probe update committed after the edit form was loaded.
-	for _, key := range []string{service.AccountCostMultiplierExtraKey, service.AccountCostAutoSyncExtraKey, service.AccountProbePenaltyExtraKey} {
-		if _, provided := extra[key]; !provided {
-			if value, exists := currentExtra[key]; exists {
-				if extra == nil {
-					extra = make(map[string]any)
-				}
-				extra[key] = value
-			}
-		}
-	}
 	delete(extra, service.OpenAITwoFAAdmissionExtraKey)
 	if state, ok := currentExtra[service.OpenAITwoFAAdmissionExtraKey]; ok {
 		if extra == nil {
@@ -1123,6 +1111,28 @@ func lockAndMergeAccountProbeExtra(
 			}
 		}
 		extra = portable
+	}
+	// A service may have filled omitted request fields with a stale snapshot.
+	// Resolve omission against the locked row, including a concurrent deletion.
+	// Do this after platform portability so omitted account-wide costs stay fresh;
+	// probe penalties still follow the platform transition's discard contract.
+	for _, key := range []string{service.AccountCostMultiplierExtraKey, service.AccountCostAutoSyncExtraKey, service.AccountProbePenaltyExtraKey} {
+		if service.AccountPlatformChanging(ctx) && key == service.AccountProbePenaltyExtraKey {
+			continue
+		}
+		provided, scoped := service.AccountExtraUpdateFieldProvided(ctx, key)
+		if !scoped {
+			_, provided = extra[key]
+		}
+		if !provided {
+			delete(extra, key)
+			if value, exists := currentExtra[key]; exists {
+				if extra == nil {
+					extra = make(map[string]any)
+				}
+				extra[key] = value
+			}
+		}
 	}
 	return extra, nil
 }

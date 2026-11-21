@@ -20,3 +20,23 @@ func PreserveAccountStatus(ctx context.Context) bool {
 	preserve, _ := ctx.Value(preserveAccountStatusKey{}).(bool)
 	return preserve
 }
+
+type accountExtraUpdateFieldsKey struct{}
+
+// Capture request intent before a service fills omitted extra from its snapshot.
+// Each request replaces inherited intent, including requests with nil extra.
+func withAccountExtraUpdateFields(ctx context.Context, extra map[string]any) context.Context {
+	provided := make(map[string]bool, 3)
+	for _, key := range []string{AccountCostMultiplierExtraKey, AccountCostAutoSyncExtraKey, AccountProbePenaltyExtraKey} {
+		_, provided[key] = extra[key]
+	}
+	return context.WithValue(ctx, accountExtraUpdateFieldsKey{}, provided)
+}
+
+// AccountExtraUpdateFieldProvided distinguishes explicit request fields from a
+// materialized Account snapshot. Without request scope, internal full-Account
+// writers retain their existing key-presence contract.
+func AccountExtraUpdateFieldProvided(ctx context.Context, key string) (provided, scoped bool) {
+	fields, scoped := ctx.Value(accountExtraUpdateFieldsKey{}).(map[string]bool)
+	return fields[key], scoped
+}
