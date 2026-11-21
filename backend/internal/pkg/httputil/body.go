@@ -181,6 +181,10 @@ func readRequestBodyChunksWithBudget(ctx context.Context, reader io.Reader, init
 			read, err = reader.Read(chunk[n:])
 			n += read
 		}
+		// HTTP/1 can cancel the context as a side effect of the read deadline.
+		if IsRequestBodyReadTimeout(err) {
+			return requestBodyBuffer{}, err
+		}
 		if err := ctx.Err(); err != nil {
 			return requestBodyBuffer{}, err
 		}

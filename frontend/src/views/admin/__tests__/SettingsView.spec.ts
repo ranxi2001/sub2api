@@ -785,7 +785,7 @@ describe("admin SettingsView payment visible method controls", () => {
     const add = wrapper.findAll('button').find(b => b.text() === 'admin.settings.webSearchEmulation.addProvider');
     await add!.trigger('click');
     const providerSelect = wrapper.findAll('select').find(s => s.find('option[value="deepseek"]').exists())!;
-    expect(providerSelect.findAll('option').map(o => o.attributes('value'))).toEqual(['brave', 'tavily', 'deepseek']);
+    expect(providerSelect.findAll('option').map(o => o.attributes('value'))).toEqual(['brave', 'tavily', 'deepseek', 'exa']);
     await providerSelect.setValue('deepseek');
     expect(wrapper.text()).toContain('admin.settings.webSearchEmulation.deepSeekHint');
     await wrapper.get('input[placeholder="admin.settings.webSearchEmulation.apiKeyPlaceholder"]').setValue('fictional-deepseek-key');
@@ -921,14 +921,12 @@ describe("admin SettingsView payment visible method controls", () => {
     await tabBadge("gateway").trigger("click");
     await flushPromises();
 
-    // Gateway has three independent announcements. Each dismissal removes only
-    // that notice and leaves the remaining notices in the normal tab flow.
-    expect(tabBadge("gateway").exists()).toBe(true);
-    await tabBadge("gateway").trigger("click");
-    await flushPromises();
-    expect(tabBadge("gateway").exists()).toBe(true);
-    await tabBadge("gateway").trigger("click");
-    await flushPromises();
+    // The four gateway notices each occupy their own place in tab flow.
+    for (let remaining = 3; remaining > 0; remaining--) {
+      expect(tabBadge("gateway").exists()).toBe(true);
+      await tabBadge("gateway").trigger("click");
+      await flushPromises();
+    }
     expect(tabBadge("gateway").exists()).toBe(false);
     expect(tabBadge("payment").exists()).toBe(true);
     expect(tabBar.querySelector("[style]")).toBeNull();

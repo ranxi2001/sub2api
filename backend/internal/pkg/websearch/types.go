@@ -28,4 +28,5 @@ const (
 	ProviderTypeBrave    = "brave"
 	ProviderTypeDeepSeek = "deepseek"
 	ProviderTypeTavily   = "tavily"
+	ProviderTypeExa      = "exa"
 )

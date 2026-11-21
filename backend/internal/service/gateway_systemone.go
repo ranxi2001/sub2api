@@ -11,6 +11,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/typesafe"
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/sjson"
 )
 
 type SystemOneForwardResult struct {
@@ -47,6 +48,15 @@ func (s *GatewayService) ForwardSystemOne(ctx context.Context, c *gin.Context, a
 	if err != nil {
 		return nil, err
 	}
+	mappedModel := firstNonEmpty(account.GetMappedModel(typesafe.JevLatestModel), typesafe.JevLatestModel)
+	var upstreamModel string
+	if mappedModel != typesafe.JevLatestModel {
+		body, err = sjson.SetBytes(body, "model", mappedModel)
+		if err != nil {
+			return nil, fmt.Errorf("apply TypeSafe account model mapping: %w", err)
+		}
+		upstreamModel = mappedModel
+	}
 	req, err := typesafe.NewSystemOneRequest(ctx, baseURL, key, body)
 	if err != nil {
 		return nil, err
@@ -59,6 +69,7 @@ func (s *GatewayService) ForwardSystemOne(ctx context.Context, c *gin.Context, a
 	if err := checkAPIKeyLongContextBeforeForward(ctx, c, s.billingService, body); err != nil {
 		return nil, err
 	}
+	SetOpsUpstreamModel(c, upstreamModel)
 	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
 		return nil, s.handleUpstreamTransportError(ctx, c, account, err, OpsUpstreamErrorEvent{
@@ -98,6 +109,7 @@ func (s *GatewayService) ForwardSystemOne(ctx context.Context, c *gin.Context, a
 			UpstreamHeaders:       resp.Header.Clone(),
 			Usage:                 ClaudeUsage{InputTokens: decoded.Usage.InputTokens, OutputTokens: decoded.Usage.OutputTokens},
 			Model:                 typesafe.JevLatestModel,
+			UpstreamModel:         upstreamModel,
 			UpstreamResponseModel: decoded.Model,
 			Duration:              time.Since(started),
 		},

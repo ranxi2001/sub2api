@@ -20,7 +20,7 @@ func normalizeCodexPageContext(body []byte) ([]byte, bool) {
 }
 
 func normalizeCodexUntrustedContext(body []byte) ([]byte, bool) {
-	if !mayContainCodexCallOutputCandidate(body, "codex_apps_open_page", "codex_apps_selected_page_part_", "browser_info", "goal_objective", "untrusted_context") {
+	if !mayContainCodexCallOutputCandidate(body, "codex_apps_open_page", "codex_apps_selected_page_part_", "browser_info", "goal_objective", "untrusted_context", "ide_context", "untrusted_content", "proposed_plan") {
 		return body, false
 	}
 	input := gjson.GetBytes(body, "input")
@@ -44,7 +44,7 @@ func normalizeCodexUntrustedContext(body []byte) ([]byte, bool) {
 		}
 		name, output := item.Get("name").String(), item.Get("output").String()
 		text := "<external_" + name + ">\n" + output + "\n</external_" + name + ">"
-		if name == "browser_info" || name == "goal_objective" || name == "untrusted_context" {
+		if codexStandaloneContextName(name) {
 			text = "<external_" + name + ">" + output + "</external_" + name + ">"
 		}
 		message, err := json.Marshal(map[string]any{
@@ -89,7 +89,13 @@ func isCodexContext(item gjson.Result) bool {
 		return false
 	}
 	name := item.Get("name").String()
-	if name == "browser_info" || name == "goal_objective" || name == "untrusted_context" {
+	if codexStandaloneContextName(name) {
+		if name == "untrusted_content" {
+			return true
+		}
+		if name == "proposed_plan" {
+			return output.String() != ""
+		}
 		return strings.TrimSpace(output.String()) != ""
 	}
 	if name == "codex_apps_open_page" {
@@ -134,4 +140,12 @@ func validCodexPageSnapshot(text string) bool {
 	}
 	var value string
 	return json.Unmarshal(id, &value) == nil && strings.TrimSpace(value) != ""
+}
+
+func codexStandaloneContextName(name string) bool {
+	switch name {
+	case "browser_info", "goal_objective", "untrusted_context", "ide_context", "untrusted_content", "proposed_plan":
+		return true
+	}
+	return false
 }
