@@ -804,9 +804,9 @@ export default {
     noSearchResult: '没有匹配的模型',
     anonymousHint: '登录后可查看你的专属分组与专属倍率',
     currency: {
-      label: '显示币种', CNY: '人民币', USD: '美元', credits: '站内额度',
+      customerLabel: '客户参考价：{currency}（折后）', credits: '站内额度',
       reference: '展示参考汇率：1 USD = {rate} CNY',
-      explanation: '客户价按人民币充值基准折算（¥1 = {credits} 站内额度），不含充值优惠和手续费；官方价来自美元目录。切换币种仅影响展示，实际扣费规则不变。',
+      explanation: '站内额度参考价值：1 额度 = {value} {currency}。客户价与官方参考价的币种由站点设置，官方价可按平台／模型不同；以金额符号和列标题为准。参考换算不改变实际扣费，也不代表充值优惠后的成本。',
       unavailable: '暂未取得换算配置：客户价显示站内额度，官方参考价显示美元。',
       minimumCharge: '单次最低 {amount}',
     },

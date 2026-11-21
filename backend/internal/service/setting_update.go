@@ -533,6 +533,13 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	if settings.ModelPlazaUSDToCNYRate < 0 || math.IsNaN(settings.ModelPlazaUSDToCNYRate) || math.IsInf(settings.ModelPlazaUSDToCNYRate, 0) {
 		return nil, infraerrors.BadRequest("INVALID_MODEL_PLAZA_DISPLAY_RATE", "model plaza USD to CNY display rate must be finite and positive")
 	}
+	plazaCurrency, err := NormalizeModelPlazaCurrency(settings.ModelPlazaCurrency)
+	if err != nil {
+		return nil, infraerrors.BadRequest("INVALID_MODEL_PLAZA_CURRENCY", err.Error())
+	}
+	settings.ModelPlazaCurrency = plazaCurrency
+	plazaCurrencyJSON, _ := json.Marshal(plazaCurrency)
+	updates[SettingKeyModelPlazaCurrency] = string(plazaCurrencyJSON)
 	updates[SettingKeyModelPlazaUSDToCNYRate] = strconv.FormatFloat(settings.ModelPlazaUSDToCNYRate, 'f', -1, 64)
 	updates[SettingKeyPluginManagementEnabled] = strconv.FormatBool(settings.PluginManagementEnabled)
 

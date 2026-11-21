@@ -914,6 +914,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	result.ModelPlazaRequireAuth = settings[SettingKeyModelPlazaRequireAuth] == "true"
 	result.ModelPlazaDescription = settings[SettingKeyModelPlazaDescription]
 	result.ModelPlazaUSDToCNYRate = modelPlazaUSDToCNYRate(settings[SettingKeyModelPlazaUSDToCNYRate])
+	result.ModelPlazaCurrency = parseModelPlazaCurrency(settings[SettingKeyModelPlazaCurrency])
 	result.PluginManagementEnabled = settings[SettingKeyPluginManagementEnabled] == "true"
 
 	// Support tickets (default: disabled; strict true). A corrupt config is shown as the

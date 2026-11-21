@@ -1,3 +1,4 @@
+import { defaultPlazaCurrencySettings } from '@/utils/plazaCurrency'
 import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import PlazaGroupSection from '../PlazaGroupSection.vue'
@@ -94,7 +95,7 @@ const NOTE = 'modelPlaza.detail.longContextDisabledNote'
 describe('PlazaGroupSection 长上下文说明', () => {
   it('passes display currency to the table without changing group rates', async () => {
     const wrapper = mountSection(group({ rate_multiplier: 0.5 }))
-    const priceDisplay = { currency: 'CNY' as const, usdToCny: 7, creditPerCny: 1 }
+    const priceDisplay = { usdToCny: 7, settings: defaultPlazaCurrencySettings() }
     await wrapper.setProps({ priceDisplay })
     expect(wrapper.findComponent(PlazaModelPricingTable).props()).toMatchObject({ priceDisplay, rateMultiplier: 0.5 })
     wrapper.unmount()

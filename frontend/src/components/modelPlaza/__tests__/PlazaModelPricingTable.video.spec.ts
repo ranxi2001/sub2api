@@ -1,3 +1,4 @@
+import { defaultPlazaCurrencySettings } from '@/utils/plazaCurrency'
 import { afterEach, describe, expect, it } from 'vitest'
 import { enableAutoUnmount, mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
@@ -89,7 +90,7 @@ describe.each([
     const wrapper = render(mediaModel(mode), {
       imageRateIndependent: true, imageRateMultiplier: 2,
       videoRateIndependent: true, videoRateMultiplier: 3,
-      priceDisplay: { currency: 'CNY', usdToCny: 7, creditPerCny: 2 }
+      priceDisplay: { usdToCny: 7, settings: { ...defaultPlazaCurrencySettings(), wallet_currency: 'CNY', wallet_unit_value: 0.5, customer_currency: 'CNY' } }
     })
     const price = wrapper.findAll('tbody td')[1].text()
     expect(price).toContain(mode === 'image' ? '¥0.54' : mode === 'video' ? '¥0.81' : '¥0.135')

@@ -567,7 +567,7 @@ type ModelPlazaRuntime struct {
 	RequireAuth  bool
 	Description  string
 	USDToCNYRate float64
-	CreditPerCNY float64
+	Currency     ModelPlazaCurrencySettings
 }
 
 // GetModelPlazaRuntime reads the model-plaza feature switches directly from the
@@ -579,7 +579,7 @@ func (s *SettingService) GetModelPlazaRuntime(ctx context.Context) ModelPlazaRun
 		SettingKeyModelPlazaRequireAuth,
 		SettingKeyModelPlazaDescription,
 		SettingKeyModelPlazaUSDToCNYRate,
-		SettingBalanceRechargeMult,
+		SettingKeyModelPlazaCurrency,
 	})
 	if err != nil {
 		return ModelPlazaRuntime{Enabled: false}
@@ -589,7 +589,7 @@ func (s *SettingService) GetModelPlazaRuntime(ctx context.Context) ModelPlazaRun
 		RequireAuth:  vals[SettingKeyModelPlazaRequireAuth] == "true",
 		Description:  vals[SettingKeyModelPlazaDescription],
 		USDToCNYRate: modelPlazaUSDToCNYRate(vals[SettingKeyModelPlazaUSDToCNYRate]),
-		CreditPerCNY: normalizeBalanceRechargeMultiplier(pcParseFloat(vals[SettingBalanceRechargeMult], defaultBalanceRechargeMultiplier)),
+		Currency:     parseModelPlazaCurrency(vals[SettingKeyModelPlazaCurrency]),
 	}
 }
 

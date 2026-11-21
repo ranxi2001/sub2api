@@ -82,11 +82,20 @@ export interface ModelPlazaGroup {
   models: PlazaModel[]
 }
 
+export interface PlazaCurrencySettings {
+  wallet_currency: 'CNY' | 'USD'
+  wallet_unit_value: number
+  customer_currency: 'CNY' | 'USD'
+  official_currency: 'CNY' | 'USD'
+  official_platform_currencies: Record<string, 'CNY' | 'USD'>
+  official_model_currencies: Record<string, 'CNY' | 'USD'>
+}
+
 export interface ModelPlazaResponse {
   /** Display reference only: CNY per real USD, independent of wallet credits. */
   usd_to_cny_rate?: number
-  /** Wallet credits received per CNY before recharge bonuses and fees. */
-  credit_per_cny?: number
+  /** Display-only wallet valuation and currency rules, independent of payments. */
+  currency?: PlazaCurrencySettings
   /** 管理员配置的全局价格说明（Markdown）。 */
   description: string
   groups: ModelPlazaGroup[]

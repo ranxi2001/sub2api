@@ -382,10 +382,11 @@ type UpdateSettingsRequest struct {
 	SubscriptionEnabled *bool `json:"subscription_enabled"`
 
 	// Model Plaza feature switches + description
-	ModelPlazaEnabled      *bool    `json:"model_plaza_enabled"`
-	ModelPlazaRequireAuth  *bool    `json:"model_plaza_require_auth"`
-	ModelPlazaDescription  *string  `json:"model_plaza_description"`
-	ModelPlazaUSDToCNYRate *float64 `json:"model_plaza_usd_to_cny_rate" binding:"omitempty,gt=0"`
+	ModelPlazaEnabled      *bool                               `json:"model_plaza_enabled"`
+	ModelPlazaRequireAuth  *bool                               `json:"model_plaza_require_auth"`
+	ModelPlazaDescription  *string                             `json:"model_plaza_description"`
+	ModelPlazaUSDToCNYRate *float64                            `json:"model_plaza_usd_to_cny_rate" binding:"omitempty,gt=0"`
+	ModelPlazaCurrency     *service.ModelPlazaCurrencySettings `json:"model_plaza_currency"`
 
 	// Plugin management menu visibility switch; plugin runtime is unaffected.
 	PluginManagementEnabled *bool `json:"plugin_management_enabled"`
@@ -2398,6 +2399,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.ModelPlazaRequireAuth
 		}(),
+		ModelPlazaCurrency: func() service.ModelPlazaCurrencySettings {
+			if req.ModelPlazaCurrency != nil {
+				return *req.ModelPlazaCurrency
+			}
+			return previousSettings.ModelPlazaCurrency
+		}(),
 		ModelPlazaUSDToCNYRate: func() float64 {
 			if req.ModelPlazaUSDToCNYRate != nil {
 				return *req.ModelPlazaUSDToCNYRate
@@ -2898,6 +2905,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		ModelPlazaRequireAuth:   updatedSettings.ModelPlazaRequireAuth,
 		ModelPlazaDescription:   updatedSettings.ModelPlazaDescription,
 		ModelPlazaUSDToCNYRate:  updatedSettings.ModelPlazaUSDToCNYRate,
+		ModelPlazaCurrency:      updatedSettings.ModelPlazaCurrency,
 		PluginManagementEnabled: updatedSettings.PluginManagementEnabled,
 
 		SupportTicketEnabled: updatedSettings.SupportTicketEnabled,

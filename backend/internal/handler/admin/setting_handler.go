@@ -429,6 +429,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		PluginManagementEnabled: settings.PluginManagementEnabled,
 		ModelPlazaDescription:   settings.ModelPlazaDescription,
 		ModelPlazaUSDToCNYRate:  settings.ModelPlazaUSDToCNYRate,
+		ModelPlazaCurrency:      settings.ModelPlazaCurrency,
 
 		SupportTicketEnabled: settings.SupportTicketEnabled,
 		SupportTicket:        settings.SupportTicket,

@@ -799,9 +799,9 @@ export default {
     noSearchResult: 'No matching models',
     anonymousHint: 'Sign in to see your exclusive groups and personal rates',
     currency: {
-      label: 'Display currency', CNY: 'CNY', USD: 'USD', credits: 'Wallet credits',
+      customerLabel: 'Your reference price: {currency} (discounted)', credits: 'Wallet credits',
       reference: 'Display reference: 1 USD = {rate} CNY',
-      explanation: 'Your price uses the CNY recharge baseline (¥1 = {credits} wallet credits), excluding recharge offers and fees. Official prices originate in USD. Currency selection changes display only, not billing.',
+      explanation: 'Wallet reference value: 1 credit = {value} {currency}. Display currencies are set by this site; official references can vary by platform or model. Check the currency symbols and headings. Display conversion does not change billing or represent your cost after recharge offers.',
       unavailable: 'Conversion settings are unavailable: your prices are in wallet credits and official references are in USD.',
       minimumCharge: 'Minimum {amount} per request',
     },
