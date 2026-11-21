@@ -2,6 +2,7 @@ package handler
 
 import (
 	"log/slog"
+	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -167,7 +168,7 @@ func (h *ModelPlazaHandler) Get(c *gin.Context) {
 	response.Success(c, modelPlazaResponse{
 		Description:  rt.Description,
 		USDToCNYRate: rt.USDToCNYRate,
-		Currency:     rt.Currency,
+		Currency:     visiblePlazaCurrency(rt.Currency, out),
 		Groups:       out,
 	})
 }
@@ -283,4 +284,24 @@ func toModelPlazaOfficialPricing(p *service.PlazaOfficialPricing) *modelPlazaOff
 		CacheReadPrice:     p.CacheReadPrice,
 		Intervals:          toUserPricingIntervals(p.Intervals),
 	}
+}
+
+// Currency override IDs follow the same visibility boundary as the model list.
+func visiblePlazaCurrency(settings service.ModelPlazaCurrencySettings, groups []modelPlazaGroup) service.ModelPlazaCurrencySettings {
+	result := settings
+	result.OfficialPlatformCurrencies = map[string]string{}
+	result.OfficialModelCurrencies = map[string]string{}
+	for _, group := range groups {
+		for _, model := range group.Models {
+			platform := strings.ToLower(strings.TrimSpace(model.Platform))
+			name := strings.ToLower(strings.TrimSpace(model.Name))
+			if currency, ok := settings.OfficialPlatformCurrencies[platform]; ok {
+				result.OfficialPlatformCurrencies[platform] = currency
+			}
+			if currency, ok := settings.OfficialModelCurrencies[name]; ok {
+				result.OfficialModelCurrencies[name] = currency
+			}
+		}
+	}
+	return result
 }

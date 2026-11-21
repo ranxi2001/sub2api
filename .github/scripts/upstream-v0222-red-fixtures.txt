@@ -204,3 +204,4 @@ backend/internal/service/account_probe_penalty_test.go
 # Model plaza display currency tests require the candidate display configuration.
 backend/internal/service/model_plaza_currency_test.go
 backend/internal/service/model_plaza_currency_update_test.go
+backend/internal/handler/model_plaza_currency_test.go
