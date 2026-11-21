@@ -46,11 +46,19 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	}
 	originalModel := ccReq.Model
 	clientStream := ccReq.Stream
+	if err := apicompat.ValidateChatCompletionsAnthropicMedia(&ccReq); err != nil {
+		writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		return nil, err
+	}
 
 	// 2. Convert CC → Responses → Anthropic (chained conversion)
 	responsesReq, err := chatCompletionsToResponses(s.cfg, &ccReq)
 	if err != nil {
 		return nil, fmt.Errorf("convert chat completions to responses: %w", err)
+	}
+	if err := apicompat.PreserveChatCompletionsAnthropicToolMedia(&ccReq, responsesReq); err != nil {
+		writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", "Failed to convert tool media")
+		return nil, err
 	}
 
 	// Resolve the final upstream model before model-specific conversion.
@@ -74,9 +82,10 @@ func (s *GatewayService) ForwardAsChatCompletions(
 		return nil, err
 	}
 	responsesReq.Model = mappedModel
-	anthropicReq, err := apicompat.ResponsesToAnthropicRequest(responsesReq)
+	anthropicReq, err := apicompat.ResponsesToAnthropicRequestWithOptions(responsesReq, apicompat.ResponsesToAnthropicOptions{StrictMedia: true})
 	if err != nil {
-		if isClaude55SignedThinkingModel(mappedModel) {
+		var mediaErr *apicompat.AnthropicMediaError
+		if errors.As(err, &mediaErr) || isClaude55SignedThinkingModel(mappedModel) {
 			writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		}
 		return nil, fmt.Errorf("convert responses to anthropic: %w", err)
