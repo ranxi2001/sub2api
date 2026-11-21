@@ -164,21 +164,13 @@ func TestGrokImageEditInternalAndRetryableErrorsRemainUpstreamErrors(t *testing.
 	}
 }
 
-type grokMediaValidationSettingsRepo struct {
-	service.SettingRepository
-}
-
 func (grokMediaSlotRepo) SetTempUnschedulable(context.Context, int64, time.Time, string) error {
-	return nil
-}
-
-func (*grokMediaValidationSettingsRepo) SetMultiple(context.Context, map[string]string) error {
 	return nil
 }
 
 func enableGrokMediaValidationTestScheduler(t *testing.T) {
 	t.Helper()
-	settings := service.NewSettingService(&grokMediaValidationSettingsRepo{}, nil)
+	settings := service.NewSettingService(&contentModerationHandlerSettingRepo{}, nil)
 	require.NoError(t, settings.UpdateSettings(context.Background(), &service.SystemSettings{OpenAIAdvancedSchedulerEnabled: true}))
 	t.Cleanup(func() {
 		require.NoError(t, settings.UpdateSettings(context.Background(), &service.SystemSettings{}))
