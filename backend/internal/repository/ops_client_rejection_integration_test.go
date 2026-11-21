@@ -118,7 +118,7 @@ func TestChannelMonitorClientRejectionRequiresLocalEvidence(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var excluded bool
 			err := integrationDB.QueryRowContext(ctx, "SELECT "+channelMonitorClientRejectionSQL+` FROM (
-    SELECT TRUE AS is_business_limited, NULLIF($1::text,'') AS error_owner,
+    SELECT 'openai'::text AS platform, TRUE AS is_business_limited, NULLIF($1::text,'') AS error_owner,
      $2::text AS error_source, NULLIF($3::int,0) AS upstream_status_code,
      $4::jsonb AS upstream_errors, 'request' AS error_phase,
      'api_error' AS error_type, NULL::bigint AS account_id,

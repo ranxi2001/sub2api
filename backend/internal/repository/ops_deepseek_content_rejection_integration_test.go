@@ -51,7 +51,13 @@ func TestOpsDeepSeekContentRejectionHistoryAndSLA(t *testing.T) {
 		detail, err := ops.GetErrorLogByID(ctx, id)
 		require.NoError(t, err)
 		require.Equal(t, i < 2, detail.IsBusinessLimited)
-		require.Equal(t, row.StatusCode, detail.StatusCode, "historical HTTP evidence is not rewritten")
+		var storedStatus, storedUpstreamStatus int
+		require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT status_code, upstream_status_code FROM ops_error_logs WHERE id=$1", id).Scan(&storedStatus, &storedUpstreamStatus))
+		require.Equal(t, row.StatusCode, storedStatus, "historical client HTTP evidence is not rewritten")
+		require.Equal(t, *row.UpstreamStatusCode, storedUpstreamStatus, "historical upstream HTTP evidence is not rewritten")
+		// Ops detail displays the upstream status when present.
+		require.Equal(t, *row.UpstreamStatusCode, detail.StatusCode)
+		require.Equal(t, row.UpstreamStatusCode, detail.UpstreamStatusCode)
 		if i < 2 {
 			require.Equal(t, "client", detail.Owner)
 			require.Equal(t, "request", detail.Phase)
