@@ -35,6 +35,18 @@ func (c *profitReportCache) clear() {
 	c.entries = nil
 }
 func (c *profitReportCache) read(ctx context.Context, f service.UpstreamOperationsFilter, load func(context.Context, bool) (*service.ProfitOperationsSnapshot, error)) (*service.ProfitOperationsSnapshot, error) {
+	report, err := c.readOnce(ctx, f, load)
+	// A refresh may join the previous request while its canceled query is still
+	// unwinding. singleflight removes that flight before delivering its error,
+	// so a live waiter can safely join/start a fresh flight. Retry only once;
+	// deadlines and ordinary query failures keep their existing behavior.
+	if errors.Is(err, context.Canceled) && ctx.Err() == nil {
+		return c.readOnce(ctx, f, load)
+	}
+	return report, err
+}
+
+func (c *profitReportCache) readOnce(ctx context.Context, f service.UpstreamOperationsFilter, load func(context.Context, bool) (*service.ProfitOperationsSnapshot, error)) (*service.ProfitOperationsSnapshot, error) {
 	key := f
 	key.Page = 1
 	key.PageSize = 20

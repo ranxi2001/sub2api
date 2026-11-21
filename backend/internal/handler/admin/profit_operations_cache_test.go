@@ -5,10 +5,15 @@ package admin
 import (
 	"context"
 	"encoding/json"
-	"github.com/Wei-Shaw/sub2api/internal/service"
-	"github.com/stretchr/testify/require"
+	"errors"
+	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/stretchr/testify/require"
 )
 
 func TestProfitOperationsCachePagesSortAndInvalidation(t *testing.T) {
@@ -64,4 +69,90 @@ func TestProfitOperationsCacheDoesNotCacheOversizedReports(t *testing.T) {
 		require.NoError(t, err)
 	}
 	require.Equal(t, 4, calls)
+}
+
+// readOnce evaluates Done after registering the singleflight waiter. This
+// handshake lets the test cancel the leader only once the follower has joined.
+type profitCacheWaitContext struct {
+	context.Context
+	waiting chan struct{}
+	once    sync.Once
+}
+
+func (c *profitCacheWaitContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.waiting) })
+	return c.Context.Done()
+}
+
+func TestProfitOperationsCacheLiveWaiterRecoversFromCanceledLeader(t *testing.T) {
+	var cache profitReportCache
+	f := service.UpstreamOperationsFilter{Page: 1, PageSize: 20}
+	ctx, stop := context.WithTimeout(context.Background(), 5*time.Second)
+	defer stop()
+	leader, cancel := context.WithCancel(ctx)
+	defer cancel()
+	started := make(chan struct{})
+	var calls atomic.Int32
+	load := func(ctx context.Context, _ bool) (*service.ProfitOperationsSnapshot, error) {
+		if calls.Add(1) == 1 {
+			close(started)
+			<-ctx.Done()
+			return nil, fmt.Errorf("read upstream usage: %w", ctx.Err())
+		}
+		return &service.ProfitOperationsSnapshot{UpstreamOperationsSnapshot: service.UpstreamOperationsSnapshot{
+			Usage: json.RawMessage(`{"summary":{"requests":7},"rows":[],"total":0}`),
+		}}, nil
+	}
+	leaderDone := make(chan error, 1)
+	go func() { _, err := cache.read(leader, f, load); leaderDone <- err }()
+	select {
+	case <-started:
+	case <-ctx.Done():
+		t.Fatal("leader did not start")
+	}
+	waiter := &profitCacheWaitContext{Context: ctx, waiting: make(chan struct{})}
+	type result struct {
+		report *service.ProfitOperationsSnapshot
+		err    error
+	}
+	followerDone := make(chan result, 1)
+	go func() { report, err := cache.read(waiter, f, load); followerDone <- result{report, err} }()
+	select {
+	case <-waiter.waiting:
+	case <-ctx.Done():
+		t.Fatal("follower did not join")
+	}
+	cancel()
+	require.ErrorIs(t, <-leaderDone, context.Canceled)
+	follower := <-followerDone
+	require.NoError(t, follower.err)
+	require.Contains(t, string(follower.report.Usage), `"requests":7`)
+	require.EqualValues(t, 2, calls.Load())
+	_, err := cache.read(ctx, f, load)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, calls.Load(), "the recovered result should be cached")
+}
+
+func TestProfitOperationsCacheCancellationRetryIsBounded(t *testing.T) {
+	queryError := errors.New("query failed")
+	for _, tc := range []struct {
+		name  string
+		err   error
+		calls int
+	}{
+		{"canceled", context.Canceled, 2},
+		{"deadline", context.DeadlineExceeded, 1},
+		{"query failure", queryError, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var cache profitReportCache
+			calls := 0
+			_, err := cache.read(context.Background(), service.UpstreamOperationsFilter{}, func(context.Context, bool) (*service.ProfitOperationsSnapshot, error) {
+				calls++
+				return nil, tc.err
+			})
+			require.ErrorIs(t, err, tc.err)
+			require.Equal(t, tc.calls, calls)
+		})
+	}
 }
