@@ -58,17 +58,14 @@ func (s *AntigravityGatewayService) forwardGatewayMessages(ctx context.Context, 
 	if s.settingService != nil && s.settingService.cfg != nil {
 		cfg = s.settingService.cfg
 	}
-	var request struct {
-		Model  string `json:"model"`
-		Stream bool   `json:"stream"`
-	}
-	if err := json.Unmarshal(body, &request); err != nil {
+	parsed, err := ParseGatewayRequest(NewRequestBodyRef(body), PlatformAnthropic)
+	if err != nil {
 		return nil, err
 	}
 	relay := &GatewayService{cfg: cfg, httpUpstream: s.httpUpstream, accountRepo: s.accountRepo,
 		rateLimitService: s.rateLimitService, settingService: s.settingService,
 		responseHeaderFilter: compileResponseHeaderFilter(cfg), deferredService: &DeferredService{}}
-	return relay.Forward(ctx, c, account, &ParsedRequest{Body: NewRequestBodyRef(body), Model: request.Model, Stream: request.Stream})
+	return relay.Forward(ctx, c, account, parsed)
 }
 
 func (s *AntigravityGatewayService) forwardGatewayGemini(ctx context.Context, c *gin.Context, account *Account, model, action string, stream bool, body []byte) (*ForwardResult, error) {
@@ -197,7 +194,7 @@ func prepareGatewayProtocolAccount(ctx context.Context, selected *Account, repo 
 		delete(view.Extra, key)
 	}
 	view.modelMappingCacheReady = false
-	if !view.IsSchedulable() {
+	if !view.IsSchedulableForModelWithContext(ctx, model) {
 		return nil, ErrGatewayProtocolsPending
 	}
 	if family == domain.PlatformGatewayAnthropic {

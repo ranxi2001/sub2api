@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
@@ -160,4 +161,15 @@ func TestGatewayProtocolAdmissionSharedStateAndSelectionIdentity(t *testing.T) {
 		_, err := prepareGatewayProtocolAccount(WithResolvedTargetPlatform(ctx, target), &selected, repo, family, "public-model")
 		require.Error(t, err, "one shared account error blocks all target protocols")
 	}
+}
+
+func TestGatewayProtocolAdmissionPreservesModelCooldown(t *testing.T) {
+	repo, ctx := gatewayProtocolFixture(PlatformOpenAI)
+	repo.account.Extra = map[string]any{modelRateLimitsKey: map[string]any{
+		"public-model": map[string]any{"rate_limit_reset_at": time.Now().Add(time.Hour).Format(time.RFC3339)},
+	}}
+	_, err := prepareGatewayProtocolAccount(ctx, repo.account, repo, domain.PlatformGatewayOpenAI, "public-model")
+	require.ErrorIs(t, err, ErrGatewayProtocolsPending, "transport view must retain existing per-model cooldown admission")
+	_, err = prepareGatewayProtocolAccount(ctx, repo.account, repo, domain.PlatformGatewayOpenAI, "another-model")
+	require.NoError(t, err, "a model cooldown does not erase other model capacity")
 }
