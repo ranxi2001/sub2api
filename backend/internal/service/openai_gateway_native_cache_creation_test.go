@@ -61,6 +61,7 @@ func TestNativeAnthropicCacheCreationRouteBillingBoundary(t *testing.T) {
 						}
 						message := `{"id":"msg_cache","type":"message","role":"assistant","model":"k3","content":[],"usage":` + startUsage + `}`
 						payload := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":" + message + "}\n\n"
+						payload = withAnthropicFixtureContent(payload)
 						for _, snapshot := range test.snapshots {
 							for range 2 {
 								payload += "event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":" + snapshot + "}\n\n"
@@ -104,7 +105,7 @@ func TestNativeAnthropicCacheCreationRouteBillingBoundary(t *testing.T) {
 						case "responses":
 							result, err = svc.Forward(context.Background(), ctx, account, body)
 						}
-						if route == "messages" && stream && terminal == "eof" {
+						if terminal == "eof" {
 							require.ErrorContains(t, err, "missing terminal event")
 						} else {
 							require.NoError(t, err)
@@ -121,8 +122,15 @@ func TestNativeAnthropicCacheCreationRouteBillingBoundary(t *testing.T) {
 						require.Equal(t, test.aggregate, result.Usage.CacheCreationInputTokens)
 						require.Equal(t, test.ttl5m, result.Usage.CacheCreation5mTokens)
 						require.Equal(t, test.ttl1h, result.Usage.CacheCreation1hTokens)
-						require.Equal(t, http.StatusOK, recorder.Code)
-						if route == "messages" {
+						if terminal == "eof" && !stream {
+							require.Equal(t, http.StatusBadGateway, recorder.Code)
+						} else {
+							require.Equal(t, http.StatusOK, recorder.Code)
+						}
+						if terminal == "eof" {
+							require.NotContains(t, recorder.Body.String(), "response.completed")
+							require.NotContains(t, recorder.Body.String(), "[DONE]")
+						} else if route == "messages" {
 							require.Equal(t, payload, recorder.Body.String())
 						} else {
 							assertNativeCacheCompatibleUsage(t, recorder.Body.String(), route, stream, uncachedInput, test.aggregate)

@@ -23,6 +23,12 @@ func TestIssue985AdapterBoundaries(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	canonical := issue985Stream()
 	stop := issue985Frame("message_stop", `{"type":"message_stop"}`)
+	var dataOnly, reordered strings.Builder
+	for _, frame := range strings.Split(strings.TrimSpace(canonical), "\n\n") {
+		lines := strings.Split(frame, "\n")
+		_, _ = dataOnly.WriteString(lines[1] + "\n\n")
+		_, _ = reordered.WriteString(lines[1] + "\nid: fixture\n" + lines[0] + "\n\n")
+	}
 	missing := strings.ReplaceAll(strings.ReplaceAll(canonical, `,"usage":{"input_tokens":17,"output_tokens":0}`, ""), `,"usage":{"output_tokens":3}`, "")
 	for _, tc := range []struct {
 		name, wire    string
@@ -30,6 +36,8 @@ func TestIssue985AdapterBoundaries(t *testing.T) {
 		input, output int
 	}{
 		{"crlf", strings.ReplaceAll(canonical, "\n", "\r\n"), false, 17, 3},
+		{"data_only", dataOnly.String(), false, 17, 3},
+		{"field_order", reordered.String(), false, 17, 3},
 		{"cr", strings.ReplaceAll(canonical, "\n", "\r"), false, 17, 3},
 		{"bom", "\xef\xbb\xbf" + canonical, false, 17, 3},
 		{"compact", strings.ReplaceAll(strings.ReplaceAll(canonical, "event: ", "event:"), "data: ", "data:"), false, 17, 3},

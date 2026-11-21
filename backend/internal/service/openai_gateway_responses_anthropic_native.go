@@ -185,7 +185,7 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 	for {
 		event, payload, ok := streamStatus.nextEvent()
 		if !ok {
-			if !streamStatus.sawTerminal && !streamStatus.clientDisconnected {
+			if !streamStatus.clientDisconnected {
 				if resetErr, handled := handleOpenAIHTTP2PeerReset(c, account, requestID, streamStatus.readErr); handled {
 					return resultWithUsage(), resetErr
 				}
@@ -397,7 +397,7 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 	for {
 		event, payload, ok := streamStatus.nextEvent()
 		if !ok {
-			if !streamStatus.sawTerminal && !streamStatus.clientDisconnected {
+			if !streamStatus.clientDisconnected {
 				if resetErr, handled := handleOpenAIHTTP2PeerReset(c, account, requestID, streamStatus.readErr); handled {
 					return resultWithUsage(), resetErr
 				}

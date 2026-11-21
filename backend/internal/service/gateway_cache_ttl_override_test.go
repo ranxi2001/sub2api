@@ -111,6 +111,7 @@ func cacheTTLOverrideBoundaryResponse(test cacheTTLOverrideBoundaryCase, stream 
 		return `{"id":"msg_cache","type":"message","role":"assistant","model":"k3","content":[],"usage":{` + base + `,` + cache + `}}`
 	}
 	payload := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_cache\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"k3\",\"content\":[],\"usage\":{" + base + "," + strings.TrimPrefix(test.snapshots[0], "{") + "}}\n\n"
+	payload = withAnthropicFixtureContent(payload)
 	for _, snapshot := range test.snapshots {
 		for range 2 {
 			payload += "event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":" + snapshot + "}\n\n"
@@ -356,7 +357,7 @@ func TestCacheTTLOverrideForwardPreservesAbsentDetails(t *testing.T) {
 					payload := `{"id":"msg_cache","type":"message","role":"assistant","model":"k3","content":[],"usage":` + usage + `}`
 					contentType := "application/json"
 					if stream {
-						payload = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":" + payload + "}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+						payload = withAnthropicFixtureContent("event: message_start\ndata: {\"type\":\"message_start\",\"message\":" + payload + "}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
 						contentType = "text/event-stream"
 					}
 					recorder := httptest.NewRecorder()

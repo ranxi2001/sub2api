@@ -989,6 +989,9 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 		}
 		eventName, dataLine, ready, _ := assembler.line("", maxLineSize)
 		if !ready {
+			if knownAnthropicStreamEvent(eventName) && eventName != "ping" {
+				return nil, "", nil, errors.New("stream usage incomplete: Anthropic event has no data")
+			}
 			return []string{strings.Join(lines, "\n") + "\n\n"}, "", nil, nil
 		}
 		if strings.TrimSpace(dataLine) == "[DONE]" {
@@ -1206,7 +1209,7 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 				if len(block) > 2*maxLineSize-terminalFrames.Len() {
 					return errAnthropicSSEFrameTooLarge
 				}
-				terminalFrames.WriteString(block)
+				_, _ = terminalFrames.WriteString(block)
 				continue
 			}
 			if _, err := io.WriteString(w, reverseToolNamesIfPresentString(c, block)); err != nil {

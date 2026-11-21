@@ -452,10 +452,16 @@ func (s *OpenAIGatewayService) relayAnthropicStream(ctx context.Context, resp *h
 		keepaliveTimer.Reset(keepaliveInterval)
 	}
 	inPartialEvent := false
-	clientGone := ctx.Done()
+	clientCtx := ctx
+	if c.Request != nil {
+		clientCtx = c.Request.Context()
+	}
+	clientGone := clientCtx.Done()
+	upstreamGone := ctx.Done()
 	markDisconnected := func() {
 		clientDisconnected = true
 		clientGone = nil
+		upstreamGone = nil
 		if intervalTicker == nil {
 			streamInterval = anthropicCompatDisconnectDrainInterval
 			intervalTicker = time.NewTicker(streamInterval)
@@ -501,6 +507,13 @@ func (s *OpenAIGatewayService) relayAnthropicStream(ctx context.Context, resp *h
 		}
 		raw := strings.Join(pendingLines, "\n") + "\n"
 		pendingLines = nil
+		if strings.TrimSpace(payload) == "[DONE]" {
+			return true
+		}
+		if !ready && knownAnthropicStreamEvent(name) && name != "ping" {
+			status.protocolFailure = "Anthropic event has no data"
+			return false
+		}
 		if ready {
 			event, known := status.decodeFrame(name, payload)
 			if status.protocolFailure != "" {
@@ -510,9 +523,12 @@ func (s *OpenAIGatewayService) relayAnthropicStream(ctx context.Context, resp *h
 				observer.ObserveAnthropic([]byte(payload))
 				status.observe(&event, payload)
 				parseSSEUsagePassthrough(payload, usage)
-				if model := compositeClientModel(ctx, ""); model != "" && event.Type == "message_start" {
+				if model := compositeClientModel(ctx, ""); model != "" && event.Type == "message_start" && gjson.Get(payload, "message.model").Exists() {
 					if rewritten, err := sjson.Set(payload, "message.model", model); err == nil {
-						raw = "event: message_start\ndata: " + rewritten + "\n\n"
+						var compact bytes.Buffer
+						if json.Compact(&compact, []byte(rewritten)) == nil {
+							raw = "event: message_start\ndata: " + compact.String() + "\n\n"
+						}
 					}
 				}
 				if firstTokenMs == nil && status.semanticContent {
@@ -527,7 +543,7 @@ func (s *OpenAIGatewayService) relayAnthropicStream(ctx context.Context, resp *h
 						status.readErr = errAnthropicSSEFrameTooLarge
 						return false
 					}
-					terminalFrames.WriteString(raw)
+					_, _ = terminalFrames.WriteString(raw)
 					return true
 				}
 			}
@@ -545,8 +561,14 @@ func (s *OpenAIGatewayService) relayAnthropicStream(ctx context.Context, resp *h
 	}
 
 	for {
+		if !clientDisconnected && (clientCtx.Err() != nil || ctx.Err() != nil) {
+			markDisconnected()
+		}
 		select {
 		case ev, ok := <-events:
+			if !clientDisconnected && (clientCtx.Err() != nil || ctx.Err() != nil) {
+				markDisconnected()
+			}
 			if !ok {
 				if len(pendingLines) > 0 && !consume("") {
 					return fail()
@@ -564,8 +586,11 @@ func (s *OpenAIGatewayService) relayAnthropicStream(ctx context.Context, resp *h
 				return result(), nil
 			}
 			if ev.err != nil {
+				if errors.Is(ev.err, context.Canceled) || errors.Is(ev.err, context.DeadlineExceeded) {
+					markDisconnected()
+				}
 				status.readErr = ev.err
-				if handlePeerReset && !clientDisconnected && !status.sawTerminal {
+				if handlePeerReset && !clientDisconnected {
 					if resetErr, handled := handleOpenAIHTTP2PeerReset(c, account, resp.Header.Get("x-request-id"), ev.err); handled {
 						return result(), resetErr
 					}
@@ -590,6 +615,8 @@ func (s *OpenAIGatewayService) relayAnthropicStream(ctx context.Context, resp *h
 			return fail()
 
 		case <-clientGone:
+			markDisconnected()
+		case <-upstreamGone:
 			markDisconnected()
 
 		case <-keepaliveCh:

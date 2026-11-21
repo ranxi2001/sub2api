@@ -246,7 +246,7 @@ func (st *anthropicCompatStream) failure() *anthropicCompatStreamFailure {
 		}
 	case st.readErr != nil && !errors.Is(st.readErr, io.EOF):
 		return &anthropicCompatStreamFailure{
-			err:     fmt.Errorf("stream usage incomplete: %w", st.readErr),
+			err:     fmt.Errorf("stream usage incomplete: stream read error: %w", st.readErr),
 			errType: "stream_read_error",
 			message: "upstream stream disconnected: " + sanitizeStreamError(st.readErr),
 		}

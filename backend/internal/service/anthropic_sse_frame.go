@@ -74,9 +74,9 @@ func (a *anthropicSSEFrameAssembler) line(line string, limit int) (name, payload
 		a.name = value
 	case "data":
 		if a.hasData {
-			a.data.WriteByte('\n')
+			_ = a.data.WriteByte('\n')
 		}
-		a.data.WriteString(value)
+		_, _ = a.data.WriteString(value)
 		a.hasData = true
 	}
 	return
@@ -106,6 +106,9 @@ func (st *anthropicCompatStream) nextEvent() (apicompat.AnthropicStreamEvent, st
 			break
 		}
 		if !ready {
+			if name != "" && knownAnthropicStreamEvent(name) && name != "ping" {
+				st.protocolFailure = "Anthropic event has no data"
+			}
 			continue
 		}
 		if event, valid := st.decodeFrame(name, payload); valid {
