@@ -297,6 +297,17 @@ func finishAnthropicCompatStreamFailure(c *gin.Context, writerSizeBeforeStream i
 	return result, failure.err
 }
 
+// Gin records buffered render/write failures in c.Errors instead of returning
+// them. Forwarders must propagate those failures while keeping measured usage.
+func anthropicBufferedWriteFailure(c *gin.Context, stream *anthropicCompatStream, errorsBefore int) error {
+	if len(c.Errors) <= errorsBefore {
+		return nil
+	}
+	stream.markClientDisconnected()
+	MarkResponseCommitted(c)
+	return fmt.Errorf("stream usage incomplete: buffered response delivery failed: %w", c.Errors.Last().Err)
+}
+
 // writeAnthropicCompatCCStreamFailure 向 Chat Completions 流写出终止错误帧，
 // 并标记响应已提交，handler 不再追加兜底错误。
 func writeAnthropicCompatCCStreamFailure(c *gin.Context, failure *anthropicCompatStreamFailure) {

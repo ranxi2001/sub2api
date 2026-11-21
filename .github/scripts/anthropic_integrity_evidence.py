@@ -13,7 +13,7 @@ def required_tests(mode):
     if mode == 'red':
         return tests
     for route in ('chat', 'responses', 'native_chat', 'native_responses'):
-        tests += [f'TestIssue985CanceledBeforeBufferedRead/{route}']
+        tests += [f'TestIssue985CanceledBeforeBufferedRead/{route}', f'TestIssue985BufferedFinalWriteFailure/{route}']
         for flow in ('stream', 'buffered'):
             tests += [f'TestIssue985AdapterBoundaries/{route}/{flow}/{case}' for case in ('crlf', 'cr', 'bom', 'data_only', 'field_order', 'event_without_data', 'compact', 'eof_frame', 'unknown', 'zero', 'missing', 'field_missing', 'stop_reason_only', 'terminal_error', 'malformed', 'mismatch')]
     for route in ('native', 'passthrough', 'normal'):

@@ -363,3 +363,45 @@ func TestIssue985CanceledBeforeBufferedRead(t *testing.T) {
 		})
 	}
 }
+
+func TestIssue985BufferedFinalWriteFailure(t *testing.T) {
+	for _, route := range []string{"chat", "responses", "native_chat", "native_responses"} {
+		t.Run(route, func(t *testing.T) {
+			writer := &disconnectOnMarkerResponseWriter{ResponseRecorder: httptest.NewRecorder(), marker: "fixture text"}
+			c, _ := gin.CreateTestContext(writer)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+			resp := &http.Response{Header: http.Header{}, Body: io.NopCloser(strings.NewReader(issue985Stream()))}
+			var err error
+			var input, output int
+			var disconnected bool
+			if strings.HasPrefix(route, "native") {
+				var result *OpenAIForwardResult
+				svc := &OpenAIGatewayService{}
+				if route == "native_chat" {
+					result, err = svc.handleCCBufferedFromNativeAnthropic(resp, c, "fixture", "fixture", "fixture", nil, time.Now())
+				} else {
+					result, err = svc.handleResponsesBufferedFromNativeAnthropic(resp, c, "fixture", "fixture", "fixture", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
+				}
+				require.NotNil(t, result)
+				input, output, disconnected = result.Usage.InputTokens, result.Usage.OutputTokens, result.ClientDisconnect
+			} else {
+				var result *ForwardResult
+				svc := &GatewayService{}
+				if route == "chat" {
+					result, err = svc.handleCCBufferedFromAnthropic(resp, c, "fixture", "fixture", nil, time.Now())
+				} else {
+					result, err = svc.handleResponsesBufferedStreamingResponse(resp, c, "fixture", "fixture", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
+				}
+				require.NotNil(t, result)
+				input, output, disconnected = result.Usage.InputTokens, result.Usage.OutputTokens, result.ClientDisconnect
+			}
+			require.Error(t, err)
+			require.True(t, disconnected)
+			require.Equal(t, 17, input)
+			require.Equal(t, 3, output)
+			require.True(t, writer.failed)
+			require.Zero(t, writer.writesAfterError)
+			require.Zero(t, writer.flushesAfterError)
+		})
+	}
+}
