@@ -135,7 +135,9 @@ func TestUnifiedAstraReuseRejectsUnverifiedOrUnpersistedTarget(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			s, repo, seed := unifiedAstraFixture(t)
 			calls := 0
-			target := mint780State(time.Now().Add(-time.Second))
+			// State fixtures encode whole seconds; derive both from one clock read.
+			issuedAt := time.Now().Add(-time.Second)
+			target := mint780State(issuedAt)
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			if kind == "persist" {
@@ -158,7 +160,7 @@ func TestUnifiedAstraReuseRejectsUnverifiedOrUnpersistedTarget(t *testing.T) {
 				if calls == 2 {
 					switch kind {
 					case "reissued_target":
-						h.Set(openAICodexTurnStateHeader, mint780State(time.Now().Add(-2*time.Second)))
+						h.Set(openAICodexTurnStateHeader, mint780State(issuedAt.Add(-time.Second)))
 					case "changed_route":
 						h["Set-Cookie"] = mint780Pair(time.Now().Add(time.Hour), "unified-43")
 					case "incomplete":
