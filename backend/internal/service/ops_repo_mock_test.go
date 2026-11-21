@@ -77,6 +77,10 @@ func (m *opsRepoMock) UpdateErrorResolution(ctx context.Context, errorID int64, 
 	return nil
 }
 
+func (m *opsRepoMock) GetAlertPlatformStats(context.Context, OpsDashboardFilter) ([]OpsAlertPlatformStats, error) {
+	return nil, nil
+}
+
 func (m *opsRepoMock) GetWindowStats(ctx context.Context, filter *OpsDashboardFilter) (*OpsWindowStats, error) {
 	return &OpsWindowStats{}, nil
 }
