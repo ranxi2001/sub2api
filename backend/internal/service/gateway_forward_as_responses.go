@@ -719,7 +719,9 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 			}
 		}
 		if len(events) > 0 {
-			c.Writer.Flush()
+			if err := FlushGatewayResponse(c.Writer); err != nil {
+				stream.markClientDisconnected()
+			}
 		}
 	}
 
@@ -750,7 +752,12 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 					}
 				}
 			}
-			c.Writer.Flush()
+			if err := FlushGatewayResponse(c.Writer); err != nil {
+				stream.markClientDisconnected()
+			}
+		}
+		if stream.clientDisconnected {
+			return resultWithUsage(), stream.failure().err
 		}
 		return resultWithUsage(), nil
 	}

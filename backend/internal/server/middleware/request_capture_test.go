@@ -113,3 +113,73 @@ func TestCaptureSensitiveReadAuditRoutes(t *testing.T) {
 		require.NotEmpty(t, auditSensitiveReads[route])
 	}
 }
+
+type captureFlushFailureRecorder struct {
+	*httptest.ResponseRecorder
+	failAt  int
+	flushes int
+}
+
+func (w *captureFlushFailureRecorder) FlushError() error {
+	w.flushes++
+	if w.flushes == w.failAt {
+		return io.ErrClosedPipe
+	}
+	w.Flush()
+	return nil
+}
+
+func TestRequestCapturePropagatesFlushFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		failAt   int
+		wantBody string
+	}{
+		{"intermediate", 1, "data: content\n\n"},
+		{"final", 2, "data: content\n\ndata: [DONE]\n\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &captureMiddlewareStore{tasks: map[string]requestcapture.Task{}, records: map[string]requestcapture.Record{}}
+			manager, err := requestcapture.New(store, t.TempDir(), requestcapture.Config{Enabled: true, QuotaMiB: 10, RetentionDays: 7})
+			require.NoError(t, err)
+			defer manager.Close()
+			_, err = manager.Create(context.Background(), requestcapture.CreateTask{TargetType: "group", TargetID: 7, DurationMinutes: 1}, "fixture")
+			require.NoError(t, err)
+			r := gin.New()
+			r.Use(ClientRequestID(), func(c *gin.Context) {
+				group := int64(7)
+				c.Set(string(ContextKeyAPIKey), &service.APIKey{UserID: 1, GroupID: &group})
+				c.Next()
+			}, RequestCapture(manager))
+			var flushErr error
+			r.GET("/stream", func(c *gin.Context) {
+				require.IsType(t, &captureResponseWriter{}, c.Writer)
+				c.Header("Content-Type", "text/event-stream")
+				for _, frame := range []string{"data: content\n\n", "data: [DONE]\n\n"} {
+					_, err := c.Writer.WriteString(frame)
+					require.NoError(t, err)
+					flushErr = service.FlushGatewayResponse(c.Writer)
+					if flushErr != nil {
+						return
+					}
+				}
+			})
+			writer := &captureFlushFailureRecorder{ResponseRecorder: httptest.NewRecorder(), failAt: tc.failAt}
+			r.ServeHTTP(writer, httptest.NewRequest(http.MethodGet, "/stream", nil))
+			require.ErrorIs(t, flushErr, io.ErrClosedPipe)
+			require.Equal(t, tc.failAt, writer.flushes)
+			require.Equal(t, tc.wantBody, writer.Body.String())
+			require.Equal(t, http.StatusOK, writer.Code)
+			require.Eventually(t, func() bool {
+				store.mu.Lock()
+				defer store.mu.Unlock()
+				for _, record := range store.records {
+					if record.Partial && record.IsError {
+						return true
+					}
+				}
+				return false
+			}, 5*time.Second, 10*time.Millisecond)
+		})
+	}
+}

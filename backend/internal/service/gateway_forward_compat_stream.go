@@ -47,6 +47,7 @@ type anthropicCompatStream struct {
 	semanticContent bool
 	inputUsageSeen  bool
 	outputUsageSeen bool
+	usageSeen       bool
 	protocolFailure string
 	// upstreamErr* 记录上游流内的 error 事件；收到后调用方结束读取。
 	upstreamErrType    string
@@ -167,6 +168,7 @@ func (st *anthropicCompatStream) observe(event *apicompat.AnthropicStreamEvent, 
 	}
 	if usagePath != "" {
 		u := gjson.Get(payload, usagePath)
+		st.usageSeen = st.usageSeen || anthropicUsageFieldsObserved(u)
 		for _, key := range []string{"input_tokens", "prompt_tokens", "output_tokens"} {
 			value := u.Get(key)
 			if !value.Exists() || value.Type == gjson.Null {
@@ -218,6 +220,18 @@ func (st *anthropicCompatStream) observe(event *apicompat.AnthropicStreamEvent, 
 			zap.Bool("client_disconnected", st.clientDisconnected),
 		)
 	}
+}
+
+// Availability is independent of completeness and value. Explicit zero and
+// cache-only partial measurements are known usage and must remain billable.
+func anthropicUsageFieldsObserved(u gjson.Result) bool {
+	for _, path := range []string{"input_tokens", "prompt_tokens", "output_tokens", "cache_read_input_tokens", "cached_tokens", "prompt_tokens_details.cached_tokens", "prompt_cache_hit_tokens", "prompt_cache_miss_tokens", "cache_creation_input_tokens", "cache_creation.ephemeral_5m_input_tokens", "cache_creation.ephemeral_1h_input_tokens"} {
+		v := u.Get(path)
+		if v.Type == gjson.Number && v.Float() >= 0 && v.Float() == float64(v.Int()) {
+			return true
+		}
+	}
+	return false
 }
 
 func (st *anthropicCompatStream) observeContent(block apicompat.AnthropicContentBlock) {

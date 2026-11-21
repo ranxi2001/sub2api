@@ -293,6 +293,7 @@ func (s *OpenAIGatewayService) handleNativeAnthropicBufferedResponse(
 		RequestID:                   resp.Header.Get("x-request-id"),
 		UpstreamHeaders:             resp.Header,
 		Usage:                       claudeUsageToOpenAIUsage(usage),
+		UsageUnavailable:            !anthropicUsageFieldsObserved(gjson.GetBytes(body, "usage")),
 		Model:                       originalModel,
 		BillingModel:                billingModel,
 		UpstreamModel:               upstreamModel,
@@ -324,7 +325,7 @@ func (s *OpenAIGatewayService) handleNativeAnthropicStreamingResponse(
 	if result == nil {
 		return nil, err
 	}
-	return s.nativeAnthropicStreamResult(c, resp, result.usage, result.firstTokenMs, result.clientDisconnect, originalModel, billingModel, upstreamModel, reasoningEffort, startTime), err
+	return s.nativeAnthropicStreamResult(c, resp, result.usage, result.usageUnavailable, result.firstTokenMs, result.clientDisconnect, originalModel, billingModel, upstreamModel, reasoningEffort, startTime), err
 }
 
 // relayAnthropicStream shares framing, integrity, bounded drain and terminal
@@ -357,10 +358,6 @@ func (s *OpenAIGatewayService) relayAnthropicStream(ctx context.Context, resp *h
 	}
 
 	w := c.Writer
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		return nil, errors.New("streaming not supported")
-	}
 
 	usage := &ClaudeUsage{}
 	var firstTokenMs *int
@@ -475,7 +472,7 @@ func (s *OpenAIGatewayService) relayAnthropicStream(ctx context.Context, resp *h
 	}()
 
 	result := func() *streamingResult {
-		return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}
+		return &streamingResult{usageUnavailable: !status.usageSeen, usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: clientDisconnected}
 	}
 	fail := func() (*streamingResult, error) {
 		status.clientDisconnected = clientDisconnected
@@ -491,7 +488,9 @@ func (s *OpenAIGatewayService) relayAnthropicStream(ctx context.Context, resp *h
 			MarkOpsStreamError(c, failure.errType, failure.message, http.StatusBadGateway)
 			MarkResponseCommitted(c)
 			_, _ = fmt.Fprintf(w, "event: error\ndata: %s\n\n", payload)
-			flusher.Flush()
+			if err := FlushGatewayResponse(w); err != nil {
+				markDisconnected()
+			}
 		}
 		return result(), failure.err
 	}
@@ -551,7 +550,9 @@ func (s *OpenAIGatewayService) relayAnthropicStream(ctx context.Context, resp *h
 			if _, err := io.WriteString(w, reverseToolNamesIfPresentString(c, raw)); err != nil {
 				markDisconnected()
 			} else {
-				flusher.Flush()
+				if err := FlushGatewayResponse(w); err != nil {
+					markDisconnected()
+				}
 				lastDataAt = time.Now()
 				resetKeepaliveTimer()
 			}
@@ -581,7 +582,12 @@ func (s *OpenAIGatewayService) relayAnthropicStream(ctx context.Context, resp *h
 					markDisconnected()
 					return fail()
 				}
-				flusher.Flush()
+				if err := FlushGatewayResponse(w); err != nil {
+					markDisconnected()
+				}
+				if clientDisconnected {
+					return fail()
+				}
 				return result(), nil
 			}
 			if ev.err != nil {
@@ -635,7 +641,9 @@ func (s *OpenAIGatewayService) relayAnthropicStream(ctx context.Context, resp *h
 				logger.LegacyPrintf("service.gateway", "[CN Anthropic 直通] Client disconnected during keepalive ping, continue draining upstream for usage: account=%d", account.ID)
 				continue
 			}
-			flusher.Flush()
+			if err := FlushGatewayResponse(w); err != nil {
+				markDisconnected()
+			}
 			lastDataAt = time.Now()
 			resetKeepaliveTimer()
 		}
@@ -648,6 +656,7 @@ func (s *OpenAIGatewayService) nativeAnthropicStreamResult(
 	c *gin.Context,
 	resp *http.Response,
 	usage *ClaudeUsage,
+	usageUnavailable bool,
 	firstTokenMs *int,
 	clientDisconnect bool,
 	originalModel string,
@@ -663,6 +672,7 @@ func (s *OpenAIGatewayService) nativeAnthropicStreamResult(
 		RequestID:                   resp.Header.Get("x-request-id"),
 		UpstreamHeaders:             resp.Header,
 		Usage:                       claudeUsageToOpenAIUsage(usage),
+		UsageUnavailable:            usageUnavailable,
 		Model:                       originalModel,
 		BillingModel:                billingModel,
 		UpstreamModel:               upstreamModel,
