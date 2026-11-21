@@ -254,7 +254,7 @@ func TestHTTP2NativeRelayRequiresCompleteTerminal(t *testing.T) {
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 			result, err := (&OpenAIGatewayService{cfg: rawChatCompletionsTestConfig()}).handleNativeAnthropicStreamingResponse(context.Background(), resp, c, nativeAnthropicTestAccount(), "model", "model", "model", nil, time.Now())
 			require.Error(t, err, "F5 incomplete native message_stop must not swallow a later HTTP2 reset: %s", name)
-			if name == "invalid_json" || name == "wrong_data_type" || name == "event_no_data" {
+			if name == "invalid_json" || name == "wrong_data_type" {
 				require.Contains(t, rec.Body.String(), "stream_protocol_error")
 				require.NotContains(t, rec.Body.String(), "message_stop")
 				require.Equal(t, 1, strings.Count(rec.Body.String(), "event: error"))

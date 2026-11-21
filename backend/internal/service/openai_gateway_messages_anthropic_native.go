@@ -510,9 +510,8 @@ func (s *OpenAIGatewayService) relayAnthropicStream(ctx context.Context, resp *h
 		if strings.TrimSpace(payload) == "[DONE]" {
 			return true
 		}
-		if !ready && knownAnthropicStreamEvent(name) && name != "ping" {
-			status.protocolFailure = "Anthropic event has no data"
-			return false
+		if !ready && knownAnthropicStreamEvent(name) {
+			return true
 		}
 		if ready {
 			event, known := status.decodeFrame(name, payload)

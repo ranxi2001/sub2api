@@ -441,7 +441,12 @@ func parseSSEUsagePassthrough(data string, usage *ClaudeUsage) {
 	case "message_start":
 		msgUsage := parsed.Get("message.usage")
 		if msgUsage.Exists() {
-			usage.InputTokens = int(msgUsage.Get("input_tokens").Int())
+			if tokens := int(msgUsage.Get("input_tokens").Int()); tokens > 0 {
+				usage.InputTokens = tokens
+			}
+			if tokens := int(msgUsage.Get("output_tokens").Int()); tokens > 0 {
+				usage.OutputTokens = tokens
+			}
 
 			mergeRawAnthropicCacheCreationUsage(msgUsage, usage)
 		}

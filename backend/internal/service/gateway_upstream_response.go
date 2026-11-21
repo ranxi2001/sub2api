@@ -989,8 +989,8 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 		}
 		eventName, dataLine, ready, _ := assembler.line("", maxLineSize)
 		if !ready {
-			if knownAnthropicStreamEvent(eventName) && eventName != "ping" {
-				return nil, "", nil, errors.New("stream usage incomplete: Anthropic event has no data")
+			if knownAnthropicStreamEvent(eventName) {
+				return nil, "", nil, nil
 			}
 			return []string{strings.Join(lines, "\n") + "\n\n"}, "", nil, nil
 		}

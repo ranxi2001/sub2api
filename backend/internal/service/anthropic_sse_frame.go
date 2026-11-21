@@ -105,10 +105,7 @@ func (st *anthropicCompatStream) nextEvent() (apicompat.AnthropicStreamEvent, st
 			_ = st.body.Close()
 			break
 		}
-		if !ready {
-			if name != "" && knownAnthropicStreamEvent(name) && name != "ping" {
-				st.protocolFailure = "Anthropic event has no data"
-			}
+		if !ready { // SSE does not dispatch an event without a data field.
 			continue
 		}
 		if event, valid := st.decodeFrame(name, payload); valid {

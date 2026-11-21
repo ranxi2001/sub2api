@@ -38,6 +38,7 @@ func TestIssue985AdapterBoundaries(t *testing.T) {
 		{"crlf", strings.ReplaceAll(canonical, "\n", "\r\n"), false, 17, 3},
 		{"data_only", dataOnly.String(), false, 17, 3},
 		{"field_order", reordered.String(), false, 17, 3},
+		{"event_without_data", "event: message_stop\n\n" + canonical, false, 17, 3},
 		{"cr", strings.ReplaceAll(canonical, "\n", "\r"), false, 17, 3},
 		{"bom", "\xef\xbb\xbf" + canonical, false, 17, 3},
 		{"compact", strings.ReplaceAll(strings.ReplaceAll(canonical, "event: ", "event:"), "data: ", "data:"), false, 17, 3},
@@ -277,6 +278,42 @@ func TestIssue985FinalWriteFailure(t *testing.T) {
 			require.Zero(t, writer.writesAfterError)
 			require.Zero(t, writer.flushesAfterError)
 			require.NotContains(t, writer.Body.String(), "[DONE]")
+		})
+	}
+}
+
+func TestIssue985RawPartialUsage(t *testing.T) {
+	for _, route := range []string{"native", "passthrough", "normal"} {
+		t.Run(route, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+			wire := issue985Frame("message_start", `{"type":"message_start","message":{"id":"fixture","type":"message","role":"assistant","model":"fixture","content":[],"usage":{"input_tokens":17,"output_tokens":2,"cache_read_input_tokens":7,"cache_creation_input_tokens":5,"cache_creation":{"ephemeral_1h_input_tokens":5}}}}`) + issue985Frame("error", `{"type":"error","error":{"type":"overloaded_error","message":"fixture"}}`)
+			resp := &http.Response{Header: http.Header{}, Body: io.NopCloser(strings.NewReader(wire))}
+			account := &Account{ID: 1, Platform: PlatformAnthropic, Type: AccountTypeAPIKey}
+			svc := &GatewayService{rateLimitService: &RateLimitService{}}
+			var output, cached, created int
+			var err error
+			if route == "native" {
+				var res *OpenAIForwardResult
+				res, err = (&OpenAIGatewayService{}).handleNativeAnthropicStreamingResponse(c.Request.Context(), resp, c, account, "fixture", "fixture", "fixture", nil, time.Now())
+				require.NotNil(t, res)
+				output, cached, created = res.Usage.OutputTokens, res.Usage.CacheReadInputTokens, res.Usage.CacheCreationInputTokens
+				require.Equal(t, 5, res.Usage.CacheCreation1hTokens)
+			} else {
+				var res *streamingResult
+				if route == "normal" {
+					res, err = svc.handleStreamingResponse(c.Request.Context(), resp, c, account, time.Now(), "fixture", "fixture", false)
+				} else {
+					res, err = svc.handleStreamingResponseAnthropicAPIKeyPassthrough(c.Request.Context(), resp, c, account, time.Now(), "fixture")
+				}
+				require.NotNil(t, res)
+				output, cached, created = res.usage.OutputTokens, res.usage.CacheReadInputTokens, res.usage.CacheCreationInputTokens
+				require.Equal(t, 5, res.usage.CacheCreation1hTokens)
+			}
+			require.Error(t, err)
+			require.Equal(t, 2, output)
+			require.Equal(t, 7, cached)
+			require.Equal(t, 5, created)
 		})
 	}
 }

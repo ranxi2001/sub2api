@@ -120,7 +120,7 @@ func TestNativeAnthropicResponseObservationReachesUsage(t *testing.T) {
 			require.Equal(t, 20, result.Usage.InputTokens)
 			wantOutput := 10
 			if tt.partial {
-				wantOutput = 0
+				wantOutput = 1
 			}
 			require.Equal(t, wantOutput, result.Usage.OutputTokens)
 			require.Equal(t, tt.disconnect, result.ClientDisconnect)
