@@ -106,6 +106,14 @@ func prepareGatewayProtocolAccount(ctx context.Context, selected *Account, repo 
 	if err != nil {
 		return nil, err
 	}
+	return gatewayProtocolAccountFromSnapshot(ctx, selected, current, liveGroup, family, model)
+}
+
+func gatewayProtocolAccountFromSnapshot(ctx context.Context, selected, current *Account, liveGroup *Group, family domain.PlatformGateway, model string) (*Account, error) {
+	group, _ := ctx.Value(ctxkey.Group).(*Group)
+	if selected == nil || group == nil || model == "" {
+		return nil, ErrGatewayProtocolsPending
+	}
 	if current == nil || !current.IsGateway() || current.Platform != PlatformGateway || current.ID != selected.ID || liveGroup == nil || liveGroup.ID != group.ID ||
 		!liveGroup.IsActive() || ValidateGatewayAccountGroup(current, liveGroup) != nil {
 		return nil, ErrGatewayAccountGroup
@@ -168,12 +176,14 @@ func prepareGatewayProtocolAccount(ctx context.Context, selected *Account, repo 
 		return nil, ErrGatewayAccountGroup
 	}
 	view := scope
+	view.gatewayProtocolSource = &scope
+	view.gatewayProtocolModel = model
 	view.Type = AccountTypeAPIKey
 	view.Platform = string(family)
 	// Provider-specific alternate credentials/endpoints are not gateway inputs.
 	// Keep only the one upstream key/site and portable mapping/header settings.
 	view.Credentials = make(map[string]any)
-	for _, key := range []string{"api_key", "base_url", "model_mapping", credKeyHeaderOverrideEnabled, credKeyHeaderOverrides} {
+	for _, key := range []string{"api_key", "base_url", "model_mapping", "compact_model_mapping", credKeyHeaderOverrideEnabled, credKeyHeaderOverrides} {
 		if value, ok := scope.Credentials[key]; ok {
 			view.Credentials[key] = value
 		}

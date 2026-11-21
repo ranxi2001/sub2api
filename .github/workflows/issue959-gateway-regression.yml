@@ -91,6 +91,10 @@ jobs:
           grep -F -- '--- PASS: TestGatewayManagementCreateValidatesBeforeWritesAndBindsExplicitGroups' ../evidence/unit-race.log
           grep -F -- '--- PASS: TestGatewayManagementForwardingRemainsClosed' ../evidence/unit-race.log
           grep -F -- '--- PASS: TestGatewayProtocolForwardUsesNativeBuildersAndSharedIdentity' ../evidence/unit-race.log
+          grep -F -- '--- PASS: TestGatewayProtocolOpenAIAuthoritativeAdmission' ../evidence/unit-race.log
+          grep -F -- '--- PASS: TestGatewayProtocolOpenAIRejectsFinalAuthorityChanges' ../evidence/unit-race.log
+          grep -F -- '--- PASS: TestGatewayProtocolOpenAIResponsesMappedWireModel' ../evidence/unit-race.log
+          grep -F -- '--- PASS: TestGatewayProtocolOpenAILegacyPassthroughKeepsWireModel' ../evidence/unit-race.log
           grep -F -- '--- PASS: TestGatewayProtocolAdmissionAllFamiliesKeepOneIdentity' ../evidence/unit-race.log
           grep -F -- '--- PASS: TestGatewayManagementUpdateRequiresAtomicCapability' ../evidence/unit-race.log
           grep -F -- '--- PASS: TestGatewayManagementRepositoryBindingGuard' ../evidence/unit-race.log

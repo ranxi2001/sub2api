@@ -20,10 +20,12 @@ type gatewayProtocolTransport struct {
 	anthropicHTTPUpstreamRecorder
 	accountID   int64
 	concurrency int
+	proxyURL    string
 }
 
 func (u *gatewayProtocolTransport) Do(req *http.Request, proxy string, id int64, concurrency int) (*http.Response, error) {
 	u.accountID, u.concurrency = id, concurrency
+	u.proxyURL = proxy
 	return u.anthropicHTTPUpstreamRecorder.Do(req, proxy, id, concurrency)
 }
 
@@ -70,7 +72,7 @@ func TestGatewayProtocolForwardUsesNativeBuildersAndSharedIdentity(t *testing.T)
 					responseHeaderFilter: compileResponseHeaderFilter(cfg), rateLimitService: &RateLimitService{}, deferredService: &DeferredService{}}
 				_, err = svc.Forward(ctx, c, repo.account, &ParsedRequest{Body: NewRequestBodyRef(body), Model: "public-model"})
 			case "openai":
-				svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), accountRepo: repo, httpUpstream: upstream,
+				svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), accountRepo: &gatewayProtocolOpenAIRepo{gatewayProtocolAdmissionRepo: repo}, httpUpstream: upstream, requireLatestTurnAdmission: true,
 					rateLimitService: &RateLimitService{}, deferredService: &DeferredService{}, responseHeaderFilter: compileResponseHeaderFilter(cfg)}
 				_, err = svc.Forward(ctx, c, repo.account, body)
 			case "gemini":

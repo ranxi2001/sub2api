@@ -446,6 +446,13 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	}
 
 	// 5. Get access token
+	if account.gatewayProtocolSource != nil {
+		latest, err := s.admitOpenAITurn(ctx, c, account, upstreamModel, responsesBody)
+		if err != nil {
+			return nil, err
+		}
+		account = latest
+	}
 	token, _, err := s.GetAccessToken(ctx, account)
 	if err != nil {
 		return nil, fmt.Errorf("get access token: %w", err)

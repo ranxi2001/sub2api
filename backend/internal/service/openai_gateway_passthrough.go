@@ -140,6 +140,20 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	ctx = withOpenAITransportMode(ctx, "passthrough")
 	requestedModel := reqModel
 	upstreamPassthroughModel := ""
+	// Gateway accounts retain explicit portable mappings even though their
+	// transport uses passthrough. Legacy passthrough keeps its original contract.
+	if account != nil && account.gatewayProtocolSource != nil {
+		mappedModel := account.GetMappedModel(reqModel)
+		if mappedModel != "" && mappedModel != reqModel {
+			nextBody, setErr := sjson.SetBytes(body, "model", mappedModel)
+			if setErr != nil {
+				return nil, fmt.Errorf("set gateway passthrough model: %w", setErr)
+			}
+			body = nextBody
+			upstreamPassthroughModel = mappedModel
+			attemptImageIntentInvalidated = true
+		}
+	}
 	if isOpenAIResponsesCompactPath(c) && !account.IsCopilotSDKEnabled() {
 		compactMappedModel := s.resolveOpenAICompactFallbackModel(account, reqModel)
 		if compactMappedModel != "" && compactMappedModel != reqModel {
