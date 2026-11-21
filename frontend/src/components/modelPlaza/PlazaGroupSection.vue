@@ -56,6 +56,7 @@
       <PlazaModelPricingTable
         v-if="group.models.length > 0"
         :models="group.models"
+        :price-display="priceDisplay"
         :platform="group.platform"
         :rate-multiplier="group.rate_multiplier"
         :user-rate-multiplier="group.user_rate_multiplier ?? null"
@@ -80,6 +81,7 @@ import Icon from '@/components/icons/Icon.vue'
 import GroupBadge from '@/components/common/GroupBadge.vue'
 import PlazaModelPricingTable from './PlazaModelPricingTable.vue'
 import type { ModelPlazaGroup } from '@/api/modelPlaza'
+import type { PlazaPriceDisplay } from '@/utils/plazaCurrency'
 import type { GroupPlatform, SubscriptionType } from '@/types'
 import { platformBorderStrongClass } from '@/utils/platformColors'
 import { hasPeakRate, formatPeakRateWindow, serverTimezoneLabel } from '@/utils/peak-rate'
@@ -87,6 +89,7 @@ import { useAppStore } from '@/stores/app'
 
 const props = defineProps<{
   group: ModelPlazaGroup
+  priceDisplay?: PlazaPriceDisplay
 }>()
 
 const { t } = useI18n()

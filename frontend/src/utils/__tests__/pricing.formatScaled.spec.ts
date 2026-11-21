@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { formatScaled } from '../pricing'
 
 describe('formatScaled', () => {
+  it('uses an explicit yuan symbol without changing the numeric value', () => {
+    expect(formatScaled(2.25e-6, 1e6, 2, '¥')).toBe('¥2.25')
+    expect(formatScaled(null, 1e6, 2, '¥')).toBe('-')
+  })
   it.each([
     [1e-10, 1, '$1e-10'],
     [1.25e-10, 1, '$1.25e-10'],

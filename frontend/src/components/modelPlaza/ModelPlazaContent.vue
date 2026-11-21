@@ -6,6 +6,16 @@
       <p class="mt-1.5 text-sm text-gray-500 dark:text-dark-400">{{ t('modelPlaza.description') }}</p>
     </div>
 
+    <div v-if="!loading && !error && response" class="rounded-2xl border border-gray-100 bg-white px-5 py-4 dark:border-dark-700 dark:bg-dark-800/50" data-testid="plaza-currency">
+      <div v-if="priceDisplay" class="flex flex-wrap items-center justify-between gap-3">
+        <span class="text-sm font-medium text-gray-700 dark:text-dark-200">{{ t('modelPlaza.currency.customerLabel', { currency: priceDisplay.settings.customer_currency }) }}</span>
+        <span class="text-xs text-gray-500 dark:text-dark-400">{{ t('modelPlaza.currency.reference', { rate: exchangeRateLabel }) }}</span>
+      </div>
+      <p class="text-xs leading-5 text-gray-500 dark:text-dark-400" :class="{ 'mt-2': priceDisplay }">
+        {{ priceDisplay ? t('modelPlaza.currency.explanation', { value: priceDisplay.settings.wallet_unit_value, currency: priceDisplay.settings.wallet_currency }) : t('modelPlaza.currency.unavailable') }}
+      </p>
+    </div>
+
     <!-- 全局价格说明(管理员配置,Markdown) -->
     <div
       v-if="descriptionHtml"
@@ -50,7 +60,7 @@
 
       <!-- 分组分节的模型清单(默认按生效倍率升序) -->
       <div v-if="filteredGroups.length > 0" class="space-y-5">
-        <PlazaGroupSection v-for="g in filteredGroups" :key="g.id" :group="g" />
+        <PlazaGroupSection v-for="g in filteredGroups" :key="g.id" :group="g" :price-display="priceDisplay" />
       </div>
       <div
         v-else
@@ -72,6 +82,7 @@ import PlazaFilterBar from './PlazaFilterBar.vue'
 import PlazaGroupSection from './PlazaGroupSection.vue'
 import type { ModelPlazaGroup, ModelPlazaResponse } from '@/api/modelPlaza'
 import { useAuthStore } from '@/stores/auth'
+import { hasPlazaCurrencyRates, type PlazaPriceDisplay } from '@/utils/plazaCurrency'
 
 const props = defineProps<{
   response: ModelPlazaResponse | null
@@ -84,6 +95,14 @@ const props = defineProps<{
 const { t } = useI18n()
 const authStore = useAuthStore()
 const isAuthenticated = computed(() => authStore.isAuthenticated)
+
+const priceDisplay = computed<PlazaPriceDisplay | undefined>(() => {
+  const usdToCny = props.response?.usd_to_cny_rate
+  const settings = props.response?.currency
+  if (!hasPlazaCurrencyRates(usdToCny, settings)) return undefined
+  return { usdToCny: usdToCny!, settings: settings! }
+})
+const exchangeRateLabel = computed(() => priceDisplay.value?.usdToCny.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 }))
 
 const selectedPlatform = ref<string>('all')
 const selectedGroupId = ref<number | 'all'>('all')

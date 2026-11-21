@@ -1,6 +1,12 @@
 .PHONY: build build-backend build-frontend test test-backend test-frontend test-frontend-critical
 
 FRONTEND_CRITICAL_VITEST := \
+	src/components/settings/ModelPlazaCurrencySettings.spec.ts \
+	src/utils/__tests__/plazaCurrency.spec.ts \
+	src/components/modelPlaza/__tests__/ModelPlazaContent.currency.spec.ts \
+	src/components/modelPlaza/__tests__/PlazaModelPricingTable.spec.ts \
+	src/components/modelPlaza/__tests__/PlazaModelPricingTable.video.spec.ts \
+	src/components/modelPlaza/__tests__/PlazaGroupSection.spec.ts \
 	src/components/common/__tests__/Select.spec.ts \
 	src/components/account/__tests__/AccountUsageCell.spec.ts \
 	src/views/admin/__tests__/ChannelsView.bedrockCompat.spec.ts \
