@@ -45,7 +45,13 @@ func (tc issue985NativeCase) wire(bufferedMessages bool) string {
 	if bufferedMessages {
 		return message
 	}
+	// Streaming converters consume content_block events, not the buffered JSON
+	// content array carried on message_start.
+	message = strings.Replace(message, `"content":[{"type":"text","text":"fixture text"}]`, `"content":[]`, 1)
 	wire := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":" + message + "}\n\n"
+	wire += "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n" +
+		"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"fixture text\"}}\n\n" +
+		"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n"
 	if tc.name == "partial_full_error" {
 		return wire + "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"fixture\"}}\n\n"
 	}
