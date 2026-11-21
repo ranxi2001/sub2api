@@ -18,6 +18,8 @@ type OpsRepository interface {
 
 	UpdateErrorResolution(ctx context.Context, errorID int64, resolved bool, resolvedByUserID *int64, resolvedAt *time.Time) error
 
+	GetAlertPlatformStats(ctx context.Context, filter OpsDashboardFilter) ([]OpsAlertPlatformStats, error)
+
 	// Lightweight window stats (for realtime WS / quick sampling).
 	GetWindowStats(ctx context.Context, filter *OpsDashboardFilter) (*OpsWindowStats, error)
 	// Lightweight realtime traffic summary (for the Ops dashboard header card).
