@@ -292,7 +292,7 @@ func (s *OpsAlertEvaluatorService) evaluateOnce(interval time.Duration) {
 
 			eventsCreated++
 			if created != nil && created.ID > 0 {
-				if s.maybeSendAlertEmail(ctx, runtimeCfg, rule, created) {
+				if s.maybeSendAlertEmail(ctx, runtimeCfg, rule, created, OpsDashboardFilter{StartTime: windowStart, EndTime: windowEnd, Platform: scopePlatform, GroupID: scopeGroupID}) {
 					emailsSent++
 				}
 			}
@@ -675,7 +675,7 @@ func buildOpsAlertDescription(rule *OpsAlertRule, value float64, windowMinutes i
 	)
 }
 
-func (s *OpsAlertEvaluatorService) maybeSendAlertEmail(ctx context.Context, runtimeCfg *OpsAlertRuntimeSettings, rule *OpsAlertRule, event *OpsAlertEvent) bool {
+func (s *OpsAlertEvaluatorService) maybeSendAlertEmail(ctx context.Context, runtimeCfg *OpsAlertRuntimeSettings, rule *OpsAlertRule, event *OpsAlertEvent, filter OpsDashboardFilter) bool {
 	if s == nil || s.emailService == nil || s.opsService == nil || event == nil || rule == nil {
 		return false
 	}
@@ -707,8 +707,15 @@ func (s *OpsAlertEvaluatorService) maybeSendAlertEmail(ctx context.Context, runt
 	// Apply/update rate limiter.
 	s.emailLimiter.SetLimit(emailCfg.Alert.RateLimitPerHour)
 
-	subject := fmt.Sprintf("[Ops Alert][%s] %s", strings.TrimSpace(rule.Severity), strings.TrimSpace(rule.Name))
-	body := buildOpsAlertEmailBody(rule, event)
+	var loadPlatformStats func() opsAlertPlatformResult
+	if rule.MetricType == "success_rate" || rule.MetricType == "error_rate" {
+		loadPlatformStats = sync.OnceValue(func() opsAlertPlatformResult {
+			queryCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			defer cancel()
+			rows, err := s.opsRepo.GetAlertPlatformStats(queryCtx, filter)
+			return opsAlertPlatformResult{rows: rows, available: err == nil}
+		})
+	}
 
 	anySent := false
 	for _, to := range emailCfg.Alert.Recipients {
@@ -719,20 +726,41 @@ func (s *OpsAlertEvaluatorService) maybeSendAlertEmail(ctx context.Context, runt
 		if !s.emailLimiter.Allow(time.Now().UTC()) {
 			continue
 		}
-		if s.emailService.notificationEmailService != nil {
-			if err := s.emailService.notificationEmailService.Send(ctx, NotificationEmailSendInput{
-				Event:          NotificationEmailEventOpsAlert,
-				RecipientEmail: addr,
-				RecipientName:  emailRecipientName(addr),
-				SourceType:     "ops_alert",
-				SourceID:       fmt.Sprintf("%d", event.ID),
-				Variables:      opsAlertEmailVariables(rule, event),
+		locale := notificationEmailDefaultLocale
+		notification := s.emailService.notificationEmailService
+		if notification != nil {
+			locale = notification.ResolveRecipientLocale(ctx, 0, addr)
+		}
+		headline, summary := "", ""
+		if loadPlatformStats != nil {
+			headline, summary = loadPlatformStats().summary(rule, filter, locale)
+		}
+		variables := opsAlertEmailVariables(rule, event)
+		variables["platform_headline"] = headline
+		if notification != nil {
+			if err := notification.Send(ctx, NotificationEmailSendInput{
+				Locale:           locale,
+				Event:            NotificationEmailEventOpsAlert,
+				RecipientEmail:   addr,
+				RecipientName:    emailRecipientName(addr),
+				SourceType:       "ops_alert",
+				SourceID:         fmt.Sprintf("%d", event.ID),
+				Variables:        variables,
+				RawHTMLVariables: map[string]string{"platform_summary": summary},
 			}); err == nil {
 				anySent = true
 				continue
 			} else if !shouldFallbackNotificationEmail(err) {
 				continue
 			}
+		}
+		subject := fmt.Sprintf("[Ops Alert][%s] %s", strings.TrimSpace(rule.Severity), strings.TrimSpace(rule.Name))
+		body := buildOpsAlertEmailBody(rule, event)
+		if summary != "" {
+			body = summary + body
+		}
+		if headline != "" {
+			subject = "[" + headline + "] " + subject
 		}
 		if err := s.emailService.SendEmail(ctx, addr, subject, body); err != nil {
 			// Ignore per-recipient failures; continue best-effort.
