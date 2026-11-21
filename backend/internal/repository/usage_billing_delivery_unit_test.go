@@ -28,6 +28,8 @@ func TestUsageBillingDeliveryCommitUnknownChecksReceiptBeforeReplay(t *testing.T
 	result := service.UsageBillingApplyResult{Applied: true}
 	storedResult, err := json.Marshal(result)
 	require.NoError(t, err)
+	mock.ExpectQuery("SELECT COALESCE").WithArgs(cmd.RequestID, cmd.APIKeyID).
+		WillReturnRows(sqlmock.NewRows([]string{"owner"}).AddRow("1"))
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT schema_version,payload,state,result,request_fingerprint").WillReturnRows(
 		sqlmock.NewRows([]string{"schema_version", "payload", "state", "result", "request_fingerprint"}).AddRow(1, payload, "pending", nil, cmd.RequestFingerprint))
