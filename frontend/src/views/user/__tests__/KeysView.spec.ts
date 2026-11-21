@@ -407,7 +407,8 @@ describe('user KeysView column settings', () => {
     expect(target).toBe('_self')
     expect(url.protocol).toBe('magpie:')
     expect(url.host).toBe('import')
-    expect(url.searchParams.get('name')).toBe('第二把密钥 · 示例站')
+    expect(url.searchParams.get('name')).toBe('示例站')
+    expect(url.searchParams.get('catalog')).toBe('openai')
     expect(url.searchParams.getAll('key')).toEqual(['sk-test-second+a&b'])
     expect(url.searchParams.get('responses')).toBe('https://gateway.example/relay/v1')
     expect(showInfo).toHaveBeenCalledWith('keys.magpieImport.openHelp', 6500)
@@ -422,13 +423,19 @@ describe('user KeysView column settings', () => {
     const open = vi.spyOn(window, 'open').mockReturnValue(null)
     const wrapper = await mountView()
     const button = wrapper.get('[data-testid="magpie-import-button"]')
-    expect(button.attributes('disabled')).toBeDefined()
+    const actions = [
+      button,
+      wrapper.get('[data-testid="quick-config-button"]'),
+      wrapper.get('[data-testid="use-key-button"]'),
+      wrapper.get('[data-testid="ccswitch-import-button"]')
+    ]
+    for (const action of actions) expect(action.attributes('disabled')).toBeDefined()
     await button.trigger('click')
     expect(open).not.toHaveBeenCalled()
 
     settings.resolve({ api_base_url: 'https://gateway.example' })
     await flushPromises()
-    expect(button.attributes('disabled')).toBeUndefined()
+    for (const action of actions) expect(action.attributes('disabled')).toBeUndefined()
     await button.trigger('click')
     expect(new URL(String(open.mock.calls[0][0])).searchParams.get('chat')).toBe('https://gateway.example/v1')
   })

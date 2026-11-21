@@ -1,4 +1,5 @@
 import type { ApiKey } from '@/types'
+import { resolveSiteProviderName } from '@/utils/codexQuickConfig'
 
 type ImportKey = Pick<ApiKey, 'id' | 'name' | 'key' | 'group_id' | 'group_ids' | 'group'>
 type Endpoint = 'chat' | 'responses' | 'anthropic' | 'gemini'
@@ -100,13 +101,16 @@ export function buildMagpieImportLink(input: {
     return { error: 'invalidKey' }
   }
 
-  const site = input.siteName?.trim() || 'Sub2API'
-  const name = row.name.trim() ? `${row.name.trim()} · ${site}` : site
+  const site = resolveSiteProviderName(input.siteName)
+  const isOpenAI = row.group?.platform === 'openai'
+  const keyName = row.name.trim()
+  const name = isOpenAI || !keyName ? site : `${keyName} · ${site}`
   const query = new URLSearchParams({
     name,
     id: `sub2api-${instanceId(dashboardOrigin, root)}-${row.id}`,
     ...endpoints,
     key
   })
+  if (isOpenAI) query.set('catalog', 'openai')
   return { url: `magpie://import?${query}` }
 }

@@ -3,10 +3,17 @@ import {
   findCodexCatalogModel,
   formatCodexReasoningEffortTomlLine,
   parseCodexCatalogModels,
-  selectCodexConfigReasoningEffort
+  selectCodexConfigReasoningEffort,
+  selectOpenAICodexModel
 } from '@/utils/codexCatalogConfig'
 
 describe('codexCatalogConfig', () => {
+  it('prefers GPT-6 Astra when the OpenAI catalog includes it', () => {
+    expect(selectOpenAICodexModel(['gpt-5.5', 'gpt-6-astra'])).toBe('gpt-6-astra')
+    expect(selectOpenAICodexModel(['custom-model'])).toBe('custom-model')
+    expect(selectOpenAICodexModel([])).toBe('gpt-6-astra')
+  })
+
   it('parses catalog slugs and finds a model by id', () => {
     const content = JSON.stringify({
       models: [
