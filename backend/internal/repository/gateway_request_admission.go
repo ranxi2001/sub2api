@@ -38,6 +38,11 @@ func (r *accountRepository) gatewayRequestAccount(ctx context.Context, accountID
 	if err != nil {
 		return nil, nil, err
 	}
+	paused, err := performancePaused(ctx, clientFromContext(ctx, r.client), []int64{accountID})
+	if err != nil {
+		return nil, nil, err
+	}
+	account.PerformancePaused = paused[accountID]
 	group, err := clientFromContext(ctx, r.client).Group.Get(ctx, groupID)
 	if err != nil {
 		return nil, nil, translatePersistenceError(err, service.ErrGroupNotFound, nil)

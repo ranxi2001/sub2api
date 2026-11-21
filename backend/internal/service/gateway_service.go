@@ -629,6 +629,9 @@ func shouldClearStickySession(account *Account, requestedModel string) bool {
 	if account == nil {
 		return false
 	}
+	if account.IsGateway() && account.gatewayMessagesView != nil {
+		account = account.gatewayMessagesView
+	}
 	if !account.IsSchedulable() {
 		return true
 	}

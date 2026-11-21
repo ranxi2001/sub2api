@@ -96,6 +96,24 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 	var resp *http.Response
 	retryStart := time.Now()
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
+		if account.gatewayProtocolSource != nil {
+			latest, err := s.gatewayProtocolAccount(ctx, account.gatewayProtocolSource, "anthropic", account.gatewayProtocolModel)
+			if err != nil {
+				return nil, err
+			}
+			if openAITurnRouteFingerprint(latest) != openAITurnRouteFingerprint(account) {
+				return nil, ErrGatewayAccountIdentity
+			}
+			account = latest
+			token, _, err = s.GetAccessToken(ctx, account)
+			if err != nil {
+				return nil, err
+			}
+			proxyURL = ""
+			if account.ProxyID != nil && account.Proxy != nil {
+				proxyURL = account.Proxy.URL()
+			}
+		}
 		upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, input.RequestStream)
 		upstreamReq, wireBody, err := s.buildUpstreamRequestAnthropicAPIKeyPassthrough(upstreamCtx, c, account, input.Body, token)
 		releaseUpstreamCtx()
