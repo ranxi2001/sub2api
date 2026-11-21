@@ -277,7 +277,16 @@ func (s *OpenAIGatewayService) latestOpenAITurnAccountForGroup(
 		// and persistence fence must never be bypassed by the process admission
 		// cache, including already established WebSocket turns.
 		var err error
-		latest, err = s.schedulerSnapshot.GetAccount(ctx, selected.ID)
+		if gatewayView {
+			scope, _ := ctx.Value(gatewaySelectionKey{}).(gatewaySelection)
+			reader := gatewayAccountReader(s.accountRepo, s.schedulerSnapshot)
+			if reader == nil {
+				return nil, denyOpenAITurn("latest_state_unavailable")
+			}
+			latest, _, err = reader.GatewayRequestAccount(ctx, selected.ID, scope.groupID)
+		} else {
+			latest, err = s.schedulerSnapshot.GetAccount(ctx, selected.ID)
+		}
 		if err != nil || latest == nil || latest.ID != selected.ID || latest.IsShadow() {
 			return nil, denyOpenAITurn("latest_state_unavailable")
 		}
@@ -346,8 +355,8 @@ func (s *OpenAIGatewayService) latestOpenAITurnAccountForGroup(
 		// Keep the real turn reader and all common admission guards. Validate
 		// both uncached snapshots against the original neutral identity, then
 		// rebuild a view; never make the stored gateway schedulable.
-		reader, ok := s.accountRepo.(GatewayRequestAccountReader)
-		if !ok || !authoritativeRead {
+		reader := gatewayAccountReader(s.accountRepo, s.schedulerSnapshot)
+		if reader == nil || !authoritativeRead {
 			return nil, denyOpenAITurn("latest_state_unavailable")
 		}
 		group, _ := ctx.Value(ctxkey.Group).(*Group)

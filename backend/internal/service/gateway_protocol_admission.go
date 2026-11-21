@@ -31,21 +31,21 @@ func (s *GatewayService) gatewayProtocolAccount(ctx context.Context, account *Ac
 	if s == nil {
 		return nil, ErrGatewayProtocolsPending
 	}
-	return prepareGatewayProtocolAccount(ctx, account, s.accountRepo, family, model)
+	return prepareGatewayProtocolAccount(ctx, account, gatewayAccountReader(s.accountRepo, s.schedulerSnapshot), family, model)
 }
 
 func (s *OpenAIGatewayService) gatewayProtocolAccount(ctx context.Context, account *Account, family domain.PlatformGateway, model string) (*Account, error) {
 	if s == nil {
 		return nil, ErrGatewayProtocolsPending
 	}
-	return prepareGatewayProtocolAccount(ctx, account, s.accountRepo, family, model)
+	return prepareGatewayProtocolAccount(ctx, account, gatewayAccountReader(s.accountRepo, s.schedulerSnapshot), family, model)
 }
 
 func (s *GeminiMessagesCompatService) gatewayProtocolAccount(ctx context.Context, account *Account, family domain.PlatformGateway, model string) (*Account, error) {
 	if s == nil {
 		return nil, ErrGatewayProtocolsPending
 	}
-	return prepareGatewayProtocolAccount(ctx, account, s.accountRepo, family, model)
+	return prepareGatewayProtocolAccount(ctx, account, gatewayAccountReader(s.accountRepo, s.schedulerSnapshot), family, model)
 }
 
 // Relay accounts on Antigravity URLs use native protocols, never the official
@@ -62,7 +62,7 @@ func (s *AntigravityGatewayService) forwardGatewayMessages(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
-	relay := &GatewayService{cfg: cfg, httpUpstream: s.httpUpstream, accountRepo: s.accountRepo,
+	relay := &GatewayService{cfg: cfg, httpUpstream: s.httpUpstream, accountRepo: s.accountRepo, schedulerSnapshot: s.schedulerSnapshot,
 		rateLimitService: s.rateLimitService, settingService: s.settingService,
 		responseHeaderFilter: compileResponseHeaderFilter(cfg), deferredService: &DeferredService{}}
 	return relay.Forward(ctx, c, account, parsed)
@@ -76,7 +76,7 @@ func (s *AntigravityGatewayService) forwardGatewayGemini(ctx context.Context, c 
 	if s.settingService != nil && s.settingService.cfg != nil {
 		cfg = s.settingService.cfg
 	}
-	relay := &GeminiMessagesCompatService{cfg: cfg, httpUpstream: s.httpUpstream, accountRepo: s.accountRepo,
+	relay := &GeminiMessagesCompatService{cfg: cfg, httpUpstream: s.httpUpstream, accountRepo: s.accountRepo, schedulerSnapshot: s.schedulerSnapshot,
 		rateLimitService: s.rateLimitService}
 	return relay.ForwardNative(ctx, c, account, model, action, stream, body)
 }
@@ -87,10 +87,19 @@ type GatewayRequestAccountReader interface {
 	GatewayRequestAccount(ctx context.Context, accountID, groupID int64) (*Account, *Group, error)
 }
 
+func gatewayAccountReader(repo AccountRepository, snapshot *SchedulerSnapshotService) GatewayRequestAccountReader {
+	if snapshot != nil && snapshot.localSnapshotReader != nil {
+		reader, _ := snapshot.localSnapshotReader.(GatewayRequestAccountReader)
+		return reader
+	}
+	reader, _ := repo.(GatewayRequestAccountReader)
+	return reader
+}
+
 // prepareGatewayProtocolAccount makes an isolated API-key transport view. The
 // caller retains the original gateway for usage/procurement bookkeeping. ID,
 // concurrency, proxy and runtime state remain those of the one shared account.
-func prepareGatewayProtocolAccount(ctx context.Context, selected *Account, repo AccountRepository, family domain.PlatformGateway, model string) (*Account, error) {
+func prepareGatewayProtocolAccount(ctx context.Context, selected *Account, reader GatewayRequestAccountReader, family domain.PlatformGateway, model string) (*Account, error) {
 	group, _ := ctx.Value(ctxkey.Group).(*Group)
 	if selected == nil || !selected.IsGateway() || group == nil || group.ID <= 0 {
 		return nil, ErrGatewayProtocolsPending
@@ -98,8 +107,7 @@ func prepareGatewayProtocolAccount(ctx context.Context, selected *Account, repo 
 	if model == "" {
 		return nil, ErrGatewayProtocolsPending
 	}
-	reader, ok := repo.(GatewayRequestAccountReader)
-	if !ok {
+	if reader == nil {
 		return nil, ErrGatewayProtocolsPending
 	}
 	current, liveGroup, err := reader.GatewayRequestAccount(ctx, selected.ID, group.ID)

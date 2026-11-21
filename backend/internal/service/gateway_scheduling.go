@@ -1506,8 +1506,8 @@ func (s *GatewayService) ReleaseAccountSession(ctx context.Context, account *Acc
 func (s *GatewayService) getSchedulableAccount(ctx context.Context, accountID int64) (*Account, error) {
 	if group, _ := ctx.Value(ctxkey.Group).(*Group); group != nil {
 		scope, _ := ctx.Value(gatewaySelectionKey{}).(gatewaySelection)
-		if _, enabled := requestGatewaySelection(ctx, &group.ID, scope.target); enabled && (s.schedulerSnapshot == nil || s.schedulerSnapshot.localSnapshotReader == nil) {
-			if reader, ok := s.accountRepo.(GatewayRequestAccountReader); ok {
+		if _, enabled := requestGatewaySelection(ctx, &group.ID, scope.target); enabled {
+			if reader := gatewayAccountReader(s.accountRepo, s.schedulerSnapshot); reader != nil {
 				fresh, _, err := reader.GatewayRequestAccount(ctx, accountID, group.ID)
 				if err == nil && fresh != nil && fresh.gatewayProtocolsPending() {
 					return s.refreshGatewayMessagesSelection(ctx, fresh)

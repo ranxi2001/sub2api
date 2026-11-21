@@ -87,11 +87,14 @@ func (s *GatewayService) appendGatewayMessagesCandidates(ctx context.Context, gr
 
 func appendGatewayCandidates(ctx context.Context, repo AccountRepository, snapshot *SchedulerSnapshotService, groupID *int64, platform string, accounts []Account) []Account {
 	selection, enabled := requestGatewaySelection(ctx, groupID, platform)
-	if !enabled || (snapshot != nil && snapshot.localSnapshotReader != nil) {
+	if !enabled {
 		return accounts
 	}
-	reader, ok := repo.(GatewayRequestCandidateReader)
-	if !ok {
+	reader, _ := repo.(GatewayRequestCandidateReader)
+	if snapshot != nil && snapshot.localSnapshotReader != nil {
+		reader, _ = snapshot.localSnapshotReader.(GatewayRequestCandidateReader)
+	}
+	if reader == nil {
 		return accounts
 	}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
@@ -140,7 +143,7 @@ func (s *GatewayService) refreshGatewayMessagesSelection(ctx context.Context, ac
 	}
 	scope, _ := ctx.Value(gatewaySelectionKey{}).(gatewaySelection)
 	selection, enabled := requestGatewaySelection(ctx, &group.ID, scope.target)
-	if !enabled || (s.schedulerSnapshot != nil && s.schedulerSnapshot.localSnapshotReader != nil) {
+	if !enabled {
 		return nil, ErrGatewayProtocolsPending
 	}
 	view, err := s.gatewayProtocolAccount(ctx, account, selection.family, selection.model)
@@ -164,7 +167,7 @@ func (s *OpenAIGatewayService) openAIGatewaySelectionView(ctx context.Context, a
 	}
 	scope, _ := ctx.Value(gatewaySelectionKey{}).(gatewaySelection)
 	selection, ok := requestGatewaySelection(ctx, &scope.groupID, scope.target)
-	if !ok || selection.family != domain.PlatformGatewayOpenAI || (s.schedulerSnapshot != nil && s.schedulerSnapshot.localSnapshotReader != nil) {
+	if !ok || selection.family != domain.PlatformGatewayOpenAI {
 		return nil, ErrGatewayProtocolsPending
 	}
 	view, err := s.gatewayProtocolAccount(ctx, account, selection.family, selection.model)

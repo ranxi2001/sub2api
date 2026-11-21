@@ -1896,6 +1896,17 @@ func (s *OpenAIGatewayService) getSchedulableAccount(ctx context.Context, accoun
 	} else {
 		account, err = s.accountRepo.GetByID(ctx, accountID)
 	}
+	if account == nil && s.schedulerSnapshot != nil {
+		scope, _ := ctx.Value(gatewaySelectionKey{}).(gatewaySelection)
+		if _, ok := requestGatewaySelection(ctx, &scope.groupID, scope.target); ok {
+			if reader := gatewayAccountReader(s.accountRepo, s.schedulerSnapshot); reader != nil {
+				fresh, _, readErr := reader.GatewayRequestAccount(ctx, accountID, scope.groupID)
+				if readErr == nil && fresh != nil && fresh.IsGateway() {
+					account, err = fresh, nil
+				}
+			}
+		}
+	}
 	if err == nil && account != nil && account.IsGateway() {
 		account, err = s.openAIGatewaySelectionView(ctx, account)
 	}

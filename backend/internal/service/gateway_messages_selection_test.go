@@ -4,7 +4,9 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -142,4 +144,34 @@ func TestGatewayProtocolCandidatesByGroupAndProtocol(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestGatewayProtocolRegionalAssignmentAndRemoval(t *testing.T) {
+	base, ctx := gatewayProtocolFixture(PlatformOpenAI)
+	base.account.ID = 1
+	ctx = WithGatewayOpenAISelection(ctx, "public-model", "public-model")
+	bucket := SchedulerBucket{GroupID: base.group.ID, Platform: PlatformOpenAI, Mode: SchedulerModeSingle}
+	doc := RegionalSchedulerDocument{Version: 1, Groups: []*Group{base.group},
+		Buckets: []RegionalSchedulerBucket{{Bucket: bucket, Accounts: []*Account{base.account}}}}
+	payload, err := json.Marshal(doc)
+	require.NoError(t, err)
+	require.Error(t, RegionalSchedulerValidator([]int64{2})(payload))
+	replica := regionalTestReplica(t, filepath.Join(t.TempDir(), "state"), true)
+	require.NoError(t, replica.PublishNext(ctx, "test", time.Minute, payload))
+	reader, err := NewRegionalSchedulerReader(replica)
+	require.NoError(t, err)
+	snapshot := NewSchedulerSnapshotService(nil, nil, nil, nil, nil)
+	snapshot.SetLocalSnapshotReader(reader)
+	accounts := appendGatewayCandidates(ctx, nil, snapshot, &base.group.ID, PlatformOpenAI, nil)
+	require.Len(t, accounts, 1)
+	require.Equal(t, int64(1), accounts[0].ID)
+	ordinary, _, err := reader.GetLocalSnapshot(ctx, bucket)
+	require.NoError(t, err)
+	require.Empty(t, ordinary)
+	doc.Buckets[0].Accounts = []*Account{}
+	payload, err = json.Marshal(doc)
+	require.NoError(t, err)
+	require.NoError(t, replica.PublishNext(ctx, "test", time.Minute, payload))
+	_, err = (&OpenAIGatewayService{schedulerSnapshot: snapshot}).openAIGatewaySelectionView(ctx, &accounts[0])
+	require.Error(t, err)
 }

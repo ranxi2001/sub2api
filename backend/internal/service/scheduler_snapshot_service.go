@@ -252,7 +252,7 @@ func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, 
 		}
 	}()
 	useMixed := (platform == PlatformAnthropic || platform == PlatformGemini) && !hasForcePlatform
-	mode := s.resolveMode(platform, hasForcePlatform)
+	mode := schedulerModeForPlatform(platform, hasForcePlatform)
 	bucket := s.bucketFor(groupID, platform, mode)
 	if err := ctx.Err(); err != nil {
 		return nil, useMixed, err
@@ -1808,7 +1808,7 @@ func (s *SchedulerSnapshotService) normalizeGroupIDs(groupIDs []int64) []int64 {
 	return out
 }
 
-func (s *SchedulerSnapshotService) resolveMode(platform string, hasForcePlatform bool) string {
+func schedulerModeForPlatform(platform string, hasForcePlatform bool) string {
 	if hasForcePlatform {
 		return SchedulerModeForced
 	}
