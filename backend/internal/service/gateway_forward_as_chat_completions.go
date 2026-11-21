@@ -1,7 +1,6 @@
 package service
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -221,7 +220,11 @@ func (s *GatewayService) ForwardAsChatCompletions(
 		var sseErr *sseStreamErrorEventError
 		switch {
 		case errors.As(handleErr, &sseErr):
-			return nil, s.sseStreamErrorEventFailover(ctx, c, account, resp, sseErr.RawData, mappedModel, c.Writer.Size() != writerSizeBeforeStream)
+			policyErr := s.sseStreamErrorEventFailover(ctx, c, account, resp, sseErr.RawData, mappedModel, c.Writer.Size() != writerSizeBeforeStream)
+			if result != nil || c.Writer.Size() != writerSizeBeforeStream {
+				return result, errors.New("stream usage incomplete: upstream semantic stream failure")
+			}
+			return nil, policyErr
 		case errors.Is(handleErr, errAnthropicNativeStreamIdle) && s.rateLimitService != nil:
 			s.rateLimitService.HandleStreamTimeout(ctx, account, originalModel)
 		}
@@ -230,7 +233,11 @@ func (s *GatewayService) ForwardAsChatCompletions(
 		result, handleErr = s.handleCCBufferedFromAnthropic(resp, c, originalModel, mappedModel, reasoningEffort, startTime)
 		var sseErr *sseStreamErrorEventError
 		if errors.As(handleErr, &sseErr) {
-			return nil, s.sseStreamErrorEventFailover(ctx, c, account, resp, sseErr.RawData, mappedModel, c.Writer.Size() != writerSizeBeforeBody)
+			policyErr := s.sseStreamErrorEventFailover(ctx, c, account, resp, sseErr.RawData, mappedModel, c.Writer.Size() != writerSizeBeforeBody)
+			if result != nil || c.Writer.Size() != writerSizeBeforeBody {
+				return result, errors.New("stream usage incomplete: upstream semantic stream failure")
+			}
+			return nil, policyErr
 		}
 	}
 
@@ -273,55 +280,22 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 	observer := beginUpstreamResponseModelObservation(c)
 	requestID := resp.Header.Get("x-request-id")
 
-	scanner := bufio.NewScanner(resp.Body)
-	maxLineSize := defaultMaxLineSize
-	if s.cfg != nil && s.cfg.Gateway.MaxLineSize > 0 {
-		maxLineSize = s.cfg.Gateway.MaxLineSize
-	}
-	scanner.Buffer(make([]byte, 0, 64*1024), maxLineSize)
-
 	var finalResp *apicompat.AnthropicResponse
 	var usage ClaudeUsage
-	streamStatus := &anthropicCompatStream{body: resp.Body}
+	streamStatus := newAnthropicCompatStream(s.cfg, c, resp, "anthropic buffered", requestID)
+	defer streamStatus.stop()
 
-	for scanner.Scan() {
-		line := scanner.Text()
-		// SSE 规范允许 `event:xxx`（冒号后无空格）：Kimi 等 Anthropic 兼容上游
-		// 返回紧凑格式，严格匹配 "event: " 会丢弃全部事件（#4653 同根因）。
-		if _, ok := extractOpenAISSEEventLine(line); !ok {
-			continue
-		}
-
-		if !scanner.Scan() {
+	for {
+		event, payload, ok := streamStatus.nextEvent()
+		if !ok {
 			break
 		}
-		payload, ok := extractOpenAISSEDataLine(scanner.Text())
-		if !ok {
-			continue
-		}
-
 		observeAnthropicUpstreamResponseModel(c, []byte(payload))
-		var event apicompat.AnthropicStreamEvent
-		if err := json.Unmarshal([]byte(payload), &event); err != nil {
-			continue
-		}
 
 		observer.ObserveAnthropic([]byte(payload))
 		streamStatus.observe(&event, payload)
 		if event.Type == "error" {
-			if isAnthropicCompatSafetyRejection([]byte(payload)) {
-				message := sanitizeUpstreamErrorMessage(gjson.Get(payload, "error.message").String())
-				writeGatewayCCError(c, http.StatusForbidden, "permission_error", message)
-				MarkResponseCommitted(c)
-				return nil, fmt.Errorf("upstream safety rejection: %s", message)
-			}
-			// 缓冲模式尚未向客户端写出任何内容：交给调用方按流内 error 事件做
-			// 账号故障转移，而不是忽略后返回 502 或截断的半截响应。
-			logger.L().Warn("forward_as_cc buffered: upstream error event",
-				zap.String("request_id", requestID),
-				zap.String("error_type", gjson.Get(payload, "error.type").String()),
-			)
-			return nil, &sseStreamErrorEventError{RawData: payload}
+			break
 		}
 
 		// message_start carries the initial response structure and cache usage
@@ -357,17 +331,12 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
-		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-			logger.L().Warn("forward_as_cc buffered: read error",
-				zap.Error(err),
-				zap.String("request_id", requestID),
-			)
-		}
-	}
-
-	streamStatus.readErr = scanner.Err()
 	if failure := streamStatus.failure(); failure != nil {
+		var sseErr *sseStreamErrorEventError
+		if errors.As(failure.err, &sseErr) && !usage.hasObservedTokens() && !isAnthropicCompatSafetyRejection([]byte(sseErr.RawData)) {
+			return nil, failure.err
+		}
+
 		result := &ForwardResult{
 			UpstreamResponseServiceTier: observer.ServiceTier(),
 			RequestID:                   requestID,
@@ -380,7 +349,12 @@ func (s *GatewayService) handleCCBufferedFromAnthropic(
 			Duration:                    time.Since(startTime),
 		}
 		applyObservedGatewayResponseModel(c, result)
-		writeGatewayCCError(c, http.StatusBadGateway, failure.errType, failure.message)
+		if !streamStatus.clientDisconnected {
+			writeGatewayCCError(c, http.StatusBadGateway, failure.errType, failure.message)
+		}
+		if !usage.hasObservedTokens() {
+			result = nil
+		}
 		return result, failure.err
 	}
 
@@ -578,36 +552,19 @@ func (s *GatewayService) handleCCStreamingFromAnthropic(
 	}
 
 	for {
-		line, ok := stream.nextLine()
+		event, payload, ok := stream.nextEvent()
 		if !ok {
 			break
 		}
-		// 与缓冲路径一致：接受 SSE 紧凑格式（冒号后无空格，#4653 同根因）。
-		if _, ok := extractOpenAISSEEventLine(line); !ok {
-			continue
-		}
-
-		dataLine, ok := stream.nextLine()
-		if !ok {
-			break
-		}
-		payload, ok := extractOpenAISSEDataLine(dataLine)
-		if !ok {
-			continue
-		}
-
 		observeAnthropicUpstreamResponseModel(c, []byte(payload))
-		var event apicompat.AnthropicStreamEvent
-		if err := json.Unmarshal([]byte(payload), &event); err != nil {
-			continue
-		}
 
-		// Forward received usage regardless of the client stream_options.
-		// The intermediate Responses converter synthesizes usage even when absent.
 		ccState.IncludeUsage = ccState.IncludeUsage || anthropicChatStreamHasUsage(&event, payload)
 
 		observer.ObserveAnthropic([]byte(payload))
 		stream.observe(&event, payload)
+		if event.Type == "message_stop" {
+			continue
+		}
 		if stream.upstreamErrType != "" {
 			break
 		}

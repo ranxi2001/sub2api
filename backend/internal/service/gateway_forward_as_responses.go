@@ -1,7 +1,6 @@
 package service
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -228,7 +227,11 @@ func (s *GatewayService) ForwardAsResponses(
 		var sseErr *sseStreamErrorEventError
 		switch {
 		case errors.As(handleErr, &sseErr):
-			return nil, s.sseStreamErrorEventFailover(ctx, c, account, resp, sseErr.RawData, mappedModel, c.Writer.Size() != writerSizeBeforeStream)
+			policyErr := s.sseStreamErrorEventFailover(ctx, c, account, resp, sseErr.RawData, mappedModel, c.Writer.Size() != writerSizeBeforeStream)
+			if result != nil || c.Writer.Size() != writerSizeBeforeStream {
+				return result, errors.New("stream usage incomplete: upstream semantic stream failure")
+			}
+			return nil, policyErr
 		case errors.Is(handleErr, errAnthropicNativeStreamIdle) && s.rateLimitService != nil:
 			s.rateLimitService.HandleStreamTimeout(ctx, account, originalModel)
 		}
@@ -237,7 +240,11 @@ func (s *GatewayService) ForwardAsResponses(
 		result, handleErr = s.handleResponsesBufferedStreamingResponse(resp, c, originalModel, mappedModel, reasoningEffort, startTime, clientToolMapping)
 		var sseErr *sseStreamErrorEventError
 		if errors.As(handleErr, &sseErr) {
-			return nil, s.sseStreamErrorEventFailover(ctx, c, account, resp, sseErr.RawData, mappedModel, c.Writer.Size() != writerSizeBeforeBody)
+			policyErr := s.sseStreamErrorEventFailover(ctx, c, account, resp, sseErr.RawData, mappedModel, c.Writer.Size() != writerSizeBeforeBody)
+			if result != nil || c.Writer.Size() != writerSizeBeforeBody {
+				return result, errors.New("stream usage incomplete: upstream semantic stream failure")
+			}
+			return nil, policyErr
 		}
 	}
 
@@ -468,63 +475,23 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 	observer := beginUpstreamResponseModelObservation(c)
 	requestID := resp.Header.Get("x-request-id")
 
-	scanner := bufio.NewScanner(resp.Body)
-	maxLineSize := defaultMaxLineSize
-	if s.cfg != nil && s.cfg.Gateway.MaxLineSize > 0 {
-		maxLineSize = s.cfg.Gateway.MaxLineSize
-	}
-	scanner.Buffer(make([]byte, 0, 64*1024), maxLineSize)
-
-	// Accumulate the final Anthropic response from streaming events
 	var finalResp *apicompat.AnthropicResponse
 	var usage ClaudeUsage
-	streamStatus := &anthropicCompatStream{body: resp.Body}
+	streamStatus := newAnthropicCompatStream(s.cfg, c, resp, "anthropic buffered", requestID)
+	defer streamStatus.stop()
 
-	for scanner.Scan() {
-		line := scanner.Text()
-		eventType, ok := parseAnthropicSSEField(line, "event")
+	for {
+		event, payload, ok := streamStatus.nextEvent()
 		if !ok {
-			continue
-		}
-
-		// Read the data line
-		if !scanner.Scan() {
 			break
 		}
-		dataLine := scanner.Text()
-		payload, ok := parseAnthropicSSEField(dataLine, "data")
-		if !ok {
-			continue
-		}
-
 		observeAnthropicUpstreamResponseModel(c, []byte(payload))
-		var event apicompat.AnthropicStreamEvent
-		if err := json.Unmarshal([]byte(payload), &event); err != nil {
-			logger.L().Warn("forward_as_responses buffered: failed to parse event",
-				zap.Error(err),
-				zap.String("request_id", requestID),
-				zap.String("event_type", eventType),
-			)
-			continue
-		}
 
 		observer.ObserveAnthropic([]byte(payload))
 		streamStatus.observe(&event, payload)
 		// Stop queued success events after a terminal safety rejection.
 		if event.Type == "error" {
-			if isAnthropicCompatSafetyRejection([]byte(payload)) {
-				message := sanitizeUpstreamErrorMessage(gjson.Get(payload, "error.message").String())
-				writeResponsesError(c, http.StatusForbidden, "permission_error", message)
-				MarkResponseCommitted(c)
-				return nil, fmt.Errorf("upstream safety rejection: %s", message)
-			}
-			// 缓冲模式尚未向客户端写出任何内容：交给调用方按流内 error 事件做
-			// 账号故障转移，而不是忽略后返回 502 或截断的半截响应。
-			logger.L().Warn("forward_as_responses buffered: upstream error event",
-				zap.String("request_id", requestID),
-				zap.String("error_type", gjson.Get(payload, "error.type").String()),
-			)
-			return nil, &sseStreamErrorEventError{RawData: payload}
+			break
 		}
 
 		if event.Type == "message_start" && event.Message != nil {
@@ -563,17 +530,12 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
-		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-			logger.L().Warn("forward_as_responses buffered: read error",
-				zap.Error(err),
-				zap.String("request_id", requestID),
-			)
-		}
-	}
-
-	streamStatus.readErr = scanner.Err()
 	if failure := streamStatus.failure(); failure != nil {
+		var sseErr *sseStreamErrorEventError
+		if errors.As(failure.err, &sseErr) && !usage.hasObservedTokens() && !isAnthropicCompatSafetyRejection([]byte(sseErr.RawData)) {
+			return nil, failure.err
+		}
+
 		result := &ForwardResult{
 			UpstreamResponseServiceTier: observer.ServiceTier(),
 			RequestID:                   requestID,
@@ -586,7 +548,12 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 			Duration:                    time.Since(startTime),
 		}
 		applyObservedGatewayResponseModel(c, result)
-		writeResponsesError(c, http.StatusBadGateway, failure.errType, failure.message)
+		if !streamStatus.clientDisconnected {
+			writeResponsesError(c, http.StatusBadGateway, failure.errType, failure.message)
+		}
+		if !usage.hasObservedTokens() {
+			result = nil
+		}
 		return result, failure.err
 	}
 
@@ -777,38 +744,17 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 
 	// Read Anthropic SSE events
 	for {
-		line, ok := stream.nextLine()
+		event, payload, ok := stream.nextEvent()
 		if !ok {
 			break
 		}
-		eventType, ok := parseAnthropicSSEField(line, "event")
-		if !ok {
-			continue
-		}
-
-		// Read data line
-		dataLine, ok := stream.nextLine()
-		if !ok {
-			break
-		}
-		payload, ok := parseAnthropicSSEField(dataLine, "data")
-		if !ok {
-			continue
-		}
-
 		observeAnthropicUpstreamResponseModel(c, []byte(payload))
-		var event apicompat.AnthropicStreamEvent
-		if err := json.Unmarshal([]byte(payload), &event); err != nil {
-			logger.L().Warn("forward_as_responses stream: failed to parse event",
-				zap.Error(err),
-				zap.String("request_id", requestID),
-				zap.String("event_type", eventType),
-			)
-			continue
-		}
 
 		observer.ObserveAnthropic([]byte(payload))
 		stream.observe(&event, payload)
+		if event.Type == "message_stop" {
+			continue
+		}
 		if stream.upstreamErrType != "" {
 			break
 		}
