@@ -967,7 +967,7 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 
 	needModelReplace := originalModel != mappedModel
 	clientModel := compositeClientModel(ctx, "")
-	status := &anthropicCompatStream{body: resp.Body, maxLineSize: maxLineSize}
+	status := &anthropicCompatStream{body: resp.Body, maxLineSize: maxLineSize, pump: &anthropicNativeLinePump{interval: streamInterval}}
 	var terminalFrames strings.Builder
 	pendingBytes := 0
 	useNoopDeltaKeepalive := c != nil && c.Request != nil && shouldUseClaudeCodeNoopDeltaKeepalive(c.GetHeader("User-Agent"))

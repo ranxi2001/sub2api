@@ -367,7 +367,7 @@ func (s *OpenAIGatewayService) relayAnthropicStream(ctx context.Context, resp *h
 	clientDisconnected := false
 	var pendingLines []string
 	var terminalFrames strings.Builder
-	status := &anthropicCompatStream{body: resp.Body}
+	status := &anthropicCompatStream{body: resp.Body, pump: &anthropicNativeLinePump{interval: streamInterval}}
 
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Split(anthropicSSELineSplit())

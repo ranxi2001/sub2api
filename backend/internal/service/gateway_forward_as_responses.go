@@ -737,14 +737,20 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 		}
 		if finalEvents := apicompat.FinalizeAnthropicResponsesStream(state); len(finalEvents) > 0 {
 			for _, evt := range finalEvents {
-				sse, err := apicompat.ResponsesEventToSSE(evt)
+				payload, err := json.Marshal(evt)
 				if err != nil {
-					continue
+					return resultWithUsage(), err
 				}
-				out := reverseToolNamesIfPresentString(c, sse)
-				if _, err := fmt.Fprint(c.Writer, out); err != nil {
-					stream.markClientDisconnected()
-					return resultWithUsage(), stream.failure().err
+				payload = reverseToolNamesIfPresent(c, payload)
+				payloads, _, err := clientToolRestorer.RestoreEvent(payload)
+				if err != nil {
+					return resultWithUsage(), err
+				}
+				for _, restored := range payloads {
+					if _, err := fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", gjson.GetBytes(restored, "type").String(), restored); err != nil {
+						stream.markClientDisconnected()
+						return resultWithUsage(), stream.failure().err
+					}
 				}
 			}
 			c.Writer.Flush()
