@@ -27,6 +27,12 @@ def required_tests(mode):
         tests += [f'TestIssue985HandlerToolContinuation/stream={flow}']
         tests += [f'TestIssue985SDKAccumulator/{case}/stream={flow}' for case in ('text', 'tool', 'zero', 'missing', 'partial_error', 'partial_protocol')]
         tests += [f'TestIssue985CancellationResources/cancel={flow}']
+    for route in ('chat', 'responses', 'native_chat', 'native_responses', 'native_messages', 'passthrough'):
+        tests += [f'TestIssue985FlushFailure/{route}/{phase}' for phase in ('intermediate', 'final')]
+    for suite in ('TestIssue985NativeHandlerUsage', 'TestIssue985NativePostgresBilling'):
+        for route in ('chat', 'responses', 'messages'):
+            for case in ('unknown', 'explicit_zero', 'input_only', 'output_only', 'cache_only', 'partial_full_error'):
+                tests += [f'{suite}/{route}/{case}/stream={flow}' for flow in ('true', 'false')]
     return tests
 
 

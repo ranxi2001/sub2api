@@ -724,6 +724,7 @@ func writeGatewayErrorResponse(c *gin.Context, status int, errType, message stri
 
 // streamingResult 流式响应结果
 type streamingResult struct {
+	usageUnavailable bool // No upstream usage fields were observed; explicit zero remains available.
 	usage            *ClaudeUsage
 	firstTokenMs     *int
 	clientDisconnect bool // 客户端是否在流式传输过程中断开

@@ -174,7 +174,7 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 	var usage ClaudeUsage
 	resultWithUsage := func() *OpenAIForwardResult {
 		result := &OpenAIForwardResult{RequestID: requestID, UpstreamHeaders: resp.Header,
-			Usage: claudeUsageToOpenAIUsage(&usage), Model: originalModel, BillingModel: billingModel,
+			Usage: claudeUsageToOpenAIUsage(&usage), UsageUnavailable: !streamStatus.usageSeen, Model: originalModel, BillingModel: billingModel,
 			UpstreamModel: upstreamModel, UpstreamEndpoint: "/v1/messages", ReasoningEffort: reasoningEffort,
 			Stream: false, ClientDisconnect: streamStatus.clientDisconnected, Duration: time.Since(startTime)}
 		applyObservedUpstreamResponseModel(c, result)
@@ -276,6 +276,7 @@ func (s *OpenAIGatewayService) handleResponsesBufferedFromNativeAnthropic(
 		RequestID:        requestID,
 		UpstreamHeaders:  resp.Header,
 		Usage:            claudeUsageToOpenAIUsage(&usage),
+		UsageUnavailable: !streamStatus.usageSeen,
 		Model:            originalModel,
 		BillingModel:     billingModel,
 		UpstreamModel:    upstreamModel,
@@ -337,6 +338,7 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 			RequestID:        requestID,
 			UpstreamHeaders:  resp.Header,
 			Usage:            claudeUsageToOpenAIUsage(&usage),
+			UsageUnavailable: !streamStatus.usageSeen,
 			Model:            originalModel,
 			BillingModel:     billingModel,
 			UpstreamModel:    upstreamModel,
@@ -397,7 +399,9 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 			}
 		}
 		if len(events) > 0 {
-			c.Writer.Flush()
+			if err := FlushGatewayResponse(c.Writer); err != nil {
+				streamStatus.markClientDisconnected()
+			}
 		}
 	}
 
@@ -463,7 +467,9 @@ func (s *OpenAIGatewayService) handleResponsesStreamingFromNativeAnthropic(
 			}
 		}
 		if wrote {
-			c.Writer.Flush()
+			if err := FlushGatewayResponse(c.Writer); err != nil {
+				streamStatus.markClientDisconnected()
+			}
 		}
 	}
 
