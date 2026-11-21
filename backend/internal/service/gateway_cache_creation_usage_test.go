@@ -205,7 +205,15 @@ func TestAnthropicCacheCreationMissingDetailForwardBillingBoundary(t *testing.T)
 					require.True(t, result.Usage.cacheCreationInputTokensPresent)
 					require.Equal(t, test.ttl5m, result.Usage.CacheCreation5mTokens)
 					require.Equal(t, test.ttl1h, result.Usage.CacheCreation1hTokens)
-					if route != "standard" && route != "passthrough" {
+					if terminal == "eof" && route != "standard" && route != "passthrough" {
+						wire := recorder.Body.String()
+						require.Contains(t, wire, "stream_incomplete")
+						require.NotContains(t, wire, "response.completed")
+						require.NotContains(t, wire, "[DONE]")
+						if strings.HasPrefix(route, "buffered") {
+							require.Equal(t, http.StatusBadGateway, recorder.Code)
+						}
+					} else if route != "standard" && route != "passthrough" {
 						var usage gjson.Result
 						if strings.HasPrefix(route, "buffered") {
 							usage = gjson.Get(recorder.Body.String(), "usage")

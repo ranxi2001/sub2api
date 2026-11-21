@@ -19,6 +19,10 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+func withAnthropicFixtureContent(wire string) string {
+	return strings.Replace(wire, "\n\n", "\n\n"+anthropicFixtureTextSSE, 1)
+}
+
 func TestAnthropicPromptTotalSnapshots(t *testing.T) {
 	for _, test := range []struct {
 		name   string
