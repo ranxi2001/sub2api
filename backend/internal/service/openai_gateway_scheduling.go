@@ -1706,7 +1706,7 @@ func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, grou
 		if platform == PlatformGrok {
 			accounts = s.filterGrokFreeQuotaAccountsForOpenAI(ctx, accounts)
 		}
-		return accounts, nil
+		return appendGatewayCandidates(ctx, s.accountRepo, s.schedulerSnapshot, groupID, platform, accounts), nil
 	}
 	var accounts []Account
 	var err error
@@ -1724,7 +1724,7 @@ func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, grou
 	if platform == PlatformGrok {
 		accounts = s.filterGrokFreeQuotaAccountsForOpenAI(ctx, accounts)
 	}
-	return accounts, nil
+	return appendGatewayCandidates(ctx, s.accountRepo, s.schedulerSnapshot, groupID, platform, accounts), nil
 }
 
 func (s *OpenAIGatewayService) tryAcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int) (*AcquireResult, error) {
@@ -1755,7 +1755,13 @@ func (s *OpenAIGatewayService) resolveFreshSchedulableOpenAIAccountBeforeProfit(
 	platform = NormalizeOpenAICompatiblePlatform(platform)
 
 	fresh := account
-	if s.schedulerSnapshot != nil {
+	if account.gatewayProtocolSource != nil {
+		current, err := s.openAIGatewaySelectionView(ctx, account)
+		if err != nil {
+			return nil
+		}
+		fresh = current
+	} else if s.schedulerSnapshot != nil {
 		current, err := s.getSchedulableAccount(ctx, account.ID)
 		if err != nil || current == nil {
 			return nil
@@ -1815,7 +1821,14 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ct
 		return nil
 	}
 	platform = NormalizeOpenAICompatiblePlatform(platform)
-	if s.schedulerSnapshot == nil || s.accountRepo == nil {
+	if account.gatewayProtocolSource != nil {
+		view, err := s.openAIGatewaySelectionView(ctx, account)
+		if err != nil {
+			return nil
+		}
+		account = view
+	}
+	if account.gatewayProtocolSource != nil || s.schedulerSnapshot == nil || s.accountRepo == nil {
 		if s.openAIGroupRequiresPrivacySet(ctx, groupID) && !account.IsPrivacySet() {
 			return nil
 		}
@@ -1883,6 +1896,20 @@ func (s *OpenAIGatewayService) getSchedulableAccount(ctx context.Context, accoun
 	} else {
 		account, err = s.accountRepo.GetByID(ctx, accountID)
 	}
+	if account == nil && s.schedulerSnapshot != nil {
+		scope, _ := ctx.Value(gatewaySelectionKey{}).(gatewaySelection)
+		if _, ok := requestGatewaySelection(ctx, &scope.groupID, scope.target); ok {
+			if reader := gatewayAccountReader(s.accountRepo, s.schedulerSnapshot); reader != nil {
+				fresh, _, readErr := reader.GatewayRequestAccount(ctx, accountID, scope.groupID)
+				if readErr == nil && fresh != nil && fresh.IsGateway() {
+					account, err = fresh, nil
+				}
+			}
+		}
+	}
+	if err == nil && account != nil && account.IsGateway() {
+		account, err = s.openAIGatewaySelectionView(ctx, account)
+	}
 	if err != nil || account == nil {
 		return account, err
 	}
@@ -1930,6 +1957,9 @@ func (s *OpenAIGatewayService) isOpenAIAccountBlockedBySchedulingThreshold(ctx c
 }
 
 func (s *OpenAIGatewayService) hydrateSelectedAccount(ctx context.Context, account *Account) (*Account, error) {
+	if account != nil && account.gatewayProtocolSource != nil {
+		return s.openAIGatewaySelectionView(ctx, account)
+	}
 	if account == nil || s.schedulerSnapshot == nil {
 		return account, nil
 	}

@@ -79,6 +79,14 @@ type Account struct {
 	GroupIDs      []int64
 	Groups        []*Group
 
+	// Request-local transport binding only; never persisted or exported. Final
+	// admission compares the neutral gateway identity before rebuilding a view.
+	gatewayProtocolSource  *Account
+	gatewayProtocolModel   string
+	gatewayBindingModel    string
+	gatewayMessagesView    *Account
+	gatewaySelectionTarget string
+
 	// model_mapping 热路径缓存（非持久化字段）
 	modelMappingCache               map[string]string
 	modelMappingCacheReady          bool
@@ -276,6 +284,11 @@ func accountLoadPreferenceRate(account *Account, loadRate int) int {
 }
 
 func (a *Account) IsSchedulable() bool {
+	// Fail closed until the four gateway protocols and their final admission
+	// checks are implemented together. Manual switches cannot bypass this gate.
+	if a.IsGateway() || a.Platform == PlatformGateway {
+		return false
+	}
 	if !a.IsActive() || !a.Schedulable || a.PerformancePaused {
 		return false
 	}

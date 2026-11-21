@@ -11,6 +11,17 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
+func TestAccountGatewayDTORedactsCallingKey(t *testing.T) {
+	account := &service.Account{Platform: service.PlatformGateway, Type: service.AccountTypeGateway,
+		Credentials: map[string]any{"upstream_kind": "new_api", "base_url": "https://gateway.example", "api_key": "synthetic-gateway-secret"}}
+	got := AccountFromServiceShallow(account)
+	require.Equal(t, "new_api", got.Credentials["upstream_kind"])
+	require.True(t, got.CredentialsStatus["has_api_key"])
+	raw, err := json.Marshal(got)
+	require.NoError(t, err)
+	require.NotContains(t, string(raw), "synthetic-gateway-secret")
+}
+
 func TestAccountFromServiceShallow_RedactsSensitiveCredentials(t *testing.T) {
 	src := &service.Account{
 		ID:       42,

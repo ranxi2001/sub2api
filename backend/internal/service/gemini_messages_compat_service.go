@@ -541,6 +541,13 @@ func (s *GeminiMessagesCompatService) HasAntigravityAccounts(ctx context.Context
 }
 
 func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*ForwardResult, error) {
+	if account.gatewayProtocolsPending() {
+		view, err := s.gatewayProtocolAccount(ctx, account, "gemini", gatewayProtocolBodyModel(body))
+		if err != nil {
+			return nil, err
+		}
+		account = view
+	}
 	if err := CheckUpstreamModeration(ctx, c, account); err != nil {
 		return nil, err
 	}
@@ -754,6 +761,15 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 
 		if err := checkAPIKeyLongContextRequestBeforeForward(ctx, c, upstreamReq, originalModel, mappedModel); err != nil {
 			return nil, err
+		}
+		if account.gatewayProtocolSource != nil {
+			latest, err := s.gatewayProtocolAccount(ctx, account.gatewayProtocolSource, "gemini", account.gatewayProtocolModel)
+			if err != nil {
+				return nil, err
+			}
+			if openAITurnRouteFingerprint(latest) != openAITurnRouteFingerprint(account) {
+				return nil, ErrGatewayAccountIdentity
+			}
 		}
 		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 		s.rateLimitService.observeQualityResponse(upstreamReq.Context(), account, resp, err)
@@ -1112,6 +1128,13 @@ func isGeminiSignatureRelatedError(respBody []byte) bool {
 }
 
 func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.Context, account *Account, originalModel string, action string, stream bool, body []byte) (*ForwardResult, error) {
+	if account.gatewayProtocolsPending() {
+		view, err := s.gatewayProtocolAccount(ctx, account, "gemini", originalModel)
+		if err != nil {
+			return nil, err
+		}
+		account = view
+	}
 	if err := CheckUpstreamModeration(ctx, c, account); err != nil {
 		return nil, err
 	}
@@ -1319,6 +1342,15 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 
 		if err := checkAPIKeyLongContextRequestBeforeForward(ctx, c, upstreamReq, originalModel, mappedModel); err != nil {
 			return nil, err
+		}
+		if account.gatewayProtocolSource != nil {
+			latest, err := s.gatewayProtocolAccount(ctx, account.gatewayProtocolSource, "gemini", account.gatewayProtocolModel)
+			if err != nil {
+				return nil, err
+			}
+			if openAITurnRouteFingerprint(latest) != openAITurnRouteFingerprint(account) {
+				return nil, ErrGatewayAccountIdentity
+			}
 		}
 		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 		s.rateLimitService.observeQualityResponse(upstreamReq.Context(), account, resp, err)

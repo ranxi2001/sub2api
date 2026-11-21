@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   CC_SWITCH_USAGE_SCRIPT,
   GROK_CC_SWITCH_MODEL,
-  OPENAI_CC_SWITCH_CODEX_MODEL,
   buildCcSwitchImportDeeplink
 } from '@/utils/ccswitchImport'
 import type { GroupPlatform } from '@/types'
@@ -13,10 +12,6 @@ function paramsFromDeeplink(deeplink: string): URLSearchParams {
 }
 
 describe('ccswitchImport utils', () => {
-  it('defaults OpenAI CC Switch imports to the current Codex model', () => {
-    expect(OPENAI_CC_SWITCH_CODEX_MODEL).toBe('gpt-5.5')
-  })
-
   it('defaults Grok Build imports to the current Grok model', () => {
     expect(GROK_CC_SWITCH_MODEL).toBe('grok-4.5')
   })
@@ -46,16 +41,20 @@ describe('ccswitchImport utils', () => {
     expect(params.get('resource')).toBe('provider')
     expect(params.get('app')).toBe('codex')
     expect(params.get('endpoint')).toBe(endpoint)
-    expect(params.get('model')).toBe(OPENAI_CC_SWITCH_CODEX_MODEL)
+    expect(params.get('model')).toBe('gpt-6-astra')
     const embedded = JSON.parse(atob(params.get('config')!)) as {
       auth: { OPENAI_API_KEY: string }
       config: string
     }
     expect(params.get('configFormat')).toBe('json')
     expect(embedded.auth.OPENAI_API_KEY).toBe(baseInput.apiKey)
+    expect(embedded.config).toMatch(/^model = "gpt-6-astra"$/m)
+    expect(embedded.config).toMatch(/^review_model = "gpt-6-astra"$/m)
+    expect(embedded.config).not.toMatch(/^(disable_response_storage|network_access|windows_wsl_setup_acknowledged) =/m)
     expect(embedded.config.split('\n[')[0]).toContain('service_tier = "fast"')
     expect(embedded.config.match(/^service_tier = /gm)).toHaveLength(1)
     expect(embedded.config).toContain(`base_url = "${endpoint}"`)
+    expect(embedded.config).toContain('model_catalog_url = "https://api.example.com/v1/models"')
     expect(atob(params.get('usageScript') || '')).toBe(baseInput.usageScript)
   })
 

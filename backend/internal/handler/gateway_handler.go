@@ -229,6 +229,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Model is not supported by composite groups")
 		return
 	}
+	c.Request = c.Request.WithContext(service.WithGatewayMessagesSelection(c.Request.Context(), reqModel))
 	if rejectSystemOneOnlyPlatform(c, apiKey, h.errorResponse) {
 		return
 	}

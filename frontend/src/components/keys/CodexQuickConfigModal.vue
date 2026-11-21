@@ -41,7 +41,20 @@
       </div>
 
       <div class="rounded-lg border border-gray-200 p-3 dark:border-dark-700">
-        <label class="flex cursor-pointer items-start gap-3">
+        <label v-if="isOpenAI" class="block">
+          <span class="block text-sm font-medium text-gray-900 dark:text-white">
+            {{ t('keys.useKeyModal.codexModelCatalog.mode') }}
+          </span>
+          <select v-model="catalogMode" data-testid="quick-config-catalog-mode" class="input mt-2 text-sm">
+            <option value="remote">{{ t('keys.useKeyModal.codexModelCatalog.remote') }}</option>
+            <option value="file">{{ t('keys.useKeyModal.codexModelCatalog.local') }}</option>
+            <option value="none">{{ t('keys.quickConfigureModal.noCatalog') }}</option>
+          </select>
+        </label>
+        <p v-if="isOpenAI && catalogMode === 'remote'" class="mt-2 break-all font-mono text-xs text-gray-700 dark:text-gray-300">
+          {{ modelCatalogUrl }}
+        </p>
+        <label v-if="!isOpenAI" class="flex cursor-pointer items-start gap-3">
           <input
             v-model="includeModelCatalog"
             type="checkbox"
@@ -133,7 +146,7 @@ import { useI18n } from 'vue-i18n'
 import { saveAs } from 'file-saver'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
-import { fetchCodexModelsManifest } from '@/api/codex'
+import { buildCodexModelCatalogUrl, fetchCodexModelsManifest, OPENAI_CODEX_CATALOG_CLIENT_VERSION } from '@/api/codex'
 import {
   buildMacLinuxCodexQuickConfigScript,
   buildWindowsCmdCodexQuickConfigScript,
@@ -145,12 +158,14 @@ const props = defineProps<{
   apiKey: string
   baseUrl: string
   platform?: CodexQuickConfigPlatform | null
+  siteName?: string
 }>()
 
 const emit = defineEmits<{ (event: 'close'): void }>()
 const { t } = useI18n()
 
 type TargetPlatform = 'unix' | 'windows'
+type CatalogMode = 'none' | 'remote' | 'file'
 type CatalogState = 'idle' | 'loading' | 'ready' | 'error'
 
 const detectPlatform = (): TargetPlatform => /windows/i.test(navigator.userAgent) ? 'windows' : 'unix'
@@ -158,7 +173,13 @@ const activePlatform = ref<TargetPlatform>(detectPlatform())
 const copied = ref(false)
 type ActionStatus = 'copySuccess' | 'downloadSuccess' | 'error' | null
 const actionStatus = ref<ActionStatus>(null)
-const includeModelCatalog = ref(false)
+const isOpenAI = computed(() => !props.platform || props.platform === 'openai')
+const catalogMode = ref<CatalogMode>(isOpenAI.value ? 'remote' : 'none')
+const includeModelCatalog = computed({
+  get: () => catalogMode.value === 'file',
+  set: (enabled: boolean) => { catalogMode.value = enabled ? 'file' : 'none' }
+})
+const modelCatalogUrl = computed(() => buildCodexModelCatalogUrl(props.baseUrl))
 const catalogState = ref<CatalogState>('idle')
 const catalogContent = ref('')
 const catalogModelCount = ref(0)
@@ -167,8 +188,10 @@ let catalogRequestID = 0
 
 const input = computed(() => ({
   apiKey: props.apiKey,
-  baseUrl: props.baseUrl || window.location.origin,
+  baseUrl: props.baseUrl.trim() || window.location.origin,
   platform: props.platform,
+  siteName: props.siteName,
+  modelCatalogUrl: isOpenAI.value && catalogMode.value === 'remote' ? modelCatalogUrl.value : undefined,
   modelCatalogContent: includeModelCatalog.value && catalogState.value === 'ready' ? catalogContent.value : undefined
 }))
 
@@ -198,17 +221,12 @@ watch(() => props.show, (show) => {
     activePlatform.value = detectPlatform()
     copied.value = false
     actionStatus.value = null
-    includeModelCatalog.value = false
-    resetCatalog()
+    catalogMode.value = isOpenAI.value ? 'remote' : 'none'
   }
 })
 
-watch(activePlatform, () => {
-  if (includeModelCatalog.value) void loadCatalog()
-})
-
-watch(includeModelCatalog, (enabled) => {
-  if (enabled) void loadCatalog()
+watch([() => props.show, includeModelCatalog, () => props.baseUrl, () => props.apiKey], ([show, enabled]) => {
+  if (show && enabled) void loadCatalog()
   else resetCatalog()
 })
 
@@ -229,7 +247,12 @@ async function loadCatalog() {
   catalogController = controller
   catalogState.value = 'loading'
   try {
-    const result = await fetchCodexModelsManifest(props.baseUrl, props.apiKey, controller.signal)
+    const result = await fetchCodexModelsManifest(
+      props.baseUrl,
+      props.apiKey,
+      controller.signal,
+      isOpenAI.value ? OPENAI_CODEX_CATALOG_CLIENT_VERSION : undefined
+    )
     if (requestID !== catalogRequestID) return
     catalogContent.value = result.content
     catalogModelCount.value = result.modelCount
@@ -246,6 +269,7 @@ async function loadCatalog() {
 }
 
 async function copyScript() {
+  if (!scriptReady.value) return
   try {
     await navigator.clipboard.writeText(script.value)
     copied.value = true

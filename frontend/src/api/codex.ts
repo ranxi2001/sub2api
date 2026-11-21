@@ -5,10 +5,12 @@ export interface CodexModelsManifestResult {
 }
 
 const DEFAULT_CODEX_CLIENT_VERSION = '0.158.0'
+// The browser requests a version whose catalog includes GPT-6.2 Astra.
+export const OPENAI_CODEX_CATALOG_CLIENT_VERSION = '0.166.0'
 
 function normalizeCodexBaseUrl(baseUrl: string): string {
   const fallback = typeof window !== 'undefined' ? window.location.origin : ''
-  const value = (baseUrl || fallback).trim().replace(/\/+$/, '')
+  const value = (baseUrl.trim() || fallback).replace(/\/+$/, '')
   if (!value) return '/v1'
   return /\/v1$/i.test(value) ? value : `${value}/v1`
 }
@@ -32,9 +34,10 @@ function isCodexModelsManifest(value: unknown): value is { models: unknown[] } {
 export async function fetchCodexModelsManifest(
   baseUrl: string,
   apiKey: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  clientVersion?: string
 ): Promise<CodexModelsManifestResult> {
-  const response = await fetch(buildCodexModelsManifestUrl(baseUrl), {
+  const response = await fetch(buildCodexModelsManifestUrl(baseUrl, clientVersion), {
     method: 'GET',
     headers: {
       Accept: 'application/json',

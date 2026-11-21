@@ -7,6 +7,23 @@ on:
     paths:
       - 'backend/internal/domain/constants.go'
       - 'backend/internal/service/**'
+      - 'backend/internal/handler/admin/account*'
+      - 'backend/internal/handler/dto/account_mapper_redact_test.go'
+      - 'backend/internal/repository/account_repo.go'
+      - 'backend/internal/repository/group_repo.go'
+      - 'backend/internal/repository/gateway_account*'
+      - 'backend/internal/repository/gateway_request_admission*'
+      - 'backend/internal/repository/gateway_request_candidates*'
+      - 'backend/internal/handler/gateway_messages_selection_test.go'
+      - 'backend/internal/handler/gateway_gemini_envelope_test.go'
+      - 'backend/internal/handler/gemini_v1beta_handler.go'
+      - 'backend/internal/repository/oauth_degradation_group_bindings*'
+      - 'backend/internal/repository/procurement_cost_snapshot*'
+      - 'backend/internal/repository/profit_operations.go'
+      - 'backend/internal/repository/usage_log_repo*'
+      - 'backend/internal/handler/dto/procurement_cost_snapshot*'
+      - 'backend/internal/handler/usage_observer_test.go'
+      - 'backend/migrations/392_usage_procurement_cost_snapshot.sql'
       - 'backend/internal/repository/concurrency_cache*'
       - 'backend/internal/repository/integration_harness_test.go'
       - 'backend/go.mod'
@@ -66,8 +83,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          go test -race -tags=unit ./internal/service \
-            -run '^Test(GatewayIdentity|GatewayUsage|NewAPIGateway|NewAPICostRequest|NewAPICostScale|UsagePlatformSnapshots)' \
+          go test -race -tags=unit ./internal/service ./internal/handler ./internal/handler/admin ./internal/handler/dto ./internal/repository \
+            -run '^Test(GatewayIdentity|GatewayUsage|GatewayManagement|GatewayProtocol|GatewayDataImport|AccountGatewayDTO|NewAPIGateway|NewAPICostRequest|NewAPICostScale|UsagePlatformSnapshots|ProcurementSnapshot|ObserverProcurementSnapshot)' \
             -count=1 -v -timeout=10m 2>&1 | tee ../evidence/unit-race.log
           if grep -Eq -- 'no tests to run|--- SKIP:' ../evidence/unit-race.log; then
             exit 1
@@ -75,18 +92,62 @@ jobs:
           grep -F -- '--- PASS: TestGatewayUsageWritersSnapshotRequestTarget' ../evidence/unit-race.log
           grep -F -- '--- PASS: TestNewAPIGatewayCostsFollowRequestTargetWithoutSharedWrites' ../evidence/unit-race.log
           grep -F -- '--- PASS: TestUsagePlatformSnapshotsSelectedAccount' ../evidence/unit-race.log
+          grep -F -- '--- PASS: TestGatewayManagementCreateValidatesBeforeWritesAndBindsExplicitGroups' ../evidence/unit-race.log
+          grep -F -- '--- PASS: TestGatewayManagementForwardingRemainsClosed' ../evidence/unit-race.log
+          grep -F -- '--- PASS: TestGatewayProtocolForwardUsesNativeBuildersAndSharedIdentity' ../evidence/unit-race.log
+          grep -F -- '--- PASS: TestGatewayProtocolOpenAIAuthoritativeAdmission' ../evidence/unit-race.log
+          grep -F -- '--- PASS: TestGatewayProtocolOpenAIRejectsFinalAuthorityChanges' ../evidence/unit-race.log
+          grep -F -- '--- PASS: TestGatewayProtocolOpenAIResponsesMappedWireModel' ../evidence/unit-race.log
+          grep -F -- '--- PASS: TestGatewayProtocolOpenAILegacyPassthroughKeepsWireModel' ../evidence/unit-race.log
+          grep -F -- '--- PASS: TestGatewayProtocolMessagesCandidatesStayRequestScoped' ../evidence/unit-race.log
+          grep -F -- '--- PASS: TestGatewayProtocolMessagesCandidateSourceRefreshesAfterWarmSnapshot' ../evidence/unit-race.log
+          grep -F -- '--- PASS: TestGatewayProtocolMessagesCandidateReadFailurePreservesLegacy' ../evidence/unit-race.log
+          grep -F -- '--- PASS: TestGatewayProtocolMessagesHandlerSchedulerToUsage' ../evidence/unit-race.log
+          grep -F -- '--- PASS: TestGatewayProtocolMessagesChannelMappingPreservesBindingModel' ../evidence/unit-race.log
+          grep -F -- '--- PASS: TestGatewayProtocolGeminiFreshAdmissionErrorEnvelope' ../evidence/unit-race.log
+          grep -F -- '--- PASS: TestGatewayProtocolGeminiForwardErrorResponseOwnership' ../evidence/unit-race.log
+          grep -F -- '--- PASS: TestGatewayProtocolAdmissionAllFamiliesKeepOneIdentity' ../evidence/unit-race.log
+          grep -F -- '--- PASS: TestGatewayManagementUpdateRequiresAtomicCapability' ../evidence/unit-race.log
+          grep -F -- '--- PASS: TestGatewayManagementRepositoryBindingGuard' ../evidence/unit-race.log
+          grep -F -- '--- PASS: TestGatewayDataImportIdentityValidation' ../evidence/unit-race.log
+          grep -F -- '--- PASS: TestAccountGatewayDTORedactsCallingKey' ../evidence/unit-race.log
+          grep -F -- '--- PASS: TestProcurementSnapshotMixedTargetsThroughUsageWriters' ../evidence/unit-race.log
+          grep -F -- '--- PASS: TestProcurementSnapshotAdminDTOAndUserPrivacy' ../evidence/unit-race.log
+          grep -F -- '--- PASS: TestObserverProcurementSnapshotFollowsExistingAccountCostScope' ../evidence/unit-race.log
       - name: Shared account slots against isolated Redis
         working-directory: backend
         shell: bash
         run: |
           set -euo pipefail
           go test -race -tags=integration ./internal/repository \
-            -run '^TestConcurrencyCacheSuite$/^TestGatewayTargetsShareAccountConcurrency$' \
+            -run '^Test((ConcurrencyCacheSuite|AccountRepoSuite)$|GatewayAtomicUpdate)/^(TestGateway(TargetsShareAccountConcurrency|ManagementAtomicMembershipAndOAuthExclusion|RequestAdmissionReloadsGroupMembershipAndStatus|RequestCandidatesRequireLiveExplicitAnthropicGroup)|admin|account-service|bulk)$' \
             -count=1 -v -timeout=10m 2>&1 | tee ../evidence/concurrency-redis.log
           if grep -Eq -- 'no tests to run|--- SKIP:' ../evidence/concurrency-redis.log; then
             exit 1
           fi
           grep -F -- '--- PASS: TestConcurrencyCacheSuite/TestGatewayTargetsShareAccountConcurrency' ../evidence/concurrency-redis.log
+          grep -F -- '--- PASS: TestAccountRepoSuite/TestGatewayManagementAtomicMembershipAndOAuthExclusion' ../evidence/concurrency-redis.log
+          grep -F -- '--- PASS: TestAccountRepoSuite/TestGatewayRequestAdmissionReloadsGroupMembershipAndStatus' ../evidence/concurrency-redis.log
+          grep -F -- '--- PASS: TestAccountRepoSuite/TestGatewayRequestCandidatesRequireLiveExplicitAnthropicGroup' ../evidence/concurrency-redis.log
+          grep -F -- '--- PASS: TestGatewayAtomicUpdateOAuthInterleaving' ../evidence/concurrency-redis.log
+          grep -F -- '--- PASS: TestGatewayAtomicUpdateRollbackAfterStagedFields' ../evidence/concurrency-redis.log
+          grep -F -- '--- PASS: TestGatewayAtomicUpdateSuccessfulCommit' ../evidence/concurrency-redis.log
+          grep -F -- '--- PASS: TestGatewayAtomicUpdateCallerTransactionRollback' ../evidence/concurrency-redis.log
+      - name: Procurement snapshots and legacy profit accounting
+        working-directory: backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -race -tags=integration ./internal/repository \
+            -run '^(TestProcurementSnapshot|TestProfitOperationsPersistedProfitIndependentFromAccountDebit|TestProfitOperationsZeroLossUnknownAndCurrentConfiguration)' \
+            -count=1 -v -timeout=10m 2>&1 | tee ../evidence/procurement-cost.log
+          if grep -Eq -- 'no tests to run|--- SKIP:' ../evidence/procurement-cost.log; then
+            exit 1
+          fi
+          grep -F -- '--- PASS: TestProcurementSnapshotAllInsertPathsAndImmutability' ../evidence/procurement-cost.log
+          grep -F -- '--- PASS: TestProcurementSnapshotDurableReplayDoesNotRepriceOrRecharge' ../evidence/procurement-cost.log
+          grep -F -- '--- PASS: TestProcurementSnapshotProfitUsesMixedRequestTargetsAndUnknowns' ../evidence/procurement-cost.log
+          grep -F -- '--- PASS: TestProcurementSnapshotMigrationLeavesHistoryAndChargesUntouched' ../evidence/procurement-cost.log
       - uses: actions/upload-artifact@v7
         if: always()
         with:

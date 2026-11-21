@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/tidwall/gjson"
 
@@ -120,6 +121,18 @@ func sleepWithContext(ctx context.Context, d time.Duration) error {
 
 // Forward 转发请求到Claude API
 func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, parsed *ParsedRequest) (result *ForwardResult, err error) {
+	if account.gatewayProtocolsPending() {
+		if parsed != nil && parsed.GroupID != nil {
+			if group, ok := ctx.Value(ctxkey.Group).(*Group); !ok || group == nil || group.ID != *parsed.GroupID {
+				return nil, ErrGatewayAccountGroup
+			}
+		}
+		view, err := s.gatewayProtocolAccount(ctx, account, "anthropic", gatewayProtocolParsedModel(parsed))
+		if err != nil {
+			return nil, err
+		}
+		account = view
+	}
 	if err := CheckUpstreamModeration(ctx, c, account); err != nil {
 		return nil, err
 	}

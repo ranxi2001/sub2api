@@ -23,6 +23,7 @@ describe('NewFeatureBadge', () => {
 
 
   it.each([
+    ['cross-platform gateway accounts', NEW_FEATURE_NOTICES.crossPlatformGatewayAccounts],
     ['model plaza currency', NEW_FEATURE_NOTICES.modelPlazaCurrency],
     ['image usage billing', NEW_FEATURE_NOTICES.imageUsageBilling],
     ['channel UltraFast pricing', NEW_FEATURE_NOTICES.channelUltrafastPricing],

@@ -1,3 +1,9 @@
+export const OPENAI_CODEX_MODEL = 'gpt-6-astra'
+
+export function selectOpenAICodexModel(slugs: readonly string[]): string {
+  return slugs.includes(OPENAI_CODEX_MODEL) ? OPENAI_CODEX_MODEL : slugs[0] || OPENAI_CODEX_MODEL
+}
+
 export interface CodexCatalogReasoningLevel {
   effort?: unknown
 }

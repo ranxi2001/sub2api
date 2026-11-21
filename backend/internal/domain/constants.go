@@ -44,6 +44,9 @@ const (
 	PlatformComposite = "composite"
 )
 
+// AccountPlatformGateway is an account-only identity, never a request or group platform.
+const AccountPlatformGateway = "gateway"
+
 // Account mode constants 区分国产供应商的「按量付费（余额）」与「Coding Plan」两种接入方式。
 // 存储于 credentials["account_mode"]，决定 base_url 预设与额度监控方式。
 const (
