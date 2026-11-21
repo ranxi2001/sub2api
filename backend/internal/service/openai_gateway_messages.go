@@ -34,7 +34,11 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	defaultMappedModel string,
 ) (*OpenAIForwardResult, error) {
 	if account.gatewayProtocolsPending() {
-		return nil, ErrGatewayProtocolsPending
+		view, err := s.gatewayProtocolAccount(ctx, account, "openai", gatewayProtocolBodyModel(body))
+		if err != nil {
+			return nil, err
+		}
+		account = view
 	}
 
 	admittedCtx, admissionErr := s.beginPriorityLatencyTurn(ctx, c, account, gjson.GetBytes(body, "model").String())

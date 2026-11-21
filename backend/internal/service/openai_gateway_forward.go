@@ -92,7 +92,11 @@ func prismBrowserResponsesURL(baseURL string) string {
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (result *OpenAIForwardResult, resultErr error) {
 	if account.gatewayProtocolsPending() {
-		return nil, ErrGatewayProtocolsPending
+		view, err := s.gatewayProtocolAccount(ctx, account, "openai", gatewayProtocolBodyModel(body))
+		if err != nil {
+			return nil, err
+		}
+		account = view
 	}
 	preparedCtx, preparedBody, prepareErr := s.prepareOpenAIAgentOAuthReplay(ctx, account, body)
 	if prepareErr != nil {
