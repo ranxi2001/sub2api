@@ -38,7 +38,7 @@ func TestAPIKeyWSPolicyAppliesToFirstAndSubsequentFrames(t *testing.T) {
 	require.NoError(t, err)
 
 	writeCtx, cancelWrite := context.WithTimeout(ctx, 3*time.Second)
-	err = client.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-6.1-sol","Model":"gpt-6.1-sol","reasoning":{"effort":"ultra"}}`))
+	err = client.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-6.1-sol","reasoning":{"effort":"ultra"}}`))
 	cancelWrite()
 	require.NoError(t, err)
 	second := requirePassthroughUpstreamWrite(t, upstream, 3*time.Second)

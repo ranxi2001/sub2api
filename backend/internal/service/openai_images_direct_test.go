@@ -127,13 +127,11 @@ func TestCodexDirectImagesStreamRejectsPlainJSON(t *testing.T) {
 func TestCodexDirectImagesStreamKeepsPrettyPrintedUsageOnOneLine(t *testing.T) {
 	body := []byte(`{"model":"gpt-image-2","prompt":"draw","stream":true}`)
 	c, rec := newOpenAIImagesTestContext(t, body)
-	resp := openAIImagesJSONResponse()
-	resp.Body = io.NopCloser(strings.NewReader("{\n  \"created\": 1710000000,\n  \"data\": [\n    {\n      \"b64_json\": \"aGVsbG8=\"\n    }\n  ],\n  \"usage\": {\n    \"input_tokens\": 10,\n    \"output_tokens\": 20\n  }\n}\n"))
-	svc := newOpenAIImagesTestService(&httpUpstreamRecorder{resp: resp})
-	parsed, err := svc.ParseOpenAIImagesRequest(c, body)
-	require.NoError(t, err)
-	_, err = svc.ForwardImages(context.Background(), c, directImagesTestAccount(), body, parsed, "")
-	require.NoError(t, err)
+	const event = "image_generation.completed"
+	usage := []byte("{\n  \"input_tokens\": 10,\n  \"output_tokens\": 20\n}")
+	payload := buildOpenAIImagesStreamCompletedPayload(event, openAIResponsesImageResult{Result: "aGVsbG8="}, "b64_json", 1710000000, usage)
+	svc := &OpenAIGatewayService{}
+	require.NoError(t, svc.writeOpenAIImagesStreamEvent(c, rec, event, payload))
 
 	out := strings.TrimRight(rec.Body.String(), "\n")
 	var data string

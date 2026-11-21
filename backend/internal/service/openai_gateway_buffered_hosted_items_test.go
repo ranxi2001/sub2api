@@ -278,7 +278,7 @@ func TestBufferedCompat_GrokSearchCountFromRebuiltHostedItems(t *testing.T) {
 				body := []byte(`{"model":"grok-4.7","stream":false,"messages":[{"role":"user","content":"hi"}]}`)
 				c.Request = httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
 				c.Request.Header.Set("Content-Type", "application/json")
-				c.Set("api_key", &APIKey{ID: 88000})
+				c.Set("api_key", &APIKey{ID: 88000, AllowLongContext: true})
 				account := healthyGrokOAuthGatewayTestAccount(4242, "access-token")
 				svc := grokAuditOAuthService(&httpUpstreamRecorder{resp: bufferedHostedItemsSSEResponse(stream(tc.terminalOutput))}, account)
 
