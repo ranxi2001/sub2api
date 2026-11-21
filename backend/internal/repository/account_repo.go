@@ -20,6 +20,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
@@ -54,7 +55,8 @@ type accountRepository struct {
 	// 确保粘性会话能及时感知账号不可用状态。
 	// Used to proactively sync account snapshot to cache when status changes,
 	// ensuring sticky sessions can promptly detect unavailable accounts.
-	schedulerCache service.SchedulerCache
+	schedulerCache       service.SchedulerCache
+	oauth429RoutingModel *atomic.Pointer[string]
 }
 
 var schedulerNeutralExtraKeyPrefixes = []string{
@@ -134,7 +136,7 @@ func NewAdminAccountRepository(client *dbent.Client, sqlDB *sql.DB, schedulerCac
 // newAccountRepositoryWithSQL 是内部构造函数，支持依赖注入 SQL 执行器。
 // 这种设计便于单元测试时注入 mock 对象。
 func newAccountRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor, schedulerCache service.SchedulerCache) *accountRepository {
-	return &accountRepository{client: client, sql: sqlq, schedulerCache: schedulerCache}
+	return &accountRepository{client: client, sql: sqlq, schedulerCache: schedulerCache, oauth429RoutingModel: new(atomic.Pointer[string])}
 }
 
 func (r *accountRepository) Create(ctx context.Context, account *service.Account) error {
