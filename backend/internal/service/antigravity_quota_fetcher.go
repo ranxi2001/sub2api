@@ -161,10 +161,11 @@ func (f *AntigravityQuotaFetcher) buildUsageInfo(modelsResp *antigravity.FetchAv
 
 		// remainingFraction 是剩余比例 (0.0-1.0)，转换为使用率百分比
 		utilization := int((1.0 - modelInfo.QuotaInfo.RemainingFraction) * 100)
+		resetTime := antigravityQuotaResetTime(modelInfo.QuotaInfo)
 
 		info.AntigravityQuota[modelName] = &AntigravityModelQuota{
 			Utilization: utilization,
-			ResetTime:   modelInfo.QuotaInfo.ResetTime,
+			ResetTime:   resetTime,
 		}
 
 		// 填充模型详细能力信息
@@ -197,8 +198,8 @@ func (f *AntigravityQuotaFetcher) buildUsageInfo(modelsResp *antigravity.FetchAv
 			progress := &UsageProgress{
 				Utilization: utilization,
 			}
-			if modelInfo.QuotaInfo.ResetTime != "" {
-				if resetTime, err := time.Parse(time.RFC3339, modelInfo.QuotaInfo.ResetTime); err == nil {
+			if resetTimeRaw := antigravityQuotaResetTime(modelInfo.QuotaInfo); resetTimeRaw != "" {
+				if resetTime, err := time.Parse(time.RFC3339, resetTimeRaw); err == nil {
 					progress.ResetsAt = &resetTime
 					progress.RemainingSeconds = int(time.Until(resetTime).Seconds())
 				}
@@ -219,6 +220,17 @@ func (f *AntigravityQuotaFetcher) buildUsageInfo(modelsResp *antigravity.FetchAv
 	}
 
 	return info
+}
+
+// antigravityQuotaResetTime suppresses moving upstream reset timestamps for unused quota.
+// Google returns resetTime = now + 5h on every fetch when remainingFraction == 1; that
+// moving timestamp is not an active reset deadline. Check the raw fraction rather than
+// the truncated integer utilization percentage so usage below 1% still retains its real deadline.
+func antigravityQuotaResetTime(quota *antigravity.ModelQuotaInfo) string {
+	if quota.RemainingFraction >= 1 {
+		return ""
+	}
+	return quota.ResetTime
 }
 
 // GetProxyURL 获取账户的代理 URL

@@ -735,6 +735,38 @@ describe('AccountUsageCell', () => {
     expect(wrapper.find('.usage-bar').text()).toContain('|0|2026-11-14T21:22:49Z')
   })
 
+  it.each([
+    { id: 9801, reset: '', initial: null, reopened: null },
+    { id: 9802, reset: '2026-10-18T11:00:00Z', initial: '3h 0m', reopened: '2h 0m' }
+  ])('Antigravity 重新进入页面不生成满额倒计时，保留不足 1% 用量的真实时间 ($id)', async ({ id, reset, initial, reopened }) => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-18T08:00:00Z'))
+    getUsage.mockResolvedValue({
+      antigravity_quota: { 'gemini-3-flash': { utilization: 0, reset_time: reset } }
+    })
+    const open = () => mount(AccountUsageCell, {
+      props: { account: makeAccount({ id }) },
+      global: { stubs: { AccountQuotaInfo: true } }
+    })
+    let wrapper = open()
+    try {
+      await flushPromises()
+      expect(wrapper.text()).toContain('0%')
+      if (initial) expect(wrapper.text()).toContain(initial)
+      else expect(wrapper.text()).not.toMatch(/\d+h \d+m/)
+      wrapper.unmount()
+      vi.setSystemTime(new Date('2026-10-18T09:00:00Z'))
+      wrapper = open()
+      await flushPromises()
+      expect(getUsage).toHaveBeenCalledTimes(2)
+      if (reopened) expect(wrapper.text()).toContain(reopened)
+      else expect(wrapper.text()).not.toMatch(/\d+h \d+m/)
+    } finally {
+      wrapper.unmount()
+      vi.useRealTimers()
+    }
+  })
+
   it('Antigravity 会显示 AI Credits 余额信息', async () => {
     getUsage.mockResolvedValue({
       ai_credits: [

@@ -53,6 +53,54 @@ func TestNormalizeTier(t *testing.T) {
 func aqfBoolPtr(v bool) *bool { return &v }
 func aqfIntPtr(v int) *int    { return &v }
 
+func TestBuildUsageInfo_UnusedQuotaHasNoMovingResetDeadline(t *testing.T) {
+	fetcher := &AntigravityQuotaFetcher{}
+	for _, reset := range []string{"2026-10-18T13:00:00Z", "2026-10-18T14:00:00Z"} {
+		info := fetcher.buildUsageInfo(&antigravity.FetchAvailableModelsResponse{
+			Models: map[string]antigravity.ModelInfo{
+				"gemini-2.5-pro": {QuotaInfo: &antigravity.ModelQuotaInfo{
+					RemainingFraction: 1, ResetTime: reset,
+				}},
+			},
+		}, "", "", nil)
+		require.Zero(t, info.AntigravityQuota["gemini-2.5-pro"].Utilization)
+		require.Empty(t, info.AntigravityQuota["gemini-2.5-pro"].ResetTime)
+		require.NotNil(t, info.FiveHour)
+		require.Nil(t, info.FiveHour.ResetsAt)
+		require.Zero(t, info.FiveHour.RemainingSeconds)
+	}
+}
+
+func TestBuildUsageInfo_ConsumedQuotaPreservesUpstreamResetDeadline(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		remaining float64
+		reset     string
+	}{
+		{"partial", 0.75, "2026-10-18T11:30:13Z"},
+		{"less_than_one_percent", 0.99991775, "2026-10-18T11:30:13Z"},
+		{"exhausted", 0, "2026-10-19T04:30:09Z"},
+		{"no_deadline", 0.75, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			info := (&AntigravityQuotaFetcher{}).buildUsageInfo(&antigravity.FetchAvailableModelsResponse{
+				Models: map[string]antigravity.ModelInfo{
+					"gemini-2.5-pro": {QuotaInfo: &antigravity.ModelQuotaInfo{
+						RemainingFraction: tc.remaining, ResetTime: tc.reset,
+					}},
+				},
+			}, "", "", nil)
+			require.Equal(t, tc.reset, info.AntigravityQuota["gemini-2.5-pro"].ResetTime)
+			if tc.reset == "" {
+				require.Nil(t, info.FiveHour.ResetsAt)
+			} else {
+				require.NotNil(t, info.FiveHour.ResetsAt)
+				require.Equal(t, tc.reset, info.FiveHour.ResetsAt.UTC().Format(time.RFC3339))
+			}
+		})
+	}
+}
+
 func TestBuildUsageInfo_BasicModels(t *testing.T) {
 	fetcher := &AntigravityQuotaFetcher{}
 
