@@ -853,6 +853,7 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 	usage := &ClaudeUsage{}
 	var firstTokenMs *int
 	scanner := bufio.NewScanner(resp.Body)
+	scanner.Split(anthropicSSELineSplit())
 	// 设置更大的buffer以处理长行
 	maxLineSize := defaultMaxLineSize
 	if s.cfg != nil && s.cfg.Gateway.MaxLineSize > 0 {

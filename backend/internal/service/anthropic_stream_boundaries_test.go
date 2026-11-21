@@ -30,6 +30,8 @@ func TestIssue985AdapterBoundaries(t *testing.T) {
 		input, output int
 	}{
 		{"crlf", strings.ReplaceAll(canonical, "\n", "\r\n"), false, 17, 3},
+		{"cr", strings.ReplaceAll(canonical, "\n", "\r"), false, 17, 3},
+		{"bom", "\xef\xbb\xbf" + canonical, false, 17, 3},
 		{"compact", strings.ReplaceAll(strings.ReplaceAll(canonical, "event: ", "event:"), "data: ", "data:"), false, 17, 3},
 		{"eof_frame", strings.TrimRight(canonical, "\n"), false, 17, 3},
 		{"unknown", issue985Frame("future_event", `{"type":"future_event","opaque":true}`) + canonical, false, 17, 3},
@@ -114,10 +116,11 @@ func TestIssue985AdapterBoundaries(t *testing.T) {
 }
 
 func TestIssue985EveryTransportSplit(t *testing.T) {
-	wire := strings.ReplaceAll(issue985Stream(), "\ndata:", "\nid: fixture\n: comment\ndata:")
+	wire := "\xef\xbb\xbf" + strings.ReplaceAll(strings.ReplaceAll(issue985Stream(), "\ndata:", "\nid: fixture\n: comment\ndata:"), "\n", "\r\n")
 	for split := 0; split <= len(wire); split++ {
 		reader := io.MultiReader(strings.NewReader(wire[:split]), strings.NewReader(wire[split:]))
 		scanner := bufio.NewScanner(reader)
+		scanner.Split(anthropicSSELineSplit())
 		st := &anthropicCompatStream{body: io.NopCloser(reader), pump: newAnthropicNativeLinePump(scanner, time.Second), maxLineSize: 4096}
 		var usage ClaudeUsage
 		for {
@@ -211,6 +214,7 @@ func TestIssue985CancellationResources(t *testing.T) {
 			reader, writer := io.Pipe()
 			defer writer.Close()
 			scanner := bufio.NewScanner(reader)
+			scanner.Split(anthropicSSELineSplit())
 			st := &anthropicCompatStream{body: reader, pump: newAnthropicNativeLinePump(scanner, 30*time.Millisecond), maxLineSize: 128}
 			if cancelClient {
 				gone := make(chan struct{})

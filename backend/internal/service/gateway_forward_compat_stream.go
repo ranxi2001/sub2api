@@ -67,6 +67,7 @@ type anthropicCompatStreamFailure struct {
 // newAnthropicCompatStream 启动上游行泵；调用方 defer stop()。
 func newAnthropicCompatStream(cfg *config.Config, c *gin.Context, resp *http.Response, logPrefix, requestID string) *anthropicCompatStream {
 	scanner := bufio.NewScanner(resp.Body)
+	scanner.Split(anthropicSSELineSplit())
 	maxLineSize := defaultMaxLineSize
 	if cfg != nil && cfg.Gateway.MaxLineSize > 0 {
 		maxLineSize = cfg.Gateway.MaxLineSize
@@ -138,7 +139,7 @@ func (st *anthropicCompatStream) nextLine() (string, bool) {
 			// 正常收流或取消：不记日志。
 		default:
 			logger.L().Warn(st.logPrefix+" stream: read error",
-				zap.Error(err),
+				zap.String("status", "read_error"),
 				zap.String("request_id", st.requestID),
 			)
 		}
@@ -201,8 +202,12 @@ func (st *anthropicCompatStream) observe(event *apicompat.AnthropicStreamEvent, 
 		_ = st.body.Close()
 		logger.L().Warn(st.logPrefix+" stream: upstream error event",
 			zap.String("request_id", st.requestID),
-			zap.String("error_type", st.upstreamErrType),
-			zap.String("error_message", st.upstreamErrMessage),
+			zap.String("status", "upstream_error"),
+			zap.Int("frame_count", st.frameCount),
+			zap.Bool("input_usage_seen", st.inputUsageSeen),
+			zap.Bool("output_usage_seen", st.outputUsageSeen),
+			zap.Bool("terminal_seen", st.sawTerminal),
+			zap.Int("content_bytes", st.contentBytes),
 			zap.Bool("client_disconnected", st.clientDisconnected),
 		)
 	}

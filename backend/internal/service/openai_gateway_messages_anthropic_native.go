@@ -370,6 +370,7 @@ func (s *OpenAIGatewayService) relayAnthropicStream(ctx context.Context, resp *h
 	status := &anthropicCompatStream{body: resp.Body}
 
 	scanner := bufio.NewScanner(resp.Body)
+	scanner.Split(anthropicSSELineSplit())
 	maxLineSize := defaultMaxLineSize
 	if s.cfg != nil && s.cfg.Gateway.MaxLineSize > 0 {
 		maxLineSize = s.cfg.Gateway.MaxLineSize

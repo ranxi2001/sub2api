@@ -1,6 +1,8 @@
 package service
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
@@ -10,6 +12,36 @@ import (
 )
 
 var errAnthropicSSEFrameTooLarge = errors.New("upstream SSE frame exceeds size limit")
+
+// SSE accepts LF, CRLF and lone CR; a CR at a network boundary must wait for
+// the following byte so its LF is not mistaken for an empty frame. The BOM is
+// ignored only at the beginning of the stream.
+func anthropicSSELineSplit() bufio.SplitFunc {
+	first := true
+	return func(data []byte, atEOF bool) (advance int, token []byte, err error) {
+		for i, b := range data {
+			if b != '\r' && b != '\n' {
+				continue
+			}
+			if b == '\r' && i+1 == len(data) && !atEOF {
+				return 0, nil, nil
+			}
+			advance, token = i+1, data[:i]
+			if b == '\r' && i+1 < len(data) && data[i+1] == '\n' {
+				advance++
+			}
+			break
+		}
+		if advance == 0 && atEOF && len(data) > 0 {
+			advance, token = len(data), data
+		}
+		if first && advance > 0 {
+			token = bytes.TrimPrefix(token, []byte("\xef\xbb\xbf"))
+			first = false
+		}
+		return
+	}
+}
 
 // anthropicSSEFrameAssembler bounds the entire frame, including ignored fields.
 // Scanner/line-pump boundaries are transport details, never event boundaries.

@@ -14,7 +14,7 @@ def required_tests(mode):
         return tests
     for route in ('chat', 'responses', 'native_chat', 'native_responses'):
         for flow in ('stream', 'buffered'):
-            tests += [f'TestIssue985AdapterBoundaries/{route}/{flow}/{case}' for case in ('crlf', 'compact', 'eof_frame', 'unknown', 'zero', 'missing', 'field_missing', 'stop_reason_only', 'terminal_error', 'malformed', 'mismatch')]
+            tests += [f'TestIssue985AdapterBoundaries/{route}/{flow}/{case}' for case in ('crlf', 'cr', 'bom', 'compact', 'eof_frame', 'unknown', 'zero', 'missing', 'field_missing', 'stop_reason_only', 'terminal_error', 'malformed', 'mismatch')]
     for route in ('native', 'passthrough', 'normal'):
         tests += [f'TestIssue985NativeRelays/{route}/{case}' for case in ('multidata', 'empty', 'missing', 'error_after_terminal', 'reasoning')]
     tests += ['TestIssue985EveryTransportSplit', 'TestIssue985FrameBoundAndFieldOrder']
