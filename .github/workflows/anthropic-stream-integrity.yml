@@ -19,7 +19,19 @@ jobs:
   regression:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: fixture
+          POSTGRES_PASSWORD: fixture
+          POSTGRES_DB: issue985_fixture
+        ports: ['15432:5432']
+        options: >-
+          --health-cmd "pg_isready -U fixture -d issue985_fixture"
+          --health-interval 5s --health-timeout 5s --health-retries 10
     env:
+      ISSUE985_TEST_POSTGRES_DSN: 'postgres://fixture:fixture@127.0.0.1:15432/issue985_fixture?sslmode=disable'
       CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       GOFLAGS: -p=2
     steps:
@@ -67,7 +79,7 @@ jobs:
           evidence="$RUNNER_TEMP/anthropic-integrity"
           cd backend
           set +e
-          go test -race -json -tags=unit ./internal/service -run '^TestIssue985' -count=1 -timeout=10m > "$evidence/green.jsonl" 2> "$evidence/green.stderr"
+          go test -race -json -tags=unit,issue985pg ./internal/service ./internal/handler -run '^TestIssue985' -count=1 -timeout=10m > "$evidence/green.jsonl" 2> "$evidence/green.stderr"
           rc=$?
           set -e
           printf '%s\n' "$rc" > "$evidence/green.exitcode"

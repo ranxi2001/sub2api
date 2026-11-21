@@ -199,6 +199,15 @@ jobs:
           # Every integration package and its existing assertions still run.
           GOFLAGS: '-p=1'
         run: python3 .github/ci/go_tests.py integration --output "$RUNNER_TEMP/go-test-results"
+      - name: Anthropic handler and PostgreSQL integrity regression
+        env:
+          ISSUE985_TEST_POSTGRES_DSN: 'postgres://fixture:fixture@127.0.0.1:15432/issue985_fixture?sslmode=disable'
+          PGPASSWORD: fixture
+          GOFLAGS: '-p=1'
+        run: |
+          psql -h 127.0.0.1 -p 15432 -U fixture -d shadow_audit -c 'CREATE DATABASE issue985_fixture'
+          cd backend
+          go test -tags=unit,issue985pg ./internal/handler -run '^TestIssue985PostgresBilling$' -count=1 -timeout=8m
       - name: Upload integration test timings
         if: always()
         uses: actions/upload-artifact@v4

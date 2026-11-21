@@ -76,26 +76,29 @@ func (st *anthropicCompatStream) nextEvent() (apicompat.AnthropicStreamEvent, st
 		if !ready {
 			continue
 		}
-		st.frameCount++
-		if strings.TrimSpace(payload) == "[DONE]" {
-			continue
+		if event, valid := st.decodeFrame(name, payload); valid {
+			return event, payload, true
 		}
-		var event apicompat.AnthropicStreamEvent
-		if err := json.Unmarshal([]byte(payload), &event); err != nil {
-			if name != "" && !knownAnthropicStreamEvent(name) {
-				continue
-			}
-			st.protocolFailure = "invalid Anthropic event JSON"
-			break
-		}
-		if event.Type == "" || (name != "" && name != "message" && name != event.Type) {
-			st.protocolFailure = "Anthropic event name and JSON type disagree"
-			break
-		}
-		if !knownAnthropicStreamEvent(event.Type) {
-			continue
-		}
-		return event, payload, true
 	}
 	return apicompat.AnthropicStreamEvent{}, "", false
+}
+
+// decodeFrame is also used by native relays that keep their keepalive timers.
+func (st *anthropicCompatStream) decodeFrame(name, payload string) (apicompat.AnthropicStreamEvent, bool) {
+	st.frameCount++
+	var event apicompat.AnthropicStreamEvent
+	if strings.TrimSpace(payload) == "[DONE]" {
+		return event, false
+	}
+	if err := json.Unmarshal([]byte(payload), &event); err != nil {
+		if name == "" || knownAnthropicStreamEvent(name) {
+			st.protocolFailure = "invalid Anthropic event JSON"
+		}
+		return event, false
+	}
+	if event.Type == "" || (name != "" && name != "message" && name != event.Type) {
+		st.protocolFailure = "Anthropic event name and JSON type disagree"
+		return event, false
+	}
+	return event, knownAnthropicStreamEvent(event.Type)
 }

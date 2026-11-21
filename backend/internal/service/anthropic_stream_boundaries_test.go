@@ -1,0 +1,160 @@
+//go:build unit
+
+package service
+
+import (
+	"bufio"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
+)
+
+func TestIssue985AdapterBoundaries(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	canonical := issue985Stream()
+	stop := issue985Frame("message_stop", `{"type":"message_stop"}`)
+	missing := strings.ReplaceAll(strings.ReplaceAll(canonical, `,"usage":{"input_tokens":17,"output_tokens":0}`, ""), `,"usage":{"output_tokens":3}`, "")
+	for _, tc := range []struct {
+		name, wire    string
+		fail          bool
+		input, output int
+	}{
+		{"crlf", strings.ReplaceAll(canonical, "\n", "\r\n"), false, 17, 3},
+		{"compact", strings.ReplaceAll(strings.ReplaceAll(canonical, "event: ", "event:"), "data: ", "data:"), false, 17, 3},
+		{"eof_frame", strings.TrimRight(canonical, "\n"), false, 17, 3},
+		{"unknown", issue985Frame("future_event", `{"type":"future_event","opaque":true}`) + canonical, false, 17, 3},
+		{"zero", strings.ReplaceAll(strings.ReplaceAll(canonical, `"input_tokens":17`, `"input_tokens":0`), `"output_tokens":3`, `"output_tokens":0`), false, 0, 0},
+		{"missing", missing, true, 0, 0},
+		{"field_missing", strings.ReplaceAll(canonical, `"input_tokens":17,`, ""), true, 0, 3},
+		{"stop_reason_only", strings.TrimSuffix(canonical, stop), true, 17, 3},
+		{"terminal_error", canonical + issue985Frame("error", `{"type":"error","error":{"type":"overloaded_error","message":"synthetic"}}`), true, 17, 3},
+		{"malformed", strings.TrimSuffix(canonical, stop) + issue985Frame("message_stop", `{`), true, 17, 3},
+		{"mismatch", strings.ReplaceAll(canonical, "event: message_stop", "event: ping"), true, 17, 3},
+	} {
+		for _, adapter := range []string{"chat", "responses", "native_chat", "native_responses"} {
+			for _, stream := range []bool{true, false} {
+				mode := "buffered"
+				if stream {
+					mode = "stream"
+				}
+				t.Run(adapter+"/"+mode+"/"+tc.name, func(t *testing.T) {
+					rec := httptest.NewRecorder()
+					c, _ := gin.CreateTestContext(rec)
+					c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+					resp := &http.Response{Header: http.Header{}, Body: io.NopCloser(strings.NewReader(tc.wire))}
+					var err error
+					var input, output int
+					if strings.HasPrefix(adapter, "native") {
+						svc := &OpenAIGatewayService{}
+						var result *OpenAIForwardResult
+						if adapter == "native_chat" {
+							if stream {
+								result, err = svc.handleCCStreamingFromNativeAnthropic(resp, c, "client-model", "fixture-model", "fixture-model", nil, time.Now())
+							} else {
+								result, err = svc.handleCCBufferedFromNativeAnthropic(resp, c, "client-model", "fixture-model", "fixture-model", nil, time.Now())
+							}
+						} else {
+							if stream {
+								result, err = svc.handleResponsesStreamingFromNativeAnthropic(resp, c, "client-model", "fixture-model", "fixture-model", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
+							} else {
+								result, err = svc.handleResponsesBufferedFromNativeAnthropic(resp, c, "client-model", "fixture-model", "fixture-model", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
+							}
+						}
+						if result != nil {
+							input, output = result.Usage.InputTokens, result.Usage.OutputTokens
+						}
+					} else {
+						svc := &GatewayService{}
+						var result *ForwardResult
+						if adapter == "chat" {
+							if stream {
+								result, err = svc.handleCCStreamingFromAnthropic(resp, c, "client-model", "fixture-model", nil, time.Now())
+							} else {
+								result, err = svc.handleCCBufferedFromAnthropic(resp, c, "client-model", "fixture-model", nil, time.Now())
+							}
+						} else {
+							if stream {
+								result, err = svc.handleResponsesStreamingResponse(resp, c, "client-model", "fixture-model", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
+							} else {
+								result, err = svc.handleResponsesBufferedStreamingResponse(resp, c, "client-model", "fixture-model", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
+							}
+						}
+						if result != nil {
+							input, output = result.Usage.InputTokens, result.Usage.OutputTokens
+						}
+					}
+					if tc.fail {
+						require.Error(t, err)
+						var replay *UpstreamFailoverError
+						require.False(t, errors.As(err, &replay))
+						require.NotContains(t, rec.Body.String(), "[DONE]")
+						require.NotContains(t, rec.Body.String(), "response.completed")
+						require.NotContains(t, rec.Body.String(), `"finish_reason":"stop"`)
+					} else {
+						require.NoError(t, err)
+						require.Contains(t, rec.Body.String(), "fixture text")
+						require.Contains(t, rec.Body.String(), "client-model")
+					}
+					require.Equal(t, tc.input, input, "preserve known input even on failure")
+					require.Equal(t, tc.output, output, "preserve known output even on failure")
+				})
+			}
+		}
+	}
+}
+
+func TestIssue985EveryTransportSplit(t *testing.T) {
+	wire := strings.ReplaceAll(issue985Stream(), "\ndata:", "\nid: fixture\n: comment\ndata:")
+	for split := 0; split <= len(wire); split++ {
+		reader := io.MultiReader(strings.NewReader(wire[:split]), strings.NewReader(wire[split:]))
+		scanner := bufio.NewScanner(reader)
+		st := &anthropicCompatStream{body: io.NopCloser(reader), pump: newAnthropicNativeLinePump(scanner, time.Second), maxLineSize: 4096}
+		var usage ClaudeUsage
+		for {
+			event, payload, ok := st.nextEvent()
+			if !ok {
+				break
+			}
+			st.observe(&event, payload)
+			if event.Message != nil {
+				mergeAnthropicUsage(&usage, event.Message.Usage)
+			}
+			if event.Usage != nil {
+				mergeAnthropicUsage(&usage, *event.Usage)
+			}
+		}
+		st.stop()
+		require.Nil(t, st.failure(), "split=%d", split)
+		require.Equal(t, 17, usage.InputTokens)
+		require.Equal(t, 3, usage.OutputTokens)
+	}
+}
+
+func TestIssue985FrameBoundAndFieldOrder(t *testing.T) {
+	var a anthropicSSEFrameAssembler
+	_, _, ready, err := a.line("data: {\"type\":\"ping\"}", 100)
+	require.NoError(t, err)
+	require.False(t, ready)
+	_, _, _, err = a.line("event:ping", 100)
+	require.NoError(t, err)
+	name, payload, ready, err := a.line("", 100)
+	require.NoError(t, err)
+	require.True(t, ready)
+	require.Equal(t, "ping", name)
+	require.Equal(t, `{"type":"ping"}`, payload)
+	for i := 0; i < 10; i++ {
+		_, _, _, err = a.line(":0123456789", 100)
+		if err != nil {
+			break
+		}
+	}
+	require.ErrorIs(t, err, errAnthropicSSEFrameTooLarge, "metadata-only frame must also be bounded")
+}
