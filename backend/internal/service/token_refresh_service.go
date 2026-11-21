@@ -911,7 +911,17 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 				releaseRate()
 			}
 			attemptTimedOut := errors.Is(refreshContextErr(attemptCtx), context.DeadlineExceeded) && refreshContextErr(ctx) == nil
-			if err == nil && newCredentials != nil && !attemptTimedOut && refreshContextErr(ctx) == nil {
+			if err == nil && hasOpenAIRefreshCredentials(attemptedAccount, newCredentials) {
+				var durableAccount *Account
+				durableAccount, credentialsPersisted, err = persistOpenAIRefreshCredentials(attemptCtx, s.accountRepo, attemptedAccount, newCredentials)
+				if err == nil {
+					account = durableAccount
+					if !credentialsPersisted {
+						err = errRefreshSkipped
+						shortCircuit = true
+					}
+				}
+			} else if err == nil && newCredentials != nil && !attemptTimedOut && refreshContextErr(ctx) == nil {
 				newCredentials["_token_version"] = time.Now().UnixMilli()
 				current, applied, saveErr := persistOAuthRefreshedCredentials(attemptCtx, s.accountRepo, account, attemptedAccount, newCredentials)
 				if saveErr != nil {
@@ -930,7 +940,7 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 		cancelAttempt()
 		releaseAttempt()
 		persistedAfterAttemptDeadline := attemptTimedOut && credentialsPersisted && err == nil
-		if attemptTimedOut && !persistedAfterAttemptDeadline && !isProviderScopedTerminalRefreshError(err) {
+		if attemptTimedOut && !shortCircuit && !persistedAfterAttemptDeadline && !isProviderScopedTerminalRefreshError(err) {
 			cause := err
 			if cause == nil {
 				cause = context.DeadlineExceeded

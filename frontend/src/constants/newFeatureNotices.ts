@@ -4,6 +4,8 @@
  * browser; use a new ID to announce the feature again in a later release.
  */
 export const NEW_FEATURE_NOTICES = {
+  exaSearch: 'exa-search-provider',
+  claudeWindowCost: 'claude-window-cost-estimate',
   openaiVideos: 'openai-videos-endpoint-capability',
   channelConfig: 'channel-configuration-20261119',
   imageUsageBilling: 'image-usage-minimum-charge-20261119',

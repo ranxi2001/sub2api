@@ -13,3 +13,12 @@ for name in ['qualityAccountAllowsModel', 'eligibleQualityModels']:
 if 'infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"' not in original:
     original = original.replace('import (', 'import (\n\tinfraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"', 1)
 target.write_text(original)
+
+# The candidate's metadata resolver also fills an audio capability bit. The
+# historical list implementation ignores it; retain storage for that caller.
+descriptor = target.with_name('openai_codex_models_service.go')
+source = descriptor.read_text()
+anchor = 'type codexModelMetadataOverride struct {\n'
+if source.count(anchor) != 1:
+    raise SystemExit('historical descriptor declaration missing or ambiguous')
+descriptor.write_text(source.replace(anchor, anchor + '\taudioInput bool\n', 1))

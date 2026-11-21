@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"errors"
 	"fmt"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/requesttiming"
 	"net/http"
@@ -152,15 +151,7 @@ func readAdmissionRequestBody(c *gin.Context) ([]byte, bool) {
 		if RejectRequestBodyReadError(c, err) {
 			return nil, false
 		}
-		status := http.StatusBadRequest
-		message := "Failed to read request body"
-		var maxErr *http.MaxBytesError
-		if errors.As(err, &maxErr) {
-			status = http.StatusRequestEntityTooLarge
-			message = "Request body is too large"
-		}
-		c.JSON(status, gin.H{"error": gin.H{"type": "invalid_request_error", "message": message}})
-		c.Abort()
+		AbortWithRequestBodyReadFailure(c, "group_model_allowlist", err)
 		return nil, false
 	}
 	requestmodel.ResetRequestBody(c.Request, body)

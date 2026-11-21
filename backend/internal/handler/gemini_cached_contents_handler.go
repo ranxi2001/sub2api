@@ -68,11 +68,12 @@ func readGeminiCachedContentBody(c *gin.Context) ([]byte, bool) {
 		if middleware.RejectRequestBodyReadError(c, err) {
 			return nil, false
 		}
-		if maxErr, ok := extractMaxBytesError(err); ok {
-			googleError(c, http.StatusRequestEntityTooLarge, buildBodyTooLargeMessage(maxErr.Limit))
-			return nil, false
+		status, message := requestBodyReadFailure(nil, c.Request, err)
+		if status == pkghttputil.StatusClientClosedRequest {
+			c.Status(status)
+		} else {
+			googleError(c, status, message)
 		}
-		googleError(c, http.StatusBadRequest, "Failed to read request body")
 		return nil, false
 	}
 	if len(body) == 0 {

@@ -150,11 +150,12 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		if middleware2.RejectRequestBodyReadError(c, err) {
 			return
 		}
-		if maxErr, ok := extractMaxBytesError(err); ok {
-			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
+		status, message := requestBodyReadFailure(reqLog, c.Request, err)
+		if status == 499 {
+			c.Status(status)
 			return
 		}
-		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		h.errorResponse(c, status, "invalid_request_error", message)
 		return
 	}
 
@@ -1271,6 +1272,22 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 
 	// Get available models from account configurations for the selected group platform.
 	availableModels := h.gatewayService.GetAvailableModels(c.Request.Context(), groupID, platform)
+	if platform == service.PlatformAnthropic {
+		var group *service.Group
+		if apiKey != nil {
+			group = apiKey.Group
+		}
+		source := availableModels
+		if group != nil && group.ModelAllowlistEnabled() {
+			source = service.ModelListingSource(platform, availableModels, service.DefaultModelIDsForPlatform(platform))
+		} else if len(source) == 0 {
+			source = service.DefaultModelIDsForPlatform(platform)
+		}
+		expanded := h.gatewayService.ExpandAnthropicLongContextModels(c.Request.Context(), group, source)
+		if len(availableModels) > 0 || len(expanded) > len(source) || (group != nil && group.ModelAllowlistEnabled()) {
+			availableModels = expanded
+		}
+	}
 	if apiKey != nil && apiKey.Group != nil && apiKey.Group.ModelAllowlistEnabled() {
 		source := service.ModelListingSource(platform, availableModels, service.DefaultModelIDsForPlatform(platform))
 		writeAllowlistedModelsList(c, platform, apiKey.Group.ModelAllowlist.FilterForListing(source))
@@ -2172,11 +2189,12 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		if middleware2.RejectRequestBodyReadError(c, err) {
 			return
 		}
-		if maxErr, ok := extractMaxBytesError(err); ok {
-			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
+		status, message := requestBodyReadFailure(reqLog, c.Request, err)
+		if status == 499 {
+			c.Status(status)
 			return
 		}
-		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		h.errorResponse(c, status, "invalid_request_error", message)
 		return
 	}
 

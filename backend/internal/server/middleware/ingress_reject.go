@@ -35,6 +35,8 @@ const (
 	IngressRejectLongContextDisabled    IngressRejectReason = "long_context_disabled"
 	IngressRejectSubagentsBlocked       IngressRejectReason = "subagents_blocked"
 	IngressRejectCodexClientRequired    IngressRejectReason = "codex_client_required"
+	// IngressRejectConflictingRequestFields：请求体同名字段重复声明（GHSA-p3r4-jcm3-2hph）。
+	IngressRejectConflictingRequestFields IngressRejectReason = "conflicting_request_fields"
 )
 
 const ingressRejectReasonContextKey = "ingress_reject_reason"

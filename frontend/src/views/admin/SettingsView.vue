@@ -59,6 +59,12 @@
                 />
                 <NewFeatureBadge
                   v-if="tab.key === 'gateway'"
+                  :notice-id="NEW_FEATURE_NOTICES.exaSearch"
+                  :user-id="authStore.user?.id"
+                  class="settings-tab-badge"
+                />
+                <NewFeatureBadge
+                  v-if="tab.key === 'gateway'"
                   :notice-id="NEW_FEATURE_NOTICES.serverlessIPRouting"
                   :user-id="authStore.user?.id"
                   class="settings-tab-badge"
@@ -6111,6 +6117,7 @@
                   {{ t("admin.settings.webSearchEmulation.title") }}
                 </h2>
                 <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.deepSeekSearch" :user-id="authStore.user?.id" />
+                <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.exaSearch" :user-id="authStore.user?.id" />
               </div>
               <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
                 {{ t("admin.settings.webSearchEmulation.description") }}
@@ -6187,6 +6194,7 @@
                           { value: 'brave', label: 'Brave Search' },
                           { value: 'tavily', label: 'Tavily' },
                           { value: 'deepseek', label: 'DeepSeek' },
+                          { value: 'exa', label: 'Exa' },
                         ]"
                         class="w-36"
                         @click.stop
@@ -6194,6 +6202,12 @@
                       <NewFeatureBadge
                         v-if="provider.type === 'deepseek'"
                         :notice-id="NEW_FEATURE_NOTICES.deepSeekSearch"
+                        :user-id="authStore.user?.id"
+                        @click.stop
+                      />
+                      <NewFeatureBadge
+                        v-if="provider.type === 'exa'"
+                        :notice-id="NEW_FEATURE_NOTICES.exaSearch"
                         :user-id="authStore.user?.id"
                         @click.stop
                       />
