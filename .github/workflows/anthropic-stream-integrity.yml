@@ -5,6 +5,11 @@ on:
     paths:
       - 'backend/internal/service/*anthropic*'
       - 'backend/internal/service/gateway_forward*'
+      - 'backend/internal/service/gateway_upstream_response.go'
+      - 'backend/internal/service/gateway_service.go'
+      - 'backend/internal/handler/gateway_compat_stream_usage_test.go'
+      - 'backend/go.mod'
+      - 'backend/go.sum'
       - 'backend/internal/handler/*985*'
       - 'backend/internal/pkg/apicompat/**'
       - '.github/workflows/anthropic-stream-integrity.yml'
@@ -48,31 +53,6 @@ jobs:
         run: python3 -m pip install -r .github/scripts/anthropic_integrity_sdk_requirements.txt
       - name: Evidence validator negative controls
         run: python3 .github/scripts/anthropic_integrity_evidence_test.py
-      - name: Fixed production business RED, identical oracle
-        shell: bash
-        run: |
-          set -euo pipefail
-          evidence="$RUNNER_TEMP/anthropic-integrity"
-          mkdir -p "$evidence"
-          baseline=dfcc66238b28c8a0392c24d418d81120f95f682f
-          red_tree="$RUNNER_TEMP/anthropic-red"
-          git worktree add --detach "$red_tree" "$baseline"
-          oracle=backend/internal/service/anthropic_stream_integrity_test.go
-          cp "$oracle" "$red_tree/$oracle"
-          test "$(git hash-object "$oracle")" = "$(git -C "$red_tree" hash-object "$oracle")"
-          printf 'candidate=%s\nbaseline=%s\noracle=%s\n' "$CANDIDATE_SHA" "$baseline" "$(git hash-object "$oracle")" > "$evidence/identity.txt"
-          for path in gateway_forward_compat_stream.go gateway_forward_as_chat_completions.go gateway_forward_as_responses.go; do
-            p="backend/internal/service/$path"
-            test "$(git -C "$red_tree" hash-object "$p")" = "$(git rev-parse "$baseline:$p")"
-            git -C "$red_tree" hash-object "$p" >> "$evidence/identity.txt"
-          done
-          cd "$red_tree/backend"
-          set +e
-          go test -json -tags=unit ./internal/service -run '^TestIssue985(Framing|Failure)$' -count=1 -timeout=8m > "$evidence/red.jsonl" 2> "$evidence/red.stderr"
-          rc=$?
-          set -e
-          printf '%s\n' "$rc" > "$evidence/red.exitcode"
-          python3 "$GITHUB_WORKSPACE/.github/scripts/anthropic_integrity_evidence.py" red "$evidence"
       - name: Clean candidate GREEN and race
         if: ${{ !cancelled() }}
         shell: bash
@@ -81,6 +61,8 @@ jobs:
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
           test -z "$(git status --porcelain)"
           evidence="$RUNNER_TEMP/anthropic-integrity"
+          mkdir -p "$evidence"
+          printf 'candidate=%s\noracle=%s\n' "$CANDIDATE_SHA" "$(git hash-object backend/internal/service/anthropic_stream_integrity_test.go)" > "$evidence/identity.txt"
           cd backend
           set +e
           go test -race -json -tags=unit,issue985pg,issue985sdk ./internal/service ./internal/handler -run '^TestIssue985' -count=1 -timeout=10m > "$evidence/green.jsonl" 2> "$evidence/green.stderr"

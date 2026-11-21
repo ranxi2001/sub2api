@@ -30,6 +30,7 @@ cancellation, lifecycle and race tests; existing full unit/integration CI and
 ordinary server build. Evidence validation rejects missing selected tests,
 skips, build failures, panic/crash and race contamination, with negative controls.
 
-Temporary fixed-baseline workflow entry must be archived under
-`.github/workflow-archive/` after acceptance; reusable tests and evidence scripts
-remain. Draft remains Draft until independent source review and all gates pass.
+The fixed-baseline RED/GREEN workflow is preserved at
+`.github/workflow-archive/anthropic-stream-integrity-red-green.yml` after its
+remote evidence passed. The active path-triggered workflow retains reusable
+GREEN/race/SDK/PostgreSQL/build tests and strict evidence validation. Draft remains Draft until independent source review and all gates pass.
