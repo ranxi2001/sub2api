@@ -3,6 +3,7 @@
 package handler
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -58,6 +59,15 @@ func (tc issue985NativeCase) wire(bufferedMessages bool) string {
 	return wire + "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
 }
 
+// Each fixture gateway serves one request. Its in-memory admission balance
+// and empty quota snapshot have no backing Redis entries to evict after debit.
+type issue985NativeCache struct{ *handlerInflightCache }
+
+func (*issue985NativeCache) InvalidateUserBalance(context.Context, int64) error { return nil }
+func (*issue985NativeCache) DeleteUserPlatformQuotaCache(context.Context, int64, string) error {
+	return nil
+}
+
 // Real OpenAI handler, scheduler, native adapter, HTTP transport and RecordUsage.
 // No worker pool: the request completion signal follows synchronous billing.
 func issue985NativeGateway(t *testing.T, upstreamURL string, billing service.UsageBillingRepository) (*httptest.Server, <-chan struct{}) {
@@ -72,7 +82,7 @@ func issue985NativeGateway(t *testing.T, upstreamURL string, billing service.Usa
 		Credentials: map[string]any{"api_key": "fixture", "api_protocol": service.APIProtocolAnthropic, "base_url": upstreamURL}, GroupIDs: []int64{groupID}, AccountGroups: []service.AccountGroup{{AccountID: 9401, GroupID: groupID}}}
 	repo := &openAIWSUsageHandlerAccountRepoStub{account: account}
 	snapshot := service.NewSchedulerSnapshotService(&fakeSchedulerCache{accounts: []*service.Account{&account}}, nil, nil, nil, nil)
-	cache := service.NewBillingCacheService(newHandlerInflightCache(100), nil, nil, nil, nil, nil, cfg, nil)
+	cache := service.NewBillingCacheService(&issue985NativeCache{newHandlerInflightCache(100)}, nil, nil, nil, nil, nil, cfg, nil)
 	t.Cleanup(cache.Stop)
 	usageRepo := &openAIWSUsageHandlerUsageLogRepoStub{created: make(chan *service.UsageLog, 32)}
 	gw := service.NewOpenAIGatewayService(repo, nil, usageRepo, billing, nil, nil, nil, nil, cfg, snapshot, nil, service.NewBillingService(cfg, nil), service.NewRateLimitService(nil, nil, cfg, nil, nil), cache, repository.NewHTTPUpstream(cfg), &service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil)

@@ -6,6 +6,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/requestcapture"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 )
 
@@ -77,5 +78,16 @@ func (w *captureResponseWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 func (w *captureResponseWriter) WriteString(p string) (int, error) { return w.Write([]byte(p)) }
+
+func (w *captureResponseWriter) Flush() { _ = w.FlushError() }
+
+func (w *captureResponseWriter) FlushError() error {
+	err := service.FlushGatewayResponse(w.ResponseWriter)
+	if err != nil {
+		w.session.MarkPartial("client_flush_failed")
+		w.session.MarkError("client_flush_failed")
+	}
+	return err
+}
 
 var _ http.Flusher = (*captureResponseWriter)(nil)
