@@ -95,13 +95,13 @@ func (r opsAlertPlatformResult) summary(rule *OpsAlertRule, filter OpsDashboardF
 	for _, header := range []string{tr("Platform", "平台"), tr("Status", "状态"), tr("Counted", "请求"), tr("Failed", "失败"), tr("Error rate", "错误率"), tr("Unknown", "终态未知")} {
 		fmt.Fprintf(&out, `<th scope="col">%s</th>`, header)
 	}
-	out.WriteString("</tr></thead><tbody>")
-	out.WriteString(alertsHTML.String())
-	out.WriteString(otherHTML.String())
-	out.WriteString("</tbody></table>")
+	_, _ = out.WriteString("</tr></thead><tbody>")
+	_, _ = out.WriteString(alertsHTML.String())
+	_, _ = out.WriteString(otherHTML.String())
+	_, _ = out.WriteString("</tbody></table>")
 	fmt.Fprintf(&out, "<p>"+tr("Total: %d failed / %d known requests, %d unknown.", "合计：失败 %d / 已知终态 %d，另有 %d 个终态未知。")+"</p>", total.Failed, total.Succeeded+total.Failed, total.Unknown)
 	fmt.Fprintf(&out, "<p>"+tr("Threshold: %s %s %g%% with at least %d known requests per platform.", "判定条件：%s %s %g%%，每个平台至少 %d 个已知终态请求。")+"</p>", html.EscapeString(rule.MetricType), html.EscapeString(rule.Operator), rule.Threshold, minSamples)
-	out.WriteString("<p>" + tr("Counted = successes + final failures, including in-stream failures. Unknown outcomes, business limits and client cancellations are excluded. Attribution uses the recorded usage platform, then the selected account or logged routing platform. The trigger uses the existing SLA overview.", "计入请求为成功和最终失败之和，含流内失败。终态未知、业务限制及客户端取消不计入分母。跨协议按用量记录的平台归属，缺失时依次取所选账号平台和错误日志的路由平台。触发值沿用原 SLA 总览。") + "</p>")
+	_, _ = out.WriteString("<p>" + tr("Counted = successes + final failures, including in-stream failures. Unknown outcomes, business limits and client cancellations are excluded. Attribution uses the recorded usage platform, then the selected account or logged routing platform. The trigger uses the existing SLA overview.", "计入请求为成功和最终失败之和，含流内失败。终态未知、业务限制及客户端取消不计入分母。跨协议按用量记录的平台归属，缺失时依次取所选账号平台和错误日志的路由平台。触发值沿用原 SLA 总览。") + "</p>")
 	return headline, out.String()
 }
 

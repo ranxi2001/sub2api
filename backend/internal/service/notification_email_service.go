@@ -739,12 +739,14 @@ func renderNotificationEmail(event, subject, htmlBody string, variables map[stri
 	}
 	if event == NotificationEmailEventOpsAlert && rawHTMLVariables["platform_summary"] != "" && !slices.Contains(notificationEmailPlaceholdersIn(htmlBody), "platform_summary") {
 		block := "{{platform_summary}}"
-		if pos := strings.Index(strings.ToLower(htmlBody), "<body>"); pos >= 0 {
-			pos += len("<body>")
+		if pos := strings.LastIndex(strings.ToLower(htmlBody), "</body>"); pos >= 0 {
 			htmlBody = htmlBody[:pos] + block + htmlBody[pos:]
 		} else {
 			htmlBody = block + htmlBody
 		}
+	}
+	if event == NotificationEmailEventOpsAlert {
+		renderedSubject = strings.TrimSpace(renderedSubject)
 	}
 	renderedHTML, err := renderNotificationEmailString(event, htmlBody, variables, rawHTMLVariables, true)
 	if err != nil {

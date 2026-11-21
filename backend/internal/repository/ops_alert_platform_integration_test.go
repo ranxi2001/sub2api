@@ -24,6 +24,10 @@ func TestAlertPlatformStatsFinalOutcomes(t *testing.T) {
 		_, _ = integrationDB.ExecContext(ctx, "DELETE FROM request_timing_details WHERE usage_log_id IN (SELECT id FROM usage_logs WHERE user_id=$1)", user.ID)
 		_, _ = integrationDB.ExecContext(ctx, "DELETE FROM usage_logs WHERE user_id=$1", user.ID)
 		_, _ = integrationDB.ExecContext(ctx, "DELETE FROM ops_error_logs WHERE api_key_id=$1", key.ID)
+		_, _ = integrationDB.ExecContext(ctx, "DELETE FROM api_keys WHERE id=$1", key.ID)
+		_, _ = integrationDB.ExecContext(ctx, "DELETE FROM groups WHERE id=$1", group.ID)
+		_, _ = integrationDB.ExecContext(ctx, "DELETE FROM accounts WHERE id=$1", account.ID)
+		_, _ = integrationDB.ExecContext(ctx, "DELETE FROM users WHERE id=$1", user.ID)
 	})
 	usage := func(request, platform string, stream bool, detail string) {
 		var id int64
