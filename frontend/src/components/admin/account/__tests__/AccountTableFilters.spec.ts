@@ -62,9 +62,9 @@ describe('AccountTableFilters', () => {
     const filters = { ...defaultFilters(), platform: 'openai', type: 'oauth', status: 'active', privacy_mode: '__unset__', group: '42' }
     const wrapper = mountFilters(filters)
     const expectedOptions = [
-      ['platform', ['', ...CONCRETE_PLATFORM_OPTIONS.map(option => option.value)]],
+      ['platform', ['', ...CONCRETE_PLATFORM_OPTIONS.map(option => option.value), 'gateway']],
       ['status', ['', 'active', 'inactive', 'error', 'rate_limited', 'temp_unschedulable', 'unschedulable']],
-      ['type', ['', 'oauth', 'setup-token', 'apikey', 'bedrock']],
+      ['type', ['', 'oauth', 'setup-token', 'apikey', 'bedrock', 'gateway']],
       ['privacy_mode', ['', '__unset__', 'training_off', 'training_set_cf_blocked', 'training_set_failed']],
       ['group', ['', 'ungrouped', '42']]
     ] as const
@@ -78,7 +78,7 @@ describe('AccountTableFilters', () => {
         await select.get('button').trigger('click')
         await select.findAll('[role="option"]')[optionIndex].trigger('click')
         changes += 1
-        const group = key === 'platform' && value && value !== 'openai' ? '' : filters.group
+        const group = key === 'platform' && value && value !== 'openai' && value !== 'gateway' ? '' : filters.group
         expect(wrapper.emitted('update:filters')?.at(-1)).toEqual([{ ...filters, group, [key]: value }])
         expect(wrapper.emitted('change')).toHaveLength(changes)
         expect(wrapper.props('filters')).toEqual(filters)

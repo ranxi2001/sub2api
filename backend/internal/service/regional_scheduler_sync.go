@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/domain"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/regional"
 )
 
@@ -69,12 +71,12 @@ func decodeRegionalScheduler(payload []byte) (RegionalSchedulerDocument, error) 
 	if doc.Version != 1 || doc.Buckets == nil || len(doc.Buckets) > 4096 {
 		return doc, errors.New("invalid regional scheduler version or buckets")
 	}
-	groups := make(map[int64]bool, len(doc.Groups))
+	groups := make(map[int64]*Group, len(doc.Groups))
 	for _, g := range doc.Groups {
-		if g == nil || g.ID <= 0 || groups[g.ID] {
+		if g == nil || g.ID <= 0 || groups[g.ID] != nil {
 			return doc, errors.New("invalid regional group")
 		}
-		groups[g.ID] = true
+		groups[g.ID] = g
 	}
 	// A repeated account must have identical credentials and policy in every
 	// bucket; otherwise hydration would depend on bucket iteration order.
@@ -89,7 +91,7 @@ func decodeRegionalScheduler(payload []byte) (RegionalSchedulerDocument, error) 
 			return doc, errors.New("unsupported mixed scheduler bucket")
 		}
 		seen[b] = true
-		if b.GroupID > 0 && len(entry.Accounts) > 0 && !groups[b.GroupID] {
+		if b.GroupID > 0 && len(entry.Accounts) > 0 && groups[b.GroupID] == nil {
 			return doc, errors.New("regional bucket missing group policy")
 		}
 		ids := make(map[int64]bool, len(entry.Accounts))
@@ -106,7 +108,13 @@ func decodeRegionalScheduler(payload []byte) (RegionalSchedulerDocument, error) 
 				return doc, errors.New("conflicting regional account views")
 			}
 			accountViews[a.ID] = encoded
-			if a.Platform != b.Platform && (b.Mode != SchedulerModeMixed || a.Platform != PlatformAntigravity || !a.IsMixedSchedulingEnabled()) {
+			if a.IsGateway() || a.Platform == PlatformGateway {
+				g := groups[b.GroupID]
+				if g == nil || !g.IsActive() || ValidateGatewayAccountGroup(a, g) != nil || !domain.IsConcretePlatform(b.Platform) ||
+					(g.Platform != PlatformComposite && g.Platform != b.Platform) {
+					return doc, errors.New("regional gateway assignment mismatch")
+				}
+			} else if a.Platform != b.Platform && (b.Mode != SchedulerModeMixed || a.Platform != PlatformAntigravity || !a.IsMixedSchedulingEnabled()) {
 				return doc, errors.New("regional account platform mismatch")
 			}
 			if b.GroupID > 0 {
@@ -227,6 +235,18 @@ func (s *SchedulerSnapshotService) ExportRegionalScheduler(ctx context.Context, 
 			a := &accounts[i]
 			if allowed[a.ID] && a.IsSchedulable() {
 				entry.Accounts = append(entry.Accounts, a)
+			}
+		}
+		if reader, ok := s.accountRepo.(GatewayRequestCandidateReader); ok && bucket.GroupID > 0 && len(allowed) > 0 {
+			candidates, group, err := reader.ListGatewayRequestCandidates(ctx, bucket.GroupID, bucket.Platform)
+			if err != nil {
+				return nil, err
+			}
+			for i := range candidates {
+				a := &candidates[i]
+				if allowed[a.ID] && group != nil && group.ID == bucket.GroupID && group.IsActive() && ValidateGatewayAccountGroup(a, group) == nil {
+					entry.Accounts = append(entry.Accounts, a)
+				}
 			}
 		}
 		doc.Buckets = append(doc.Buckets, entry)
@@ -360,4 +380,57 @@ func (r *RegionalSchedulerReader) GetLocalGroup(ctx context.Context, id int64) (
 		return nil, ErrLocalSchedulerSnapshotUnavailable
 	}
 	return out, nil
+}
+
+// Read neutral accounts only from the configured bucket for this request. The
+// ordinary local snapshot and unscoped detail interfaces keep them invisible.
+func (r *RegionalSchedulerReader) ListGatewayRequestCandidates(ctx context.Context, groupID int64, target string) ([]Account, *Group, error) {
+	doc, expiry, err := r.detailView(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	if _, ok := requestGatewaySelection(ctx, &groupID, target); !ok {
+		return nil, nil, ErrGatewayAccountGroup
+	}
+	var group *Group
+	for _, g := range doc.Groups {
+		if g.ID == groupID {
+			group = g
+			break
+		}
+	}
+	if group == nil || !group.IsActive() || group.RequireOAuthOnly || (group.Platform != target && group.Platform != PlatformComposite) {
+		return nil, nil, ErrGatewayAccountGroup
+	}
+	forced, _ := ctx.Value(ctxkey.ForcePlatform).(string)
+	bucket := SchedulerBucket{GroupID: groupID, Platform: target, Mode: (&SchedulerSnapshotService{}).resolveMode(target, forced != "")}
+	var accounts []Account
+	for _, entry := range doc.Buckets {
+		if entry.Bucket == bucket {
+			for _, account := range entry.Accounts {
+				if account.IsGateway() {
+					accounts = append(accounts, *account)
+				}
+			}
+			break
+		}
+	}
+	if err := regionalReadFinished(ctx, expiry); err != nil {
+		return nil, nil, err
+	}
+	return accounts, group, nil
+}
+
+func (r *RegionalSchedulerReader) GatewayRequestAccount(ctx context.Context, accountID, groupID int64) (*Account, *Group, error) {
+	scope, _ := ctx.Value(gatewaySelectionKey{}).(gatewaySelection)
+	accounts, group, err := r.ListGatewayRequestCandidates(ctx, groupID, scope.target)
+	if err != nil {
+		return nil, nil, err
+	}
+	for i := range accounts {
+		if accounts[i].ID == accountID {
+			return &accounts[i], group, nil
+		}
+	}
+	return nil, group, ErrGatewayAccountGroup
 }

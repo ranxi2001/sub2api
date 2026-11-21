@@ -326,6 +326,7 @@ describe('UseKeyModal', () => {
     expect(configToml).toMatch(/# experimental_bearer_token = "sk-grok-codex-test"/)
     expect(configToml).not.toContain('supports_websockets = true')
     expect(configToml).not.toContain('responses_websockets_v2')
+    expect(configToml).not.toMatch(/^(disable_response_storage|network_access|windows_wsl_setup_acknowledged) =/m)
     expect(wrapper.text()).not.toContain('auth.json')
     expect(codeBlocks.join('\n')).toContain('SUB2API_API_KEY')
 
@@ -365,8 +366,8 @@ describe('UseKeyModal', () => {
     const configToml = codeBlocks.find((content) => content.includes('model_provider = "OpenAI"'))
 
     expect(configToml).toBeDefined()
-    expect(configToml).toContain('model = "gpt-5.5"')
-    expect(configToml).toContain('review_model = "gpt-5.5"')
+    expect(configToml).toContain('model = "gpt-6-astra"')
+    expect(configToml).toContain('review_model = "gpt-6-astra"')
     expect(configToml).not.toContain('model = "gpt-5.4"')
     expect(configToml).not.toContain('model_context_window')
     expect(configToml).not.toContain('model_auto_compact_token_limit')
@@ -377,6 +378,7 @@ describe('UseKeyModal', () => {
     expect(configToml).not.toContain('image_generation')
     expect(configToml).not.toContain('supports_websockets')
     expect(configToml).not.toContain('responses_websockets_v2')
+    expect(configToml).not.toMatch(/^(disable_response_storage|network_access|windows_wsl_setup_acknowledged) =/m)
     const features = configToml?.split('[features]\n')[1]?.split('\n[')[0]
     expect(features).toContain('goals = true')
     expect(features).toContain('api_key_model_discovery = true')
@@ -511,8 +513,8 @@ describe('UseKeyModal', () => {
     const configToml = codeBlocks.find((content) => content.includes('supports_websockets = true'))
 
     expect(configToml).toBeDefined()
-    expect(configToml).toContain('model = "gpt-5.5"')
-    expect(configToml).toContain('review_model = "gpt-5.5"')
+    expect(configToml).toContain('model = "gpt-6-astra"')
+    expect(configToml).toContain('review_model = "gpt-6-astra"')
     expect(configToml).not.toContain('model = "gpt-5.4"')
     expect(configToml).not.toContain('model_context_window')
     expect(configToml).not.toContain('model_auto_compact_token_limit')
@@ -844,7 +846,8 @@ describe('UseKeyModal', () => {
         show: true,
         apiKey: 'sk-composite-test',
         baseUrl: 'https://example.com/v1',
-        platform: 'composite'
+        platform: 'composite',
+        siteName: 'Ambi-Sub'
       },
       global: {
         stubs: {
@@ -868,7 +871,7 @@ describe('UseKeyModal', () => {
     const unixConfig = wrapper.findAll('pre code')
       .map((code) => code.text())
       .find((content) => content.includes('[model_providers.sub2api]'))
-    expect(unixConfig).toContain('[model_providers.sub2api]\nname = "Sub2API Composite"\nbase_url = "https://example.com/v1"\nmodel_catalog_url = "https://example.com/v1/models"')
+    expect(unixConfig).toContain('[model_providers.sub2api]\nname = "Ambi-Sub"\nbase_url = "https://example.com/v1"\nmodel_catalog_url = "https://example.com/v1/models"')
     expect(unixConfig).not.toContain('model_catalog_json')
     expect(unixConfig).toContain('[features]\napi_key_model_discovery = true')
     expect(unixConfig).toContain('env_key = "SUB2API_API_KEY"')
@@ -1050,6 +1053,7 @@ describe('UseKeyModal', () => {
     const configToml = wrapper.findAll('pre code')
       .map((code) => code.text())
       .find((content) => content.includes('model_provider = "OpenAI"'))
+    expect(fetch).toHaveBeenCalledWith('https://example.com/v1/models?client_version=0.166.0', expect.any(Object))
     expect(configToml).toContain('model = "glm-5.3"')
     expect(configToml).not.toContain('model_reasoning_effort')
   })
@@ -1061,8 +1065,9 @@ describe('UseKeyModal', () => {
       props: {
         show: true,
         apiKey: 'sk-openai-test',
-        baseUrl: 'https://example.com/v1',
-        platform: 'openai'
+        baseUrl: 'https://example.com/v1/',
+        platform: 'openai',
+        siteName: '示例 "站"'
       },
       global: {
         stubs: {
@@ -1084,9 +1089,11 @@ describe('UseKeyModal', () => {
         const configToml = wrapper.findAll('pre code')
           .map((code) => code.text())
           .find((content) => content.includes('model_provider = "OpenAI"'))
-        expect(configToml).toContain('model = "gpt-5.5"')
+        expect(configToml).toMatch(/^model = "gpt-6-astra"$/m)
+        expect(configToml).toMatch(/^review_model = "gpt-6-astra"$/m)
+        expect(configToml).not.toMatch(/^(disable_response_storage|network_access|windows_wsl_setup_acknowledged) =/m)
         expect(configToml!.split('\n[')[0]).toContain('service_tier = "fast"')
-        expect(configToml).toContain('[model_providers.OpenAI]\nname = "OpenAI"\nbase_url = "https://example.com/v1"\nmodel_catalog_url = "https://example.com/v1/models"')
+        expect(configToml).toContain('[model_providers.OpenAI]\nname = "示例 \\"站\\""\nbase_url = "https://example.com/v1"\nmodel_catalog_url = "https://example.com/v1/models"')
         expect(configToml).not.toContain('model_catalog_json')
         expect(configToml).toContain('[features]\napi_key_model_discovery = true')
         expect(configToml).toContain(`requires_openai_auth = ${authMode === 'legacy'}`)

@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -628,6 +629,9 @@ func prefetchedStickyAccountIDFromContext(ctx context.Context, groupID *int64) i
 func shouldClearStickySession(account *Account, requestedModel string) bool {
 	if account == nil {
 		return false
+	}
+	if account.IsGateway() && account.gatewayMessagesView != nil {
+		account = account.gatewayMessagesView
 	}
 	if !account.IsSchedulable() {
 		return true
@@ -1516,6 +1520,21 @@ func mixedListingModelAllowed(groupPlatform, model string) bool {
 }
 
 func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64, platform string) []string {
+	legacy := s.cachedAvailableModels(ctx, groupID, platform)
+	catalog, err := s.readGatewayModelCatalog(ctx, groupID, platform)
+	if err != nil {
+		return legacy
+	}
+	models := catalog.directModels(platform)
+	if len(models) == 0 {
+		return legacy
+	}
+	combined := append(slices.Clone(legacy), models...)
+	slices.Sort(combined)
+	return slices.Compact(combined)
+}
+
+func (s *GatewayService) cachedAvailableModels(ctx context.Context, groupID *int64, platform string) []string {
 	cacheKey := modelsListCacheKey(groupID, platform)
 	if s.modelsListCache != nil {
 		if cached, found := s.modelsListCache.Get(cacheKey); found {

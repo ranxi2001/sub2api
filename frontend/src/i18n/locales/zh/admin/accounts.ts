@@ -322,6 +322,7 @@ export default {
         costConversion: '采购成本倍率换算',
         costConversionHint: '默认应用美元汇率：CN 平台 ×1，非 CN 平台 ×7。取消勾选则按上游倍率 ×1 作为采购成本，不改变客户售价。',
         applyUSDRate: '应用美元汇率',
+        requestPlatformFactor: '按每次请求的目标平台换算采购成本',
         costPlatformFactor: '平台自动换算 ×{factor}',
         costPreview: '采购成本倍率：{rate} × {scale} = {cost}',
         costSyncPaused: '此账号已关闭采购成本自动同步，保留手动成本；可在编辑账号中开启。',
@@ -945,6 +946,7 @@ export default {
       failedToRefresh: '刷新 Cookie 失败',
       // Create/Edit Account Modal
       platform: '平台',
+      gatewayProvider: '上游类型',
       accountName: '账号名称',
       enterAccountName: '请输入账号名称',
       accountType: '账号类型',

@@ -152,7 +152,7 @@ func BuildUpstreamBillingRateSnapshotItems(accounts []Account) []UpstreamBilling
 		// The billing endpoint is supported by every API-key platform; limiting
 		// this projection to OpenAI would make the background refresh erase the
 		// other platforms' persisted snapshots from the table.
-		if account.Type == AccountTypeAPIKey {
+		if account.Type == AccountTypeAPIKey || account.IsGateway() {
 			snapshot = decodeUpstreamBillingProbeSnapshot(account.Extra)
 		}
 		items = append(items, UpstreamBillingRateSnapshotItem{
@@ -630,7 +630,7 @@ func (s *UpstreamBillingProbeService) SetAccountEnabled(ctx context.Context, acc
 
 func (s *UpstreamBillingProbeService) probeLoadedAccount(ctx context.Context, account *Account, intervalMinutes int) (*UpstreamBillingProbeSnapshot, error) {
 	now := s.currentTime().UTC()
-	if s.newAPIRepo != nil {
+	if s.newAPIRepo != nil && (!account.IsGateway() || account.GetCredential(GatewayUpstreamKindCredentialKey) == "new_api") {
 		binding, err := s.newAPIRepo.GetBinding(ctx, account.ID)
 		if err != nil {
 			return nil, newAPIError("storage_unavailable")
@@ -638,6 +638,9 @@ func (s *UpstreamBillingProbeService) probeLoadedAccount(ctx context.Context, ac
 		if binding != nil && binding.Fingerprint == NewAPIAccountFingerprint(account) {
 			return s.probeNewAPIAccount(ctx, account, binding, intervalMinutes)
 		}
+	}
+	if account.IsGateway() && account.GetCredential(GatewayUpstreamKindCredentialKey) == "new_api" {
+		return s.persistProbeFailure(ctx, account, intervalMinutes, now, 0, "new_api_authorization_required", 0)
 	}
 	if s.accountTestService == nil || s.accountTestService.httpUpstream == nil {
 		return s.persistProbeFailure(ctx, account, intervalMinutes, now, 0, "transport_unavailable", 0)
@@ -1125,14 +1128,11 @@ func isUpstreamBillingProbeStatus(status string) bool {
 // CN providers, whose official-domain accounts are short-circuited to
 // "unsupported" by upstreamBillingProbeTargetIsOfficialAPI).
 // Non-sub2api upstreams return 404 and the snapshot records "unsupported".
-// Only AccountTypeAPIKey is in scope. OAuth/Bedrock hold no static API key to
-// present at all; AccountTypeUpstream (antigravity relay accounts) does carry
-// a base_url plus a static api_key, but it is deliberately left out of the
-// current supported set. New antigravity relay accounts are created with
-// type=apikey by the admin form, so only pre-existing type=upstream rows
-// cannot turn the probe on.
+// Explicit gateway accounts use either the configured New API authorization
+// or the Sub2API declaration endpoint. Other relay types retain their policy.
 func IsUpstreamBillingProbeIdentity(platform, accountType string) bool {
-	return accountType == AccountTypeAPIKey && domain.IsConcretePlatform(platform)
+	return (accountType == AccountTypeAPIKey && domain.IsConcretePlatform(platform)) ||
+		(accountType == AccountTypeGateway && platform == PlatformGateway)
 }
 
 func isUpstreamBillingProbeAccount(account *Account) bool {

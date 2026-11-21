@@ -485,6 +485,7 @@ export default {
         costConversion: 'Purchase cost conversion',
         costConversionHint: 'USD conversion is enabled by default: CN platforms ×1, other platforms ×7. Uncheck to use the upstream ratio ×1 as purchase cost. Customer prices are unchanged.',
         applyUSDRate: 'Apply USD conversion',
+        requestPlatformFactor: 'Procurement cost is converted for each request’s target platform',
         costPlatformFactor: 'Platform conversion ×{factor}',
         costPreview: 'Purchase cost multiplier: {rate} × {scale} = {cost}',
         costSyncPaused: 'Cost sync is disabled for this account; manual cost is preserved. Enable it in the account editor.',
@@ -823,6 +824,7 @@ export default {
       deleteConfirm: "Are you sure you want to delete '{name}'? This action cannot be undone.",
       // Create/Edit Account Modal
       platform: 'Platform',
+      gatewayProvider: 'Upstream provider',
       accountName: 'Account Name',
       enterAccountName: 'Enter account name',
       accountType: 'Account Type',

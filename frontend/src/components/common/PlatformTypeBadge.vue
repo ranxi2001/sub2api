@@ -87,7 +87,7 @@ interface Props {
 
 const props = defineProps<Props>()
 
-const platformLabel = computed(() => sharedPlatformLabel(props.platform))
+const platformLabel = computed(() => props.platform === 'gateway' ? 'Sub2API / New API' : sharedPlatformLabel(props.platform))
 
 const normalizedAuthMode = computed(() =>
   (props.authMode || '').trim().toLowerCase().replace(/[\s_-]+/g, '')
@@ -103,6 +103,7 @@ const typeLabel = computed(() => {
       return 'OAuth'
     case 'setup-token':
       return 'Token'
+    case 'gateway':
     case 'apikey':
       return 'Key'
     case 'bedrock':

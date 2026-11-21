@@ -409,6 +409,9 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 		}
 	}
 	bindAccountTestPlatform(c, account)
+	if account.gatewayProtocolsPending() {
+		return s.sendErrorAndEnd(c, ErrGatewayProtocolsPending.Error())
+	}
 	recordQualityBatchRoute(c, account, modelID, account.Platform+":"+account.GetAPIProtocol())
 	if expected, ok := ctx.Value(modelTraceContextKey{}).(modelTraceEnvironment); ok {
 		actual, err := modelTraceEnvironmentForAccount(account, modelID)

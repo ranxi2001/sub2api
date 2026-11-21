@@ -116,7 +116,40 @@ describe('codexQuickConfig', () => {
     expect(config.split('\n[')[0]).toContain('service_tier = "fast"')
     expect(config.match(/^service_tier = /gm)).toHaveLength(1)
     for (const platform of ['anthropic', 'grok', 'composite'] as const) {
-      expect(buildCodexQuickConfigToml({ ...input, platform })).not.toContain('service_tier')
+      const routed = buildCodexQuickConfigToml({ ...input, platform })
+      expect(routed).not.toContain('service_tier')
+      expect(routed).not.toMatch(/^(disable_response_storage|network_access|windows_wsl_setup_acknowledged) =/m)
+    }
+  })
+
+  it('writes the current OpenAI defaults and remote catalog in both scripts', () => {
+    const options = {
+      ...input,
+      siteName: ' 示例 "站" ',
+      modelCatalogUrl: 'https://example.com/v1/models'
+    }
+    const unixPayload = buildMacLinuxCodexQuickConfigScript(options).match(/PAYLOAD='([^']+)'/)?.[1]
+    const windowsPayload = buildWindowsCmdCodexQuickConfigScript(options).match(/\$configPayload = @\(\s*'([^']+)'/)?.[1]
+    for (const payload of [unixPayload, windowsPayload]) {
+      expect(payload).toBeDefined()
+      const config = decodeBase64Utf8(payload!)
+      expect(config).toMatch(/^model = "gpt-6-astra"$/m)
+      expect(config).toMatch(/^review_model = "gpt-6-astra"$/m)
+      expect(config).toContain('[model_providers.OpenAI]\nname = "示例 \\"站\\""')
+      expect(config).toContain('base_url = "https://example.com/v1"\nmodel_catalog_url = "https://example.com/v1/models"')
+      expect(config).toContain('[features]\napi_key_model_discovery = true')
+      expect(config).not.toMatch(/^(disable_response_storage|network_access|windows_wsl_setup_acknowledged|model_catalog_json) =/m)
+    }
+  })
+
+  it('uses the site name for every provider table', () => {
+    for (const platform of ['openai', 'composite', 'anthropic'] as const) {
+      const config = buildCodexQuickConfigToml({
+        ...input,
+        platform,
+        siteName: 'Ambi-Sub'
+      })
+      expect(config).toContain('name = "Ambi-Sub"')
     }
   })
 
@@ -125,10 +158,13 @@ describe('codexQuickConfig', () => {
     const config = buildCodexQuickConfigToml({
       apiKey: 'sk-catalog',
       baseUrl: 'https://example.com/v1',
+      modelCatalogUrl: 'https://example.com/v1/models',
       modelCatalogContent: catalog,
       modelCatalogPath: '~/.codex/codex-models.json'
     })
     expect(config).toContain('model_catalog_json = "~/.codex/codex-models.json"')
+    expect(config).not.toContain('model_catalog_url')
+    expect(config).toMatch(/^model = "gpt-test"$/m)
 
     const script = buildMacLinuxCodexQuickConfigScript({
       apiKey: 'sk-catalog',

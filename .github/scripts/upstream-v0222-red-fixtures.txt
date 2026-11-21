@@ -201,6 +201,13 @@ backend/internal/handler/request_body_read_log_test.go
 backend/internal/handler/probe_penalty_response_test.go
 backend/internal/service/account_probe_penalty_test.go
 
+# Native Messages gateway selection requires the request-scoped account and group reader.
+backend/internal/handler/gateway_messages_selection_test.go
+
+# Native Gemini envelope tests share those candidate-only gateway APIs/fixtures.
+# Frozen candidate blob: 2aeba94f1e98e3db91b6d3006ed0d0575775a6e9; full historical RED only.
+backend/internal/handler/gateway_gemini_envelope_test.go
+
 # Model plaza display currency tests require the candidate display configuration.
 backend/internal/service/model_plaza_currency_test.go
 backend/internal/service/model_plaza_currency_update_test.go

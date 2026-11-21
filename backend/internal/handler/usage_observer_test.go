@@ -55,6 +55,7 @@ func observerUsageRouter(r *observerUsageRepo, role string) *gin.Engine {
 	router.GET("/usage/dashboard/snapshot-v2", h.DashboardSnapshotV2)
 	router.GET("/usage/filter-options", h.ObserverFilterOptions)
 	router.GET("/usage/:id/timing", h.ObserverTiming)
+	router.GET("/usage/:id", h.GetByID)
 	return router
 }
 func usageGET(router *gin.Engine, path string) *httptest.ResponseRecorder {
@@ -100,6 +101,49 @@ func TestObserverUsageScopeAndProjection(t *testing.T) {
 			require.Equal(t, 200, w.Code, w.Body.String())
 			require.Equal(t, int64(42), r.trendFilters.UserID)
 			require.Equal(t, int64(42), r.groupFilters.UserID)
+		})
+	}
+}
+
+func TestObserverProcurementSnapshotFollowsExistingAccountCostScope(t *testing.T) {
+	accountRate, accountCost := 2.0, 9.0
+	for _, role := range []string{service.RoleObserver, service.RoleUser} {
+		t.Run(role, func(t *testing.T) {
+			row := service.UsageLog{ID: 1, UserID: 42, AccountRateMultiplier: &accountRate,
+				Account: &service.Account{ID: 7, Credentials: map[string]any{"api_key": "synthetic-must-not-leak"}}}
+			// Historical WS regressions compile this test package against older UsageLog types.
+			// The observer response below must expose the decoded snapshot on the candidate.
+			require.NoError(t, json.Unmarshal([]byte(`{"ProcurementCostSnapshot":{
+				"version":1,"account_type":"gateway","provider":"new_api","target_platform":"openai",
+				"basis":"total_cost","cost_multiplier":0.7}}`), &row))
+			r := &observerUsageRepo{record: &row, userUsageRepoCapture: userUsageRepoCapture{
+				listRows: []service.UsageLog{row}, stats: &usagestats.UsageStats{TotalAccountCost: &accountCost}}}
+			router := observerUsageRouter(r, role)
+			for _, path := range []string{"/usage?user_id=999", "/usage/1"} {
+				w := usageGET(router, path)
+				require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+				require.NotContains(t, w.Body.String(), "synthetic-must-not-leak")
+				if role == service.RoleObserver {
+					require.Contains(t, w.Body.String(), `"account_rate_multiplier":2`)
+					require.Contains(t, w.Body.String(), `"procurement_cost_snapshot"`)
+					require.Contains(t, w.Body.String(), `"cost_multiplier":0.7`)
+				} else {
+					require.NotContains(t, w.Body.String(), "account_rate_multiplier")
+					require.NotContains(t, w.Body.String(), "procurement_cost_snapshot")
+				}
+			}
+			require.Equal(t, int64(42), r.listFilters.UserID, "query user_id cannot expand existing ownership scope")
+			w := usageGET(router, "/usage/stats?user_id=999")
+			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+			if role == service.RoleObserver {
+				require.Contains(t, w.Body.String(), `"total_account_cost":9`)
+			} else {
+				require.NotContains(t, w.Body.String(), `"total_account_cost":9`)
+			}
+			r.record.UserID = 999
+			w = usageGET(router, "/usage/1")
+			require.Equal(t, http.StatusForbidden, w.Code)
+			require.NotContains(t, w.Body.String(), "procurement_cost_snapshot", "a foreign record remains forbidden")
 		})
 	}
 }

@@ -830,6 +830,9 @@ func validateDataProxy(item DataProxy) error {
 }
 
 func validateDataAccount(item DataAccount) error {
+	if err := service.ValidateGatewayAccountIdentity(item.Platform, item.Type, item.Credentials); err != nil {
+		return err
+	}
 	if strings.TrimSpace(item.Name) == "" {
 		return errors.New("account name is required")
 	}
@@ -843,7 +846,7 @@ func validateDataAccount(item DataAccount) error {
 		return errors.New("account credentials is required")
 	}
 	switch item.Type {
-	case service.AccountTypeOAuth, service.AccountTypeSetupToken, service.AccountTypeAPIKey, service.AccountTypeUpstream:
+	case service.AccountTypeOAuth, service.AccountTypeSetupToken, service.AccountTypeAPIKey, service.AccountTypeUpstream, service.AccountTypeGateway:
 	default:
 		return fmt.Errorf("account type is invalid: %s", item.Type)
 	}

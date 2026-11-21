@@ -2729,7 +2729,18 @@ func (s *OpenAIGatewayService) SelectAccountWithSchedulerForCapability(
 	if len(platformOverride) > 0 {
 		platform = platformOverride[0]
 	}
-	return s.selectAccountWithScheduler(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, "", requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
+	selection, decision, err := s.selectAccountWithScheduler(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, "", requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
+	if err == nil && selection != nil && selection.Account != nil && selection.Account.gatewayProtocolSource != nil {
+		view, readErr := s.openAIGatewaySelectionView(ctx, selection.Account)
+		if readErr != nil {
+			if selection.ReleaseFunc != nil {
+				selection.ReleaseFunc()
+			}
+			return nil, decision, readErr
+		}
+		selection.Account = view.gatewayProtocolSource
+	}
+	return selection, decision, err
 }
 
 func (s *OpenAIGatewayService) SelectAccountWithSchedulerForImages(

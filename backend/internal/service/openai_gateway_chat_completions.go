@@ -98,6 +98,13 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	promptCacheKey string,
 	defaultMappedModel string,
 ) (*OpenAIForwardResult, error) {
+	if account.gatewayProtocolsPending() {
+		view, err := s.gatewayProtocolAccount(ctx, account, "openai", gatewayProtocolBodyModel(body))
+		if err != nil {
+			return nil, err
+		}
+		account = view
+	}
 
 	admittedCtx, admissionErr := s.beginPriorityLatencyTurn(ctx, c, account, gjson.GetBytes(body, "model").String())
 	if admissionErr != nil {
@@ -439,6 +446,13 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	}
 
 	// 5. Get access token
+	if account.gatewayProtocolSource != nil {
+		latest, err := s.admitOpenAITurn(ctx, c, account, upstreamModel, responsesBody)
+		if err != nil {
+			return nil, err
+		}
+		account = latest
+	}
 	token, _, err := s.GetAccessToken(ctx, account)
 	if err != nil {
 		return nil, fmt.Errorf("get access token: %w", err)
