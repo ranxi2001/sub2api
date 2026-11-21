@@ -1,7 +1,7 @@
 <template>
   <component :is="embedded ? 'div' : AppLayout">
     <div class="min-w-0 space-y-5">
-      <header class="flex flex-wrap items-start justify-between gap-3"><div><h1 class="text-2xl font-semibold">{{ t('profitOps.title') }}</h1><p class="mt-2 text-sm text-gray-500">{{ t('profitOps.description') }}</p></div><div class="flex flex-wrap gap-2"><button class="btn btn-secondary" data-testid="refresh-wallet" :disabled="loading" @click="load(true)">{{ t('profitOps.refreshWallet') }}</button><button class="btn btn-secondary" data-testid="refresh-operations" :disabled="loading" @click="load(false, true)">{{ t('profitOps.refresh') }}</button></div></header>
+      <header class="flex flex-wrap items-start justify-between gap-3"><div><h1 :id="headingId" class="text-2xl font-semibold">{{ t('profitOps.title') }}</h1><p class="mt-2 text-sm text-gray-500">{{ t('profitOps.description') }}</p></div><div class="flex flex-wrap gap-2"><button class="btn btn-secondary" data-testid="refresh-wallet" :disabled="loading" @click="load(true)">{{ t('profitOps.refreshWallet') }}</button><button class="btn btn-secondary" data-testid="refresh-operations" :disabled="loading" @click="load(false, true)">{{ t('profitOps.refresh') }}</button></div></header>
       <SmartOpsNav v-if="!embedded" />
       <UpstreamChannelManager v-if="!embedded" @changed="load"><ProfitProviders v-if="auth.isAdmin" @changed="load" /></UpstreamChannelManager>
       <p class="rounded-xl bg-primary-50 p-4 text-sm leading-6 dark:bg-dark-800">{{ t('profitOps.attribution') }}</p>
@@ -77,7 +77,7 @@ import SmartOpsNav from './SmartOpsNav.vue'
 import UpstreamChannelManager from './UpstreamChannelManager.vue'
 import ProfitProviders from './ProfitProviders.vue'
 import { readProfitOperations, type OperationsQuery, type OperationsSnapshot, type OperationsRow, type ProfitMetrics } from '@/api/admin/profitOperations'
-const props = withDefaults(defineProps<{ embedded?: boolean; active?: boolean; scope?: Partial<OperationsQuery> }>(), {active:true})
+const props = withDefaults(defineProps<{ embedded?: boolean; headingId?: string; active?: boolean; scope?: Partial<OperationsQuery> }>(), {active:true})
 const emit = defineEmits<{ scope: [value: OperationsQuery]; refreshed: [] }>()
 const { t } = useI18n()
 const auth = useAuthStore()

@@ -15,17 +15,21 @@ describe('channel configuration',()=>{
  it('preserves legacy query filters without adopting arbitrary fields',()=>{
   expect(profitScopeFromQuery({channel_id:'7',account_id:'42',page:'2',model:'fixture',from:'2026-11-01T00:00:00Z',panel:'profit',token:'discard'})).toEqual({channel_id:7,account_id:42,page:2,model:'fixture',from:'2026-11-01T00:00:00Z'})
  })
- it('loads configuration first and mounts profit only when expanded, retaining it on collapse',async()=>{
-  const router=createRouter({history:createMemoryHistory(),routes:[{path:'/admin/channel-config',component:ChannelConfig}]})
-  await router.push('/admin/channel-config');await router.isReady()
-  const w=mount(ChannelConfig,{global:{plugins:[router]}});await flushPromises()
-  await vi.waitFor(()=>expect(w.find('[data-testid="manager"]').exists()).toBe(true))
-  expect(w.find('[data-testid="profit"]').exists()).toBe(false)
-  expect(w.find('[data-testid="accounts"]').exists()).toBe(false)
-  const panel=w.get('[data-testid="config-panel-profit"]');(panel.element as HTMLDetailsElement).open=true;await panel.trigger('toggle');await flushPromises()
-  await vi.waitFor(()=>expect(w.find('[data-testid="profit"]').exists()).toBe(true))
-  ;(panel.element as HTMLDetailsElement).open=false;await panel.trigger('toggle');await flushPromises()
-  await vi.waitFor(()=>expect(w.find('[data-testid="profit"]').exists()).toBe(true))
+ it.each(['', '?panel=accounts', '?panel=channels', '?panel=profit'])('shows profit then combined channel management at %s', async query => {
+  const router = createRouter({ history: createMemoryHistory(), routes: [{path:'/admin/channel-config',component:ChannelConfig}] })
+  await router.push('/admin/channel-config' + query)
+  const w = mount(ChannelConfig, {global:{plugins:[router]}})
+  await vi.waitFor(() => expect(w.find('[data-testid="accounts"]').exists()).toBe(true))
+  const panels = w.get('[data-testid="channel-config-panels"]').element.children
+  expect([...panels].map(p => [p.tagName, p.getAttribute('data-testid')])).toEqual([
+   ['SECTION','config-panel-profit'], ['SECTION','config-panel-channels']
+  ])
+  expect(w.get('[data-testid="profit"]').isVisible()).toBe(true)
+  expect(w.get('[data-testid="accounts"]').isVisible()).toBe(true)
+  const directory = w.get('[data-testid="channel-directory"]')
+  ;(directory.element as HTMLDetailsElement).open = true
+  await directory.trigger('toggle'); await flushPromises()
+  await vi.waitFor(() => expect(w.find('[data-testid="manager"]').exists()).toBe(true))
   w.unmount()
  })
 })
