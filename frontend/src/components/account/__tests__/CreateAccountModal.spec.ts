@@ -2175,3 +2175,22 @@ describe('mature provider import entry', () => {
     expect(w.find('[data-testid="provider-import-mode"]').exists(), 'API Key and Responses accounts must offer provider import').toBe(true)
   })
 })
+
+it('creates a cross-platform gateway with the selected provider and one calling key', async () => {
+  const wrapper = mountModal()
+  await wrapper.get('[data-testid="platform-button-gateway"]').trigger('click')
+  await wrapper.get('[data-tour="account-form-name"]').setValue('fixture gateway')
+  const fields = wrapper.get('[data-testid="gateway-account-fields"]')
+  await fields.get('select').setValue('new_api')
+  await fields.get('input[type="url"]').setValue('https://relay.example.com')
+  await fields.get('input[type="password"]').setValue('fixture-only')
+  await wrapper.get('#create-account-form').trigger('submit.prevent')
+  await flushPromises()
+  expect(createAccountMock).toHaveBeenCalledWith(expect.objectContaining({
+    platform: 'gateway',
+    type: 'gateway',
+    credentials: expect.objectContaining({
+      upstream_kind: 'new_api', base_url: 'https://relay.example.com', api_key: 'fixture-only'
+    })
+  }))
+})

@@ -99,6 +99,7 @@ export function supportsPricingModelSync(platform: string | null | undefined): b
 
 /** 平台展示名；未登记的值原样返回。 */
 export function platformDisplayName(platform: string | null | undefined): string {
+  if (platform === 'gateway') return 'Sub2API / New API'
   return getPlatformSpec(platform)?.display_name ?? platform ?? ''
 }
 

@@ -40,7 +40,8 @@
               <label v-if="accountIds.includes(candidate.account_id)" class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
                 <input v-model="applyUSDRate[candidate.account_id]" type="checkbox" class="h-4 w-4 rounded border-gray-300" :data-testid="`new-api-apply-usd-rate-${candidate.account_id}`" />
                 {{ t('admin.accounts.upstreamBilling.newAPI.applyUSDRate') }}
-                <span class="text-xs text-gray-500">{{ t('admin.accounts.upstreamBilling.newAPI.costPlatformFactor', { factor: conversionFactor(candidate) }) }}</span>
+                <span v-if="candidate.cost_multiplier_scale === 0" class="text-xs text-gray-500">{{ t('admin.accounts.upstreamBilling.newAPI.requestPlatformFactor') }}</span>
+                <span v-else class="text-xs text-gray-500">{{ t('admin.accounts.upstreamBilling.newAPI.costPlatformFactor', { factor: conversionFactor(candidate) }) }}</span>
               </label>
               <p v-if="accountIds.includes(candidate.account_id) && candidate.cost_auto_sync_enabled === false" class="text-xs text-gray-500">{{ t('admin.accounts.upstreamBilling.newAPI.costSyncPaused') }}</p>
               </div>
@@ -59,6 +60,7 @@
             </div>
             <p v-if="convertedCost(row) != null" class="text-emerald-700 dark:text-emerald-400" :data-testid="`new-api-cost-preview-${row.account_id}`">{{ t('admin.accounts.upstreamBilling.newAPI.costPreview', { rate: row.rate, scale: conversionFactor(row), cost: convertedCost(row) }) }}</p>
             <p v-else-if="row.cost_auto_sync_enabled === false" class="text-xs text-gray-500">{{ t('admin.accounts.upstreamBilling.newAPI.costSyncPaused') }}</p>
+            <p v-else-if="row.matched && row.cost_multiplier_scale === 0 && isFixedRate(row.rate)" class="text-xs text-gray-500">{{ t('admin.accounts.upstreamBilling.newAPI.requestPlatformFactor') }}</p>
             <p v-else-if="row.matched" class="text-xs text-amber-700 dark:text-amber-400">{{ t('admin.accounts.upstreamBilling.newAPI.costUnavailable') }}</p>
             <label v-if="row.token_options?.length && (!row.matched || row.token_options.length > 1)" class="block text-sm text-gray-700 dark:text-gray-200">
               {{ t('admin.accounts.upstreamBilling.newAPI.chooseToken') }}
@@ -234,7 +236,7 @@ const remove = async () => {
 const conversionFactor = (row: {account_id: number; cn_provider?: boolean}) => row.cn_provider || applyUSDRate.value[row.account_id] === false ? 1 : 7
 const convertedCost = (row: NewAPIUpstreamPreview['accounts'][number]): string | null => {
   const scale = conversionFactor(row)
-  if (row.cost_auto_sync_enabled === false || !row.matched || row.group === 'auto' || !isFixedRate(row.rate) || ![1, 7].includes(scale)) return null
+  if (row.cost_multiplier_scale === 0 || row.cost_auto_sync_enabled === false || !row.matched || row.group === 'auto' || !isFixedRate(row.rate) || ![1, 7].includes(scale)) return null
   const cost = row.rate! * scale
   return Number.isFinite(cost) && cost <= 1000000 ? Number(cost.toFixed(6)).toString() : null
 }

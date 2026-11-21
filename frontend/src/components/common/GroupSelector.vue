@@ -98,7 +98,9 @@ const filteredGroups = computed(() => {
     : props.groups
   if (props.platform) {
     // antigravity 账户启用混合调度后，可选择 anthropic/gemini 分组
-    if (props.platform === 'antigravity' && props.mixedScheduling) {
+    if (props.platform === 'gateway') {
+      result = result.filter(group => !group.require_oauth_only)
+    } else if (props.platform === 'antigravity' && props.mixedScheduling) {
       result = result.filter(
         (g) => g.platform === 'antigravity' || g.platform === 'anthropic' || g.platform === 'gemini' || g.platform === 'composite'
       )

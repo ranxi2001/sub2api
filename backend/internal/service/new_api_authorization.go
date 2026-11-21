@@ -101,7 +101,8 @@ func (s *UpstreamBillingProbeService) newAPIAccount(ctx context.Context, id int6
 	if e != nil {
 		return nil, "", e
 	}
-	if !isUpstreamBillingProbeAccount(a) || a.GetCredential("api_key") == "" {
+	if !isUpstreamBillingProbeAccount(a) || a.GetCredential("api_key") == "" ||
+		(a.IsGateway() && a.GetCredential(GatewayUpstreamKindCredentialKey) != "new_api") {
 		return nil, "", ErrUpstreamBillingProbeAccountInvalid
 	}
 	site, e := CanonicalNewAPISite(a.GetCredential("base_url"))
@@ -116,6 +117,15 @@ func (s *UpstreamBillingProbeService) GetNewAPIConfig(ctx context.Context, id in
 	accounts, e := s.accountRepo.ListAllWithFilters(ctx, "", AccountTypeAPIKey, "", "", 0, "")
 	if e != nil {
 		return nil, e
+	}
+	gateways, e := s.accountRepo.ListAllWithFilters(ctx, PlatformGateway, AccountTypeGateway, "", "", 0, "")
+	if e != nil {
+		return nil, e
+	}
+	for i := range gateways {
+		if gateways[i].IsGateway() && gateways[i].GetCredential(GatewayUpstreamKindCredentialKey) == "new_api" {
+			accounts = append(accounts, gateways[i])
+		}
 	}
 	found := false
 	for i := range accounts {
