@@ -221,4 +221,10 @@ func TestGatewayProtocolCatalogCompositePublicAlias(t *testing.T) {
 	models, err := svc.GetGroupModelCatalog(ctx, base.group.ID, PlatformComposite)
 	require.NoError(t, err)
 	require.Equal(t, []string{"public"}, models)
+	base.account.Credentials["model_mapping"] = map[string]any{"public": "wire"}
+	base.account.AccountGroups[0].AllowedModels = []string{"public"}
+	models, err = svc.GetGroupModelCatalog(ctx, base.group.ID, PlatformComposite)
+	require.NoError(t, err)
+	require.Empty(t, models, "an explicit route must authorize its actual upstream model")
+
 }

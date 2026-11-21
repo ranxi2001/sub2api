@@ -1521,8 +1521,12 @@ func mixedListingModelAllowed(groupPlatform, model string) bool {
 
 func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64, platform string) []string {
 	legacy := s.cachedAvailableModels(ctx, groupID, platform)
-	models, err := s.gatewayCatalogModels(ctx, groupID, platform)
-	if err != nil || len(models) == 0 {
+	catalog, err := s.readGatewayModelCatalog(ctx, groupID, platform)
+	if err != nil {
+		return legacy
+	}
+	models := catalog.directModels(platform)
+	if len(models) == 0 {
 		return legacy
 	}
 	combined := append(slices.Clone(legacy), models...)

@@ -11,13 +11,32 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 )
 
-// gatewayCatalogModels enumerates configured names and platform defaults using
-// the same live group, membership and model admission as a forwarded request.
-func (s *GatewayService) gatewayCatalogModels(ctx context.Context, groupID *int64, target string, routes ...CompositeModelRoute) ([]string, error) {
+type gatewayModelCatalog struct {
+	ctx      context.Context
+	family   domain.PlatformGateway
+	group    *Group
+	accounts []Account
+}
+
+func (catalog gatewayModelCatalog) allows(public, upstream string) bool {
+	if catalog.group == nil || public == "" || upstream == "" {
+		return false
+	}
+	ctx := withGatewaySelection(catalog.ctx, public, upstream, catalog.family)
+	for i := range catalog.accounts {
+		account := &catalog.accounts[i]
+		if _, err := gatewayProtocolAccountFromSnapshot(ctx, account, account, catalog.group, catalog.family, upstream); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *GatewayService) readGatewayModelCatalog(ctx context.Context, groupID *int64, target string) (gatewayModelCatalog, error) {
 	spec, concrete := domain.LookupPlatform(target)
 	reader, _ := s.accountRepo.(GatewayRequestCandidateReader)
 	if groupID == nil || *groupID <= 0 || !concrete {
-		return nil, nil
+		return gatewayModelCatalog{}, nil
 	}
 	family := spec.Gateway
 	if target == PlatformAntigravity {
@@ -27,24 +46,33 @@ func (s *GatewayService) gatewayCatalogModels(ctx context.Context, groupID *int6
 		reader, _ = snap.localSnapshotReader.(GatewayRequestCandidateReader)
 		group, err := snap.GetGroupByIDLite(ctx, *groupID)
 		if err != nil {
-			return nil, err
+			return gatewayModelCatalog{}, err
 		}
 		ctx = context.WithValue(ctx, ctxkey.Group, group)
 		ctx = WithResolvedTargetPlatform(ctx, target)
 		ctx = withGatewaySelection(ctx, "catalog", "catalog", family)
 	}
 	if reader == nil {
-		return nil, nil
+		return gatewayModelCatalog{}, nil
 	}
 	candidates, group, err := reader.ListGatewayRequestCandidates(ctx, *groupID, target)
 	if err != nil || len(candidates) == 0 || group == nil || group.ID != *groupID {
-		return nil, err
+		return gatewayModelCatalog{}, err
 	}
 	ctx = context.WithValue(ctx, ctxkey.Group, group)
 	ctx = WithResolvedTargetPlatform(ctx, target)
+	return gatewayModelCatalog{ctx: ctx, family: family, group: group, accounts: candidates}, nil
+}
+
+func (catalog gatewayModelCatalog) directModels(target string) []string {
+	if catalog.group == nil {
+		return nil
+	}
+	groupID := &catalog.group.ID
+	group := catalog.group
 	var result []string
-	for i := range candidates {
-		account := &candidates[i]
+	for i := range catalog.accounts {
+		account := &catalog.accounts[i]
 		models := groupAllowedConcreteModels(account, groupID)
 		for name := range account.GetModelMapping() {
 			models = append(models, name)
@@ -55,32 +83,18 @@ func (s *GatewayService) gatewayCatalogModels(ctx context.Context, groupID *int6
 				models = append(models, DefaultModelIDsForPlatform(target)...)
 			}
 		}
-		for _, route := range routes {
-			if !route.Enabled || route.TargetPlatform != target || normalizeCompositeRouteMatchType(route.MatchType) != CompositeRouteMatchExact {
-				continue
-			}
-			publicModel := strings.TrimSpace(route.PublicModel)
-			upstream := strings.TrimSpace(route.UpstreamModel)
-			if upstream == "" {
-				upstream = publicModel
-			}
-			modelCtx := withGatewaySelection(ctx, publicModel, upstream, family)
-			if _, err := gatewayProtocolAccountFromSnapshot(modelCtx, account, account, group, family, upstream); err == nil {
-				result = append(result, publicModel)
-			}
-		}
 		for _, model := range models {
 			if model == "" || strings.Contains(model, "*") {
 				continue
 			}
-			modelCtx := withGatewaySelection(ctx, model, model, family)
-			if _, err := gatewayProtocolAccountFromSnapshot(modelCtx, account, account, group, family, model); err == nil {
+			modelCtx := withGatewaySelection(catalog.ctx, model, model, catalog.family)
+			if _, err := gatewayProtocolAccountFromSnapshot(modelCtx, account, account, group, catalog.family, model); err == nil {
 				result = append(result, model)
 			}
 		}
 	}
 	slices.Sort(result)
-	return slices.Compact(result), nil
+	return slices.Compact(result)
 }
 
 // GetGroupModelCatalog is the fail-closed source for multi-group discovery.
@@ -106,14 +120,14 @@ func (s *GatewayService) GetGroupModelCatalog(ctx context.Context, groupID int64
 			return nil, err
 		}
 	}
-	gatewayModels := make(map[string][]string)
+	gatewayCatalogs := make(map[string]gatewayModelCatalog)
 	for _, concrete := range platforms {
-		names, err := s.gatewayCatalogModels(ctx, &groupID, concrete, routes...)
+		catalog, err := s.readGatewayModelCatalog(ctx, &groupID, concrete)
 		if err != nil {
 			return nil, err
 		}
-		gatewayModels[concrete] = names
-		for _, model := range names {
+		gatewayCatalogs[concrete] = catalog
+		for _, model := range catalog.directModels(concrete) {
 			seen[model] = struct{}{}
 		}
 		var visible []Account
@@ -193,7 +207,7 @@ func (s *GatewayService) GetGroupModelCatalog(ctx context.Context, groupID int64
 				if upstream == "" {
 					upstream = model
 				}
-				if slices.Contains(gatewayModels[route.TargetPlatform], model) {
+				if gatewayCatalogs[route.TargetPlatform].allows(model, upstream) {
 					available[model] = struct{}{}
 					break
 				}
