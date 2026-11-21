@@ -1001,6 +1001,9 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 		if status.protocolFailure != "" {
 			return nil, "", nil, errors.New("stream usage incomplete: " + status.protocolFailure)
 		}
+		if !known {
+			return []string{strings.Join(lines, "\n") + "\n\n"}, "", nil, nil
+		}
 		if known {
 			status.observe(&decoded, dataLine)
 			if decoded.Type == "error" {

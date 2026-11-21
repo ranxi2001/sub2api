@@ -17,13 +17,14 @@ def required_tests(mode):
             tests += [f'TestIssue985AdapterBoundaries/{route}/{flow}/{case}' for case in ('crlf', 'cr', 'bom', 'data_only', 'field_order', 'event_without_data', 'compact', 'eof_frame', 'unknown', 'zero', 'missing', 'field_missing', 'stop_reason_only', 'terminal_error', 'malformed', 'mismatch')]
     for route in ('native', 'passthrough', 'normal'):
         tests += [f'TestIssue985RawPartialUsage/{route}']
-        tests += [f'TestIssue985NativeRelays/{route}/{case}' for case in ('multidata', 'empty', 'missing', 'error_after_terminal', 'reasoning')]
+        tests += [f'TestIssue985NativeRelays/{route}/{case}' for case in ('multidata', 'unknown_multidata', 'empty', 'missing', 'error_after_terminal', 'reasoning')]
     tests += ['TestIssue985EveryTransportSplit', 'TestIssue985FrameBoundAndFieldOrder']
     tests += [f'TestIssue985FinalWriteFailure/{route}' for route in ('chat_completions', 'responses')]
     for flow in ('true', 'false'):
         tests += [f'TestIssue985HandlerUsage/{case}/stream={flow}' for case in ('framed', 'missing', 'zero', 'partial_error', 'partial_protocol')]
         tests += [f'TestIssue985PostgresBilling/{case}/stream={flow}' for case in ('valid', 'missing', 'explicit_zero', 'partial_protocol', 'partial_error')]
         tests += [f'TestIssue985HandlerToolContinuation/stream={flow}']
+        tests += [f'TestIssue985SDKAccumulator/{case}/stream={flow}' for case in ('text', 'tool', 'zero', 'missing', 'partial_error', 'partial_protocol')]
         tests += [f'TestIssue985CancellationResources/cancel={flow}']
     return tests
 

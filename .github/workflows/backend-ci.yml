@@ -205,9 +205,10 @@ jobs:
           PGPASSWORD: fixture
           GOFLAGS: '-p=1'
         run: |
+          python3 -m pip install -r .github/scripts/anthropic_integrity_sdk_requirements.txt
           psql -h 127.0.0.1 -p 15432 -U fixture -d shadow_audit -c 'CREATE DATABASE issue985_fixture'
           cd backend
-          go test -tags=unit,issue985pg ./internal/handler -run '^TestIssue985PostgresBilling$' -count=1 -timeout=8m
+          go test -tags=unit,issue985pg,issue985sdk ./internal/handler -run '^TestIssue985(PostgresBilling|SDKAccumulator)$' -count=1 -timeout=8m
       - name: Upload integration test timings
         if: always()
         uses: actions/upload-artifact@v4

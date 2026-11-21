@@ -1158,9 +1158,8 @@ func (s *GatewayService) sseStreamErrorEventFailover(ctx context.Context, c *gin
 	})
 
 	logger.LegacyPrintf("service.gateway",
-		"[Forward] SSE error event in stream: Account=%d(%s) RequestID=%s Body=%s",
-		account.ID, account.Name, resp.Header.Get("x-request-id"),
-		truncateString(rawData, 1000),
+		"[Forward] SSE error event in stream: account_id=%d request_id=%s status=%d output_started=%t",
+		account.ID, resp.Header.Get("x-request-id"), semanticStatus, outputStarted,
 	)
 
 	return &UpstreamFailoverError{

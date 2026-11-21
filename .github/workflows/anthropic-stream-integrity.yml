@@ -44,6 +44,8 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
+      - name: Install pinned official SDK for loopback accumulator
+        run: python3 -m pip install -r .github/scripts/anthropic_integrity_sdk_requirements.txt
       - name: Evidence validator negative controls
         run: python3 .github/scripts/anthropic_integrity_evidence_test.py
       - name: Fixed production business RED, identical oracle
@@ -81,7 +83,7 @@ jobs:
           evidence="$RUNNER_TEMP/anthropic-integrity"
           cd backend
           set +e
-          go test -race -json -tags=unit,issue985pg ./internal/service ./internal/handler -run '^TestIssue985' -count=1 -timeout=10m > "$evidence/green.jsonl" 2> "$evidence/green.stderr"
+          go test -race -json -tags=unit,issue985pg,issue985sdk ./internal/service ./internal/handler -run '^TestIssue985' -count=1 -timeout=10m > "$evidence/green.jsonl" 2> "$evidence/green.stderr"
           rc=$?
           set -e
           printf '%s\n' "$rc" > "$evidence/green.exitcode"
