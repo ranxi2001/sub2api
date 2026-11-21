@@ -168,11 +168,23 @@ func gatewayProtocolAccountFromSnapshot(ctx context.Context, selected, current *
 	scope.Credentials = maps.Clone(current.Credentials)
 	scope.modelMappingCacheReady = false
 	id := liveGroup.ID
-	publicModel := model
+	selectionModel := model
+	if family == domain.PlatformGatewayAnthropic {
+		if requested, enabled := gatewayMessagesSelectionModel(ctx, &id, target); enabled {
+			selectionModel = requested
+			if scheduling, _ := ctx.Value(gatewaySchedulingModelContextKey{}).(string); scheduling != "" {
+				selectionModel = scheduling
+			}
+		}
+	}
+	publicModel := selectionModel
 	if original, ok := RequestedPublicModelFromContext(ctx); ok {
 		publicModel = original
 	}
-	if !liveGroup.ModelAllowlist.Allows(publicModel) || !scope.isModelMappingSupported(model) || !scope.IsModelAllowedInGroup(&id, model) {
+	// Account source-key scope and binding eligibility follow selection, before
+	// channel rewriting. Forward retains model as the channel input and applies
+	// the existing account mapping to it; a wire alias grants no binding rights.
+	if !liveGroup.ModelAllowlist.Allows(publicModel) || !scope.isModelMappingSupported(selectionModel) || !scope.IsModelAllowedInGroup(&id, selectionModel) {
 		return nil, ErrGatewayAccountGroup
 	}
 	view := scope
@@ -204,7 +216,7 @@ func gatewayProtocolAccountFromSnapshot(ctx context.Context, selected, current *
 		delete(view.Extra, key)
 	}
 	view.modelMappingCacheReady = false
-	if !view.IsSchedulableForModelWithContext(ctx, model) {
+	if !view.IsSchedulableForModelWithContext(ctx, selectionModel) || !view.IsSchedulableForModelWithContext(ctx, model) {
 		return nil, ErrGatewayProtocolsPending
 	}
 	if family == domain.PlatformGatewayAnthropic {

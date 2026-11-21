@@ -101,6 +101,7 @@ jobs:
           grep -F -- '--- PASS: TestGatewayProtocolMessagesCandidateSourceRefreshesAfterWarmSnapshot' ../evidence/unit-race.log
           grep -F -- '--- PASS: TestGatewayProtocolMessagesCandidateReadFailurePreservesLegacy' ../evidence/unit-race.log
           grep -F -- '--- PASS: TestGatewayProtocolMessagesHandlerSchedulerToUsage' ../evidence/unit-race.log
+          grep -F -- '--- PASS: TestGatewayProtocolMessagesChannelMappingPreservesBindingModel' ../evidence/unit-race.log
           grep -F -- '--- PASS: TestGatewayProtocolAdmissionAllFamiliesKeepOneIdentity' ../evidence/unit-race.log
           grep -F -- '--- PASS: TestGatewayManagementUpdateRequiresAtomicCapability' ../evidence/unit-race.log
           grep -F -- '--- PASS: TestGatewayManagementRepositoryBindingGuard' ../evidence/unit-race.log
