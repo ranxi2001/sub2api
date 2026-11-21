@@ -3672,6 +3672,14 @@ func convertClaudeMessagesToGeminiContents(messages any, toolUseIDToName map[str
 					parts = append(parts, map[string]any{"functionResponse": response})
 				case "image", "document":
 					if src, ok := bm["source"].(map[string]any); ok {
+						if bm["type"] == "document" && src["media_type"] != "application/pdf" && src["media_type"] != "text/plain" {
+							// Keep legacy file carriers for non-Anthropic targets.
+							// Their MIME is not an Anthropic rejection policy here.
+							if b, err := json.Marshal(bm); err == nil {
+								parts = append(parts, map[string]any{"text": string(b)})
+							}
+							continue
+						}
 						if src["type"] == "text" && src["media_type"] == "text/plain" {
 							if data, ok := src["data"].(string); ok {
 								parts = append(parts, map[string]any{"text": data})

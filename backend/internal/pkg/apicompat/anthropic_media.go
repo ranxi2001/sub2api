@@ -16,9 +16,9 @@ type AnthropicMediaError struct {
 
 func (e *AnthropicMediaError) Error() string { return e.reason }
 
-// ValidateChatCompletionsAnthropicMedia checks empty image data URIs before the
-// generic Chat→Responses bridge drops them. Other data URIs reach the MIME-aware
-// Responses→Anthropic converter unchanged. Non-data URLs keep their legacy policy.
+// ValidateChatCompletionsAnthropicMedia validates existing media carriers before
+// the generic Chat→Responses bridge can flatten tool/function content arrays.
+// Strings are never interpreted as media. Non-data URLs keep their legacy policy.
 func ValidateChatCompletionsAnthropicMedia(req *ChatCompletionsRequest) error {
 	for _, message := range req.Messages {
 		var parts []ChatContentPart
@@ -26,12 +26,123 @@ func ValidateChatCompletionsAnthropicMedia(req *ChatCompletionsRequest) error {
 			continue
 		}
 		for _, part := range parts {
-			if part.Type == "image_url" && part.ImageURL != nil && isEmptyBase64DataURI(part.ImageURL.URL) {
-				return &AnthropicMediaError{reason: "invalid empty media data URI for Anthropic conversion"}
+			uri := ""
+			switch {
+			case part.Type == "image_url" && part.ImageURL != nil:
+				uri = part.ImageURL.URL
+			case part.Type == "file" && part.File != nil:
+				uri = part.File.FileData
+			}
+			if _, err := dataURIToAnthropicMediaBlock(uri); err != nil {
+				return err
 			}
 		}
 	}
 	return nil
+}
+
+// PreserveChatCompletionsAnthropicToolMedia restores structured tool output
+// after generic conversion. Item order and generated legacy function call IDs
+// are unchanged. Only actual content arrays with convertible data URI media are
+// replaced; string tool output and the generic bridge remain untouched.
+func PreserveChatCompletionsAnthropicToolMedia(chat *ChatCompletionsRequest, responses *ResponsesRequest) error {
+	var items []json.RawMessage
+	if err := json.Unmarshal(responses.Input, &items); err != nil {
+		return err
+	}
+	next := 0
+	changed := false
+	for _, message := range chat.Messages {
+		if message.Role != "tool" && message.Role != "function" {
+			continue
+		}
+		var wire map[string]json.RawMessage
+		for next < len(items) {
+			if err := json.Unmarshal(items[next], &wire); err != nil {
+				return err
+			}
+			var itemType string
+			if err := json.Unmarshal(wire["type"], &itemType); err != nil {
+				return err
+			}
+			if itemType == "function_call_output" {
+				break
+			}
+			wire = nil
+			next++
+		}
+		if next == len(items) {
+			break
+		}
+		next++
+		var parts []ChatContentPart
+		if json.Unmarshal(message.Content, &parts) != nil {
+			continue
+		}
+		converted := convertChatContentPartsToResponses(parts)
+		hasMedia := false
+		for _, part := range converted {
+			if part.Type == "input_image" || part.Type == "input_file" {
+				block, err := responsesMediaPartToAnthropicBlock(part, ResponsesToAnthropicOptions{StrictMedia: true})
+				if err != nil {
+					return err
+				}
+				hasMedia = hasMedia || block != nil
+			}
+		}
+		if hasMedia {
+			content, err := json.Marshal(converted)
+			if err != nil {
+				return err
+			}
+			// Keep an actual output array on the wire; a JSON-encoded string
+			// would be ordinary tool text on the next conversion.
+			wire["output"] = content
+			items[next-1], err = json.Marshal(wire)
+			if err != nil {
+				return err
+			}
+			changed = true
+		}
+	}
+	if changed {
+		input, err := json.Marshal(items)
+		if err != nil {
+			return err
+		}
+		responses.Input = input
+	}
+	return nil
+}
+
+func responsesMediaPartToAnthropicBlock(part ResponsesContentPart, opts ResponsesToAnthropicOptions) (*AnthropicContentBlock, error) {
+	uri := part.ImageURL
+	blockType := "image"
+	if part.Type == "input_file" {
+		uri, blockType = part.FileData, "document"
+	}
+	if opts.StrictMedia {
+		return dataURIToAnthropicMediaBlock(uri)
+	}
+	// Preserve the pre-strict intermediary policy for Gemini/Antigravity:
+	// carry the declared MIME and base64 bytes without applying Anthropic's
+	// allowlist or validating another target protocol's media constraints.
+	if !strings.HasPrefix(uri, "data:") {
+		return nil, nil
+	}
+	mediaType, rest, ok := strings.Cut(strings.TrimPrefix(uri, "data:"), ";")
+	if !ok || !strings.HasPrefix(rest, "base64,") {
+		return nil, nil
+	}
+	source := &AnthropicImageSource{Type: "base64", MediaType: mediaType, Data: strings.TrimPrefix(rest, "base64,")}
+	// Retain the valid plain-text source introduced with the MIME fix. If it
+	// cannot be decoded, preserve the legacy carrier for the final target.
+	if mediaType == "text/plain" {
+		if data, err := base64.StdEncoding.DecodeString(source.Data); err == nil && utf8.Valid(data) {
+			blockType, source.Type, source.Data = "document", "text", string(data)
+		}
+	}
+	return &AnthropicContentBlock{Type: blockType, Source: source}, nil
 }
 
 // dataURIToAnthropicMediaBlock chooses the block by MIME rather than by the

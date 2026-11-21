@@ -85,7 +85,7 @@ func (s *GatewayService) ForwardAsResponses(
 		return nil, err
 	}
 	responsesReq.Model = mappedModel
-	anthropicReq, err := apicompat.ResponsesToAnthropicRequest(&responsesReq)
+	anthropicReq, err := apicompat.ResponsesToAnthropicRequestWithOptions(&responsesReq, apicompat.ResponsesToAnthropicOptions{StrictMedia: true})
 	if err != nil {
 		var mediaErr *apicompat.AnthropicMediaError
 		if errors.As(err, &mediaErr) || isClaude55SignedThinkingModel(mappedModel) {
