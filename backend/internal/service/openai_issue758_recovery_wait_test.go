@@ -71,6 +71,33 @@ func TestIssue758CooldownUsesLastResetAndPreservesRoute(t *testing.T) {
 	}
 }
 
+func TestIssue758OwnerModelCooldownReportsRetryDeadline(t *testing.T) {
+	service, scheduler, ctx, request, account := issue758WaitFixture(t, nil)
+	recovery := openAIAgentRecoveryFromContext(ctx)
+	now := time.Now()
+	service.recordOpenAIAccountModelTransientFailure(account, "other-model", now)
+	service.recordOpenAIAccountModelTransientFailure(account, "other-model", now)
+	service.recordOpenAIAccountModelTransientFailure(account, request.RequestedModel, now)
+	require.NoError(t, scheduler.checkOpenAIAgentRecoveryCooldown(ctx, request, recovery))
+	block := service.recordOpenAIAccountModelTransientFailure(account, request.RequestedModel, now)
+	require.False(t, block.BlockUntil.IsZero())
+
+	var refused *OpenAIAgentRecoveryError
+	require.ErrorAs(t, scheduler.checkOpenAIAgentRecoveryCooldown(ctx, request, recovery), &refused)
+	require.Equal(t, http.StatusServiceUnavailable, refused.HTTPStatus())
+	require.Equal(t, block.BlockUntil, refused.RetryAt)
+
+	// A manual pause must still require operator intervention.
+	account.Schedulable = false
+	require.ErrorAs(t, scheduler.checkOpenAIAgentRecoveryCooldown(ctx, request, recovery), &refused)
+	require.Equal(t, http.StatusConflict, refused.HTTPStatus())
+	require.True(t, refused.RetryAt.IsZero())
+
+	account.Schedulable = true
+	service.clearOpenAIAccountModelTransientState(account.ID, request.RequestedModel)
+	require.NoError(t, scheduler.checkOpenAIAgentRecoveryCooldown(ctx, request, recovery))
+}
+
 func TestIssue758CooldownCannotDisguiseAdmissionRestrictions(t *testing.T) {
 	for _, change := range []string{"group_removed", "model_removed", "group_model_removed", "transport", "manual_pause", "auth_cooldown", "hard_quota", "excluded", "guardian"} {
 		t.Run(change, func(t *testing.T) {
