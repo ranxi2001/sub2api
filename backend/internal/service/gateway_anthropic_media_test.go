@@ -6,7 +6,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -53,7 +55,24 @@ func testCompatibilityMediaPolicy(t *testing.T, antigravity bool) {
 						}
 						body, err := json.Marshal(request)
 						require.NoError(t, err)
-						upstream := &queuedHTTPUpstreamStub{responses: []*http.Response{antigravityCompatSuccessResponse()}}
+						upstream := &queuedHTTPUpstreamStub{
+							responses: []*http.Response{compatibilityMediaSuccessResponse(stream, antigravity)},
+							onCall: func(req *http.Request, _ *queuedHTTPUpstreamStub) {
+								if antigravity {
+									require.Equal(t, "Bearer fresh-oauth-token", req.Header.Get("Authorization"))
+									require.Empty(t, req.Header.Get("x-goog-api-key"))
+									require.Equal(t, "/v1internal:streamGenerateContent", req.URL.Path)
+								} else {
+									require.Equal(t, "synthetic-api-key", req.Header.Get("x-goog-api-key"))
+									require.Empty(t, req.Header.Get("Authorization"))
+									action := ":generateContent"
+									if stream {
+										action = ":streamGenerateContent"
+									}
+									require.True(t, strings.HasSuffix(req.URL.Path, action))
+								}
+							},
+						}
 						c, recorder := newAntigravityCompatContext(http.MethodPost, "/v1/"+endpoint, body)
 						var result *ForwardResult
 						if antigravity {
@@ -66,8 +85,8 @@ func testCompatibilityMediaPolicy(t *testing.T, antigravity bool) {
 							}
 						} else {
 							svc := &GeminiMessagesCompatService{tokenProvider: &GeminiTokenProvider{}, httpUpstream: upstream, cfg: &config.Config{}}
-							account := &Account{ID: 9812, Platform: PlatformGemini, Type: AccountTypeOAuth, Concurrency: 1,
-								Credentials: map[string]any{"access_token": "synthetic-token", "project_id": "synthetic-project"}}
+							account := &Account{ID: 9812, Platform: PlatformGemini, Type: AccountTypeAPIKey, Concurrency: 1,
+								Credentials: map[string]any{"api_key": "synthetic-api-key"}}
 							if endpoint == "chat/completions" {
 								result, err = svc.ForwardAsChatCompletions(context.Background(), c, account, body)
 							} else {
@@ -79,7 +98,15 @@ func testCompatibilityMediaPolicy(t *testing.T, antigravity bool) {
 						require.Equal(t, http.StatusOK, recorder.Code)
 						require.Equal(t, 1, upstream.callCount)
 						require.Len(t, upstream.requestBodies, 1)
-						wire := gjson.GetBytes(upstream.requestBodies[0], "request.contents.0.parts.0")
+						require.Contains(t, recorder.Body.String(), "ok")
+						root := "contents"
+						if antigravity {
+							root = "request.contents"
+							require.False(t, gjson.GetBytes(upstream.requestBodies[0], "contents").Exists())
+						} else {
+							require.False(t, gjson.GetBytes(upstream.requestBodies[0], "request").Exists())
+						}
+						wire := gjson.GetBytes(upstream.requestBodies[0], root+".0.parts.0")
 						if mime == "text/plain" {
 							require.Equal(t, "synthetic", wire.Get("text").String())
 						} else if !antigravity && field == "file" && mime != "application/pdf" {
@@ -96,6 +123,71 @@ func testCompatibilityMediaPolicy(t *testing.T, antigravity bool) {
 					})
 				}
 			}
+		}
+	}
+}
+
+// Code Assist and Antigravity wrap Gemini results and always stream upstream;
+// AI Studio API-key routes use plain JSON or plain SSE to match clientStream.
+func compatibilityMediaSuccessResponse(clientStream, codeAssist bool) *http.Response {
+	body := `{"responseId":"synthetic-media","candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":3}}`
+	if codeAssist {
+		body = `{"response":` + body + `}`
+	}
+	contentType := "application/json"
+	if clientStream || codeAssist {
+		contentType = "text/event-stream"
+		body = "data: " + body + "\n\n"
+	}
+	return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{contentType}}, Body: io.NopCloser(strings.NewReader(body))}
+}
+
+func TestGeminiCompatibilityMediaPolicyOAuthControls(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		for _, endpoint := range []string{"chat/completions", "responses"} {
+			t.Run(fmt.Sprintf("%s/stream=%t", endpoint, stream), func(t *testing.T) {
+				request := map[string]any{"model": "gemini-2.5-flash", "stream": stream}
+				const uri = "data:video/mp4;base64,c3ludGhldGlj"
+				if endpoint == "chat/completions" {
+					request["messages"] = []any{map[string]any{"role": "user", "content": []any{map[string]any{"type": "image_url", "image_url": map[string]string{"url": uri}}}}}
+				} else {
+					request["input"] = []any{map[string]any{"role": "user", "content": []any{map[string]string{"type": "input_image", "image_url": uri}}}}
+				}
+				body, err := json.Marshal(request)
+				require.NoError(t, err)
+				upstream := &queuedHTTPUpstreamStub{
+					responses: []*http.Response{compatibilityMediaSuccessResponse(stream, true)},
+					onCall: func(req *http.Request, _ *queuedHTTPUpstreamStub) {
+						require.Equal(t, "Bearer synthetic-token", req.Header.Get("Authorization"))
+						require.Empty(t, req.Header.Get("x-goog-api-key"))
+						require.Equal(t, "/v1internal:streamGenerateContent", req.URL.Path)
+					},
+				}
+				svc := &GeminiMessagesCompatService{tokenProvider: &GeminiTokenProvider{}, httpUpstream: upstream, cfg: &config.Config{}}
+				account := &Account{ID: 9813, Platform: PlatformGemini, Type: AccountTypeOAuth, Concurrency: 1,
+					Credentials: map[string]any{"access_token": "synthetic-token", "project_id": "synthetic-project"}}
+				c, recorder := newAntigravityCompatContext(http.MethodPost, "/v1/"+endpoint, body)
+				if endpoint == "responses" {
+					result, err := svc.ForwardAsResponses(context.Background(), c, account, body)
+					require.Error(t, err)
+					require.Nil(t, result)
+					require.Equal(t, http.StatusBadRequest, recorder.Code)
+					require.Contains(t, recorder.Body.String(), "Gemini OAuth accounts do not support Responses compatibility")
+					require.Zero(t, upstream.callCount)
+					require.Empty(t, upstream.requestBodies)
+					return
+				}
+				result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body)
+				require.NoError(t, err)
+				require.NotNil(t, result)
+				require.Equal(t, http.StatusOK, recorder.Code)
+				require.Contains(t, recorder.Body.String(), "ok")
+				require.Equal(t, 1, upstream.callCount)
+				require.Len(t, upstream.requestBodies, 1)
+				wire := gjson.GetBytes(upstream.requestBodies[0], "request.contents.0.parts.0.inlineData")
+				require.Equal(t, "video/mp4", wire.Get("mimeType").String())
+				require.Equal(t, "c3ludGhldGlj", wire.Get("data").String())
+			})
 		}
 	}
 }
