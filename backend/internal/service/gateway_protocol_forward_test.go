@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -31,6 +32,30 @@ func (u *gatewayProtocolTransport) Do(req *http.Request, proxy string, id int64,
 
 func (u *gatewayProtocolTransport) DoWithTLS(req *http.Request, proxy string, id int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
 	return u.Do(req, proxy, id, concurrency)
+}
+
+func TestGatewayProtocolAnthropicBaseVersionsReachNativeBuilder(t *testing.T) {
+	for _, target := range []string{PlatformAnthropic, PlatformAntigravity} {
+		for _, prefix := range []string{"", "/tenant"} {
+			for _, suffix := range []string{"", "/v1", "/v1/", "/v1beta"} {
+				t.Run(target+prefix+suffix, func(t *testing.T) {
+					repo, ctx := gatewayProtocolFixture(target)
+					base := "https://gateway.example" + prefix + suffix
+					repo.account.Credentials["base_url"] = base
+					view, err := prepareGatewayProtocolAccount(ctx, repo.account, repo, domain.PlatformGatewayAnthropic, "public-model")
+					require.NoError(t, err)
+					c, _ := gin.CreateTestContext(httptest.NewRecorder())
+					c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+					svc := &GatewayService{cfg: rawChatCompletionsTestConfig()}
+					req, _, err := svc.buildUpstreamRequestAnthropicAPIKeyPassthrough(ctx, c, view, []byte(`{"model":"public-model","messages":[]}`), "synthetic-only")
+					require.NoError(t, err)
+					require.Equal(t, prefix+"/v1/messages", req.URL.Path)
+					require.Equal(t, "gateway.example", req.URL.Host)
+					require.Equal(t, base, repo.account.GetCredential("base_url"), "stored site and tenant prefix stay intact")
+				})
+			}
+		}
+	}
 }
 
 func TestGatewayProtocolForwardUsesNativeBuildersAndSharedIdentity(t *testing.T) {

@@ -191,7 +191,7 @@ func gatewayProtocolAccountFromSnapshot(ctx context.Context, selected, current *
 	// Only normalize a terminal protocol version. Tenant prefixes stay intact;
 	// native builders append the protocol's own /v1 or /v1beta exactly once.
 	base := strings.TrimSuffix(strings.TrimRight(view.GetCredential("base_url"), "/"), "/v1beta")
-	if family == domain.PlatformGatewayGemini {
+	if family == domain.PlatformGatewayGemini || family == domain.PlatformGatewayAnthropic {
 		base = strings.TrimSuffix(base, "/v1")
 	}
 	view.Credentials["base_url"] = base
