@@ -724,8 +724,28 @@ func OpenAIAgentToolResultContinuation(ctx context.Context) bool {
 	return r != nil && (r.owner != nil || r.preservesHistory()) && r.toolResult
 }
 
-// Opt-out permits one intact attempt, not automatic cross-account retries or
-// input-rewriting retries. Strict mode retains its existing tool-result rule.
+// A quota rejection precedes execution. An opted-in full-history request can
+// retain its input and use the ordinary account failover budget in that case.
+// Account-owned response pointers and ambiguous failures retain their guards.
+func openAIAgentQuotaFailoverAllowed(ctx context.Context, status int, body []byte) bool {
+	request := openAIAgentRecoveryFromContext(ctx)
+	if request == nil || !request.disableOwnerBinding || request.previousResponseID != "" ||
+		openAI409HasProviderState(request.replaySource) || request.nativeCompaction ||
+		request.omittedHistory || request.omitted400History || status != http.StatusTooManyRequests {
+		return false
+	}
+	if !openAIEncryptedJSONUnambiguous(body) {
+		return false
+	}
+	for _, path := range []string{"error.type", "error.code", "response.error.type", "response.error.code"} {
+		switch gjson.GetBytes(body, path).String() {
+		case "usage_limit_reached", "insufficient_quota", "quota_exceeded":
+			return true
+		}
+	}
+	return false
+}
+
 func OpenAIAgentRecoveryNoReplay(ctx context.Context) bool {
 	return OpenAIAgentToolResultContinuation(ctx) || openAIAgentRecoveryPreservesHistory(ctx)
 }

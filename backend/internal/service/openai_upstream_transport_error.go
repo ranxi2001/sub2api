@@ -172,14 +172,16 @@ func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Co
 		return err
 	}
 
-	if classifyUpstreamTransportError(err).Persistent {
-		s.tempUnscheduleOpenAITransportError(ctx, account, safeErr)
-	}
-
-	return &UpstreamFailoverError{
+	failoverErr := &UpstreamFailoverError{
 		StatusCode:   http.StatusBadGateway,
 		ResponseBody: openAITransportFailoverBody,
 	}
+	if classifyUpstreamTransportError(err).Persistent {
+		s.tempUnscheduleOpenAITransportError(ctx, account, safeErr)
+	} else if usesOpenAIOAuthRetryAffinity(account) {
+		failoverErr.preserveOpenAIOAuthBinding()
+	}
+	return failoverErr
 }
 
 // tempUnscheduleOpenAITransportError marks an account temporarily unschedulable

@@ -199,19 +199,30 @@ func TestOpenAIGatewayHandlerResponses_FailoverAbortsWhenClientDisconnected(t *t
 	require.Equal(t, 520, events[0].UpstreamStatusCode)
 }
 
-// TestOpenAIGatewayHandlerResponses_FailoverContinuesForConnectedClient 回归
-// 守卫：客户端在线时 failover 行为不变——切换到账号 2，两个账号都 520 后按
-// 耗尽返回 502。
+// Connected OAuth requests retry transient failures on the original account.
+// API-key accounts retain their existing bounded cross-account failover.
 func TestOpenAIGatewayHandlerResponses_FailoverContinuesForConnectedClient(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-
-	upstream := &openAIResponsesFailoverCancelUpstream{}
-	handler := newOpenAIResponsesFailoverTestHandler(t, upstream)
-	c, rec := newOpenAIResponsesFailoverTestContext(t, nil)
-
-	handler.Responses(c)
-
-	require.Equal(t, []int64{1, 2}, upstream.calls(), "在线客户端应正常切换账号")
-	require.Equal(t, http.StatusBadGateway, rec.Code)
-	require.Equal(t, "upstream_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
+	for _, tc := range []struct {
+		kind     string
+		accounts []int64
+	}{
+		{service.AccountTypeOAuth, []int64{1, 1, 1, 1}},
+		{service.AccountTypeAPIKey, []int64{1, 2}},
+	} {
+		t.Run(tc.kind, func(t *testing.T) {
+			accounts := issue715Accounts()
+			for i := range accounts {
+				accounts[i].Type = tc.kind
+				accounts[i].Credentials = map[string]any{"api_key": "fixture-key", "access_token": "fixture-access"}
+			}
+			upstream := &openAIResponsesFailoverCancelUpstream{}
+			handler := newOpenAIResponsesFailoverTestHandler(t, upstream, accounts...)
+			c, rec := newOpenAIResponsesFailoverTestContext(t, nil)
+			handler.Responses(c)
+			require.Equal(t, tc.accounts, upstream.calls())
+			require.Equal(t, http.StatusBadGateway, rec.Code)
+			require.Equal(t, "upstream_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
+		})
+	}
 }

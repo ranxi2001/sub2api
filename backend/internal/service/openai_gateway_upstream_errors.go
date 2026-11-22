@@ -180,6 +180,45 @@ func isOpenAIRequestScopedCapacityShed(upstreamMsg string, upstreamBody []byte) 
 	return isOpenAICapacityShedMessage(upstreamMsg) || isOpenAICapacityShedMessage(string(upstreamBody))
 }
 
+// Specialized upstreams have their own failover and cooldown contracts.
+func usesOpenAIOAuthRetryAffinity(account *Account) bool {
+	return account != nil && account.IsOpenAIOAuth() && !account.IsExcelOAuth() &&
+		!account.IsExcelBPSEnabled() && !account.IsSIWCEnabled() && !account.IsCopilotSDKEnabled() &&
+		!account.HasManagedOpenAIConnections() && account.AuthConnectionID == "" && !accountHasPrismBrowser(account)
+}
+
+func isOpenAIOAuthTransientServerStatus(status int) bool {
+	switch status {
+	case 500, 502, 503, 504, 520, 521, 522, 523, 524:
+		return true
+	}
+	return false
+}
+
+// Some relays wrap their own 503 concurrency rejection in an HTTP 401.
+// Only the provider's error field can establish that the credential is healthy.
+func isOpenAIWrappedConcurrency401(account *Account, status int, body []byte) bool {
+	if !usesOpenAIOAuthRetryAffinity(account) || status != http.StatusUnauthorized {
+		return false
+	}
+	providerError := gjson.GetBytes(body, "error")
+	if providerError.Get("code").String() != "" || providerError.Get("message").Type != gjson.String {
+		return false
+	}
+	message := strings.ToLower(strings.TrimSpace(providerError.Get("message").String()))
+	const prefix = "authentication failed (status=503):"
+	inner, wrapped := strings.CutPrefix(message, prefix)
+	if !wrapped {
+		return false
+	}
+	inner = strings.TrimSpace(inner)
+	if gjson.Valid(inner) {
+		reason := gjson.Get(inner, "error")
+		return reason.Type == gjson.String && strings.EqualFold(strings.TrimSpace(reason.String()), "too many concurrent requests")
+	}
+	return inner == "too many concurrent requests"
+}
+
 // OpenAIUpstreamCapacityCode preserves transient capacity across relay hops.
 // model_capacity_exhausted already denotes persisted quota in selection errors.
 const OpenAIUpstreamCapacityCode = "upstream_capacity_exhausted"
@@ -444,6 +483,38 @@ func (s *OpenAIGatewayService) newOpenAIAccountFailoverError(
 	return s.newOpenAIAccountFailoverErrorWithClassificationHeaders(account, statusCode, responseHeaders, responseHeaders, responseBody, upstreamMsg, shouldDisable, retryableOnSameAccount)
 }
 
+// Only raw text-response HTTP failures participate in the OAuth affinity
+// policy. Synthetic capability errors retain their caller's retry decision.
+func (s *OpenAIGatewayService) newOpenAIHTTPAccountFailoverError(
+	account *Account,
+	statusCode int,
+	responseHeaders http.Header,
+	responseBody []byte,
+	upstreamMsg string,
+	shouldDisable bool,
+	retryableOnSameAccount bool,
+) *UpstreamFailoverError {
+	failoverErr := s.newOpenAIAccountFailoverError(account, statusCode, responseHeaders, responseBody, upstreamMsg, shouldDisable, retryableOnSameAccount)
+	if shouldDisable || !usesOpenAIOAuthRetryAffinity(account) || failoverErr.Scope != "" {
+		return failoverErr
+	}
+	if isOpenAIWrappedConcurrency401(account, statusCode, responseBody) {
+		failoverErr.Reason = OpenAIUpstreamCapacityCode
+		failoverErr.ClientStatusCode = http.StatusServiceUnavailable
+		failoverErr.ClientMessage = openAICapacityShedClientMessage(upstreamMsg, responseBody)
+	} else if !isOpenAIOAuthTransientServerStatus(statusCode) && (statusCode != 529 || !failoverErr.RequestScopedTransient) {
+		return failoverErr
+	}
+	failoverErr.preserveOpenAIOAuthBinding()
+	return failoverErr
+}
+
+func (e *UpstreamFailoverError) preserveOpenAIOAuthBinding() {
+	e.Scope = GatewayFailureScopeRequest
+	e.RequestScopedTransient = true
+	e.RetryableOnSameAccount = true
+}
+
 func (s *OpenAIGatewayService) newOpenAIAccountFailoverErrorWithClassificationHeaders(
 	account *Account,
 	statusCode int,
@@ -544,7 +615,8 @@ func (e *UpstreamFailoverError) IsOpenAIRequestBodyTooLarge() bool {
 // IsOpenAICapacityShed reports whether typed client fields were derived from a
 // recognized provider overload rather than supplied by an unrelated failure.
 func (e *UpstreamFailoverError) IsOpenAICapacityShed() bool {
-	return e != nil && e.RequestScopedTransient && isOpenAIRequestScopedCapacityResponse(e.StatusCode, e.ResponseHeaders, e.ResponseBody)
+	return e != nil && e.RequestScopedTransient && (e.Reason == OpenAIUpstreamCapacityCode ||
+		isOpenAIRequestScopedCapacityResponse(e.StatusCode, e.ResponseHeaders, e.ResponseBody))
 }
 
 func marshalOpenAIUpstreamJSON(v any) ([]byte, error) {

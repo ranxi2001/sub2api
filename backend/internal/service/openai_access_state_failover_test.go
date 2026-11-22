@@ -155,6 +155,13 @@ func TestOpenAIHTTPAccessStateTrustsStructuredCode(t *testing.T) {
 }
 
 func TestOpenAIHTTPAuthMessagesUseExistingStatusPolicies(t *testing.T) {
+	t.Run("revoked credential with echoed concurrency error", func(t *testing.T) {
+		account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+		body := []byte(`{"error":{"code":"token_revoked","message":"Token has been revoked"},"input":{"error":{"message":"authentication failed (status=503): Too many concurrent requests"}}}`)
+		err := (&OpenAIGatewayService{}).newOpenAIHTTPAccountFailoverError(account, http.StatusUnauthorized, nil, body, "", false, false)
+		require.False(t, err.RequestScopedTransient)
+		require.False(t, err.RetryableOnSameAccount)
+	})
 	t.Run("oauth 401 remains recoverable", func(t *testing.T) {
 		repo := &openAIAuthPolicyAccountRepo{}
 		rateLimits := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)

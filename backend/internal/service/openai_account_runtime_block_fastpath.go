@@ -105,7 +105,7 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 	}
 	// Apply the same exemption before access-state and custom cooldown fast
 	// paths, which can otherwise block the credential before the shared handler.
-	if isOpenAIRequestScoped403(account, statusCode, responseBody) {
+	if isOpenAIRequestScoped403(account, statusCode, responseBody) || isOpenAIWrappedConcurrency401(account, statusCode, responseBody) {
 		return false
 	}
 	// Capacity shedding describes this request, not account health. Keep the

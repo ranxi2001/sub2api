@@ -106,6 +106,8 @@ func TestHandleOpenAIImagesOAuthResponseError_TextFallbackDoesNotCoolAccount(t *
 	// 换号行为必须原样保留：本 PR 只撤销账号状态写入，不动 failover。
 	var failover *UpstreamFailoverError
 	require.True(t, errors.As(err, &failover), "仍应触发换号，got %T", err)
+	require.False(t, failover.RetryableOnSameAccount, "synthetic missing image capability must select another account")
+	require.False(t, failover.RequestScopedTransient)
 }
 
 // 对照不变式：上游 error 帧点名该状态时仍然冷却，否则等于把功能整个废掉。
