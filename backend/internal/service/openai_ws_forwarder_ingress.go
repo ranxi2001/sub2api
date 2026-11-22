@@ -1380,6 +1380,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		bridgeReplayInputExists := false
 		var bridgeAccountFailoverInput []json.RawMessage
 		bridgeAccountFailoverInputExists := false
+		preserveOAuthOutput := account.IsOpenAIOAuth() && openAIWSPlaintextBridgeAccount(account) && !smartStateful
+		bridgeResponseID := ""
+		bridgeScope, _ := resolveOpenAIWSExecutionScope(c, firstPayload.clientPayloadRaw, apiKeyID)
 		for turn := 1; ; turn++ {
 			if turn > 1 && hooks != nil {
 				if err := hooks.beforeRequest(turn, currentBridgePayload.payloadRaw, currentBridgePayload.clientPayloadRaw, currentBridgePayload.originalModel); err != nil {
@@ -1430,6 +1433,23 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 			if smartStrict && currentBridgePayload.previousResponseID != "" && currentBridgePayload.previousResponseID != smartSession.LastResponse {
 				return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "continuation does not belong to this HTTP session", nil)
+			}
+			if preserveOAuthOutput {
+				scope, _ := resolveOpenAIWSExecutionScope(c, currentBridgePayload.clientPayloadRaw, apiKeyID)
+				if scope == "" {
+					// Incremental frames may omit a body-only identity. The
+					// bridge is connection-local; only a declared change conflicts.
+					scope = bridgeScope
+				}
+				if currentBridgePayload.previousResponseID != "" && (bridgeResponseID == "" || currentBridgePayload.previousResponseID != bridgeResponseID || scope != bridgeScope) {
+					return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "continuation does not belong to this HTTP session", nil)
+				}
+				if scope != bridgeScope {
+					bridgeReplayInput, bridgeAccountFailoverInput = nil, nil
+					bridgeReplayInputExists, bridgeAccountFailoverInputExists = false, false
+					bridgeResponseID, turnState = "", ""
+					bridgeScope = scope
+				}
 			}
 			bridgePayloadRaw := currentBridgePayload.payloadRaw
 			bridgePayloadBytes := currentBridgePayload.payloadBytes
@@ -1603,6 +1623,15 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					result.wsAccountFailoverReplayInput,
 				)
 				bridgeAccountFailoverInputExists = true
+			}
+			if preserveOAuthOutput {
+				bridgeResponseID = ""
+				if result.wsReplayInputExists {
+					bridgeResponseID = strings.TrimSpace(result.RequestID)
+				} else {
+					bridgeReplayInput, bridgeAccountFailoverInput = nil, nil
+					bridgeReplayInputExists, bridgeAccountFailoverInputExists = false, false
+				}
 			}
 			if bridgeTurnState := strings.TrimSpace(result.ResponseHeaders.Get(openAIWSTurnStateHeader)); bridgeTurnState != "" {
 				// Follow-up turns on this bridge retain their own upstream state;

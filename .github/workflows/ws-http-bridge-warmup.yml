@@ -10,6 +10,8 @@ on:
       - 'backend/internal/handler/openai_gateway_handler.go'
       - 'backend/internal/handler/openai_http_bridge_warmup_test.go'
       - 'backend/internal/handler/openai_ws_tool_result_bridge_test.go'
+      - 'backend/internal/handler/openai_ws_http_bridge_history_test.go'
+      - '.github/scripts/assert-issue999-history.py'
       - '.github/workflows/ws-http-bridge-warmup.yml'
 permissions:
   contents: read
@@ -17,6 +19,62 @@ concurrency:
   group: ws-http-warmup-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 jobs:
+  assistant-history:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Preserve regressions on pinned old production in disposable checkout
+        run: |
+          set -euo pipefail
+          baseline=8dedf05db37c870265e04327defb9e96e7787603
+          old="$RUNNER_TEMP/issue999-old"
+          git worktree add --detach "$old" "$baseline"
+          cp backend/internal/handler/openai_ws_http_bridge_history_test.go "$old/backend/internal/handler/"
+          {
+            git rev-parse HEAD
+            git -C "$old" rev-parse HEAD
+            git rev-parse HEAD:backend/internal/service/openai_ws_http_bridge.go
+            git -C "$old" rev-parse HEAD:backend/internal/service/openai_ws_http_bridge.go
+            sha256sum backend/internal/handler/openai_ws_http_bridge_history_test.go "$old/backend/internal/handler/openai_ws_http_bridge_history_test.go"
+          } > "$RUNNER_TEMP/issue999-identities.txt"
+          cmp backend/internal/handler/openai_ws_http_bridge_history_test.go "$old/backend/internal/handler/openai_ws_http_bridge_history_test.go"
+          git -C "$old" diff --exit-code -- backend/internal/service
+          set +e
+          (cd "$old/backend" && go test -race -json -tags=unit,bridgewarmup ./internal/handler -run '^TestIssue999HTTPBridgeAssistantHistory$' -count=1 -timeout=8m) > "$RUNNER_TEMP/issue999-red.jsonl" 2>&1
+          result=$?
+          set -e
+          echo "$result" > "$RUNNER_TEMP/issue999-red.exit"
+          cat "$RUNNER_TEMP/issue999-red.jsonl"
+          python3 .github/scripts/assert-issue999-history.py RED "$result" "$RUNNER_TEMP/issue999-red.jsonl"
+      - name: Candidate complete ordered history and delivery controls
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          set +e
+          (cd backend && go test -race -json -tags=unit,bridgewarmup ./internal/handler ./internal/service -run '^TestIssue999HTTPBridge' -count=1 -timeout=8m) > "$RUNNER_TEMP/issue999-green.jsonl" 2>&1
+          result=$?
+          set -e
+          echo "$result" > "$RUNNER_TEMP/issue999-green.exit"
+          cat "$RUNNER_TEMP/issue999-green.jsonl"
+          python3 .github/scripts/assert-issue999-history.py GREEN "$result" "$RUNNER_TEMP/issue999-green.jsonl"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: issue999-assistant-history-${{ github.event.pull_request.head.sha }}
+          path: |
+            ${{ runner.temp }}/issue999-*.jsonl
+            ${{ runner.temp }}/issue999-*.exit
+            ${{ runner.temp }}/issue999-identities.txt
+          if-no-files-found: error
   behavior:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
