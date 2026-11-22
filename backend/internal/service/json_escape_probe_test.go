@@ -3,6 +3,7 @@
 package service
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -33,6 +34,48 @@ func TestJSONMayEscapePlainASCII(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			require.Equal(t, tc.want, JSONMayEscapePlainASCII([]byte(tc.body)))
+		})
+	}
+}
+
+func TestJSONMayEscapePlainASCIIBackslashRuns(t *testing.T) {
+	for count := 0; count <= 9; count++ {
+		run := strings.Repeat("\\", count)
+		odd := count%2 != 0
+		for _, prefix := range []string{"", "\\u003c", "\\n" + strings.Repeat("x", 15), "\\n" + strings.Repeat("x", 16), strings.Repeat("code\\n", 100)} {
+			require.Equal(t, odd, JSONMayEscapePlainASCII([]byte(prefix+run)), "trailing run %d", count)
+			require.Equal(t, odd, JSONMayEscapePlainASCII([]byte(prefix+run+"u0061")), "keyword run %d", count)
+			require.Equal(t, odd, JSONMayEscapePlainASCII([]byte(prefix+run+"u0x")), "malformed run %d", count)
+		}
+	}
+}
+
+func BenchmarkJSONMayEscapePlainASCII(b *testing.B) {
+	code := strings.Repeat("func f() { return \\\"sample\\\" }\\n", 1<<15)
+	for _, tc := range []struct {
+		name string
+		body string
+		want bool
+	}{
+		{"short", "{\"input\":\"ok\"}", false},
+		{"short-newline", "{\"input\":\"a\\nb\"}", false},
+		{"plain", strings.Repeat("function sample ", 1<<16), false},
+		{"quoted-code", code, false},
+		{"source-file", strings.Repeat("package app\\nfunc sample() string { return \\\"Example 测试\\\" }\\n", 1<<14), false},
+		{"sparse-newlines", strings.Repeat(strings.Repeat("x", 126)+"\\n", 1<<13), false},
+		{"late-keyword-escape", code + "\\u0061", true},
+		{"html-escapes", strings.Repeat("\\u003c\\u003e", 1<<16), false},
+		{"escaped-backslashes", strings.Repeat("\\\\", 1<<19), false},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			body := []byte(tc.body)
+			b.ReportAllocs()
+			b.SetBytes(int64(len(body)))
+			for b.Loop() {
+				if JSONMayEscapePlainASCII(body) != tc.want {
+					b.Fatal("unexpected escape classification")
+				}
+			}
 		})
 	}
 }

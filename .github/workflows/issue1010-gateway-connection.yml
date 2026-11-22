@@ -1,0 +1,103 @@
+name: Issue1010 gateway connection
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/internal/service/account*.go'
+      - 'backend/internal/service/gateway_protocol_admission.go'
+      - 'backend/internal/handler/admin/account_handler.go'
+      - 'backend/internal/integration/accountconnectiontiming/**'
+      - 'backend/internal/repository/http_upstream*.go'
+      - 'backend/go.mod'
+      - 'backend/go.sum'
+      - '.github/workflows/issue1010-gateway-connection.yml'
+      - '.github/scripts/issue1010_evidence.py'
+      - '.github/scripts/test_issue1010_evidence.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue1010-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# Temporary baseline evidence; archive this entry after acceptance.
+jobs:
+  synthetic-upstream:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [red, green]
+    env:
+      EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+      BASELINE: 991cd30e2910d5eeb6ab55f6b7fc93e9a494e1a6
+      MODE: ${{ matrix.mode }}
+      GOMAXPROCS: '2'
+      GOFLAGS: '-p=2'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Prepare exact source and unchanged HTTP oracle
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          mkdir -p evidence "$RUNNER_TEMP/issue1010-baseline"
+          git rev-parse HEAD > evidence/head.txt
+          printf '%s\n' "$BASELINE" > evidence/baseline.txt
+          if [ "$MODE" = red ]; then
+            git archive "$BASELINE" | tar -x -C "$RUNNER_TEMP/issue1010-baseline"
+            cp backend/internal/integration/accountconnectiontiming/gateway_account_connection_test.go \
+              "$RUNNER_TEMP/issue1010-baseline/backend/internal/integration/accountconnectiontiming/"
+            cmp backend/internal/integration/accountconnectiontiming/gateway_account_connection_test.go \
+              "$RUNNER_TEMP/issue1010-baseline/backend/internal/integration/accountconnectiontiming/gateway_account_connection_test.go"
+          fi
+      - name: Per-leaf evidence validator regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s .github/scripts -p 'test_issue1010_evidence.py' -v
+      - name: Same native HTTP oracle on baseline and candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_dir="$GITHUB_WORKSPACE/backend"
+          if [ "$MODE" = red ]; then source_dir="$RUNNER_TEMP/issue1010-baseline/backend"; fi
+          set +e
+          (cd "$source_dir" && go test -race -tags=unit ./internal/integration/accountconnectiontiming \
+            -run '^TestGatewayAccountConnectionNativeHTTP$' -count=1 -json -timeout=10m) > evidence/oracle.jsonl 2>&1
+          result=$?
+          set -e
+          cat evidence/oracle.jsonl
+          if [ "$MODE" = red ]; then test "$result" -ne 0; else test "$result" -eq 0; fi
+          python3 .github/scripts/issue1010_evidence.py "$MODE" evidence/oracle.jsonl
+      - name: Candidate error cancellation admission and legacy lifecycle regressions
+        if: matrix.mode == 'green'
+        working-directory: backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -race -tags=unit ./internal/integration/accountconnectiontiming \
+            -run '^Test(GatewayAccountConnection(UpstreamFailureAndEOF|AdmissionNoEgress|ExplicitCompositeRoute|CancellationReleasesReader|NonSchedulableDiagnostic|SuccessSkipsRecoveryAfterKeepaliveCleanup|AdminMultiGroupSelection)|AccountConnectionTiming)' -count=1 -v -timeout=10m \
+            2>&1 | tee ../evidence/lifecycle.log
+          if grep -Eq -- 'no tests to run|--- SKIP:' ../evidence/lifecycle.log; then exit 1; fi
+          for name in TestGatewayAccountConnectionUpstreamFailureAndEOF TestGatewayAccountConnectionAdmissionNoEgress TestGatewayAccountConnectionCancellationReleasesReader TestGatewayAccountConnectionNonSchedulableDiagnostic TestGatewayAccountConnectionSuccessSkipsRecoveryAfterKeepaliveCleanup TestGatewayAccountConnectionAdminMultiGroupSelection; do
+            grep -F -- "--- PASS: $name" ../evidence/lifecycle.log
+          done
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: issue1010-${{ matrix.mode }}-${{ env.EXPECTED_HEAD }}-${{ github.run_attempt }}
+          path: evidence
+          if-no-files-found: error

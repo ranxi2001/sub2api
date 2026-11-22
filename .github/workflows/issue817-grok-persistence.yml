@@ -97,8 +97,8 @@ jobs:
             git show "$original:$source" > "$source"
             test "$(git hash-object "$source")" = "$expected_blob"
             if [ "$BEHAVIOR" = red ]; then
-              # The pinned observer predates Ciallo. Retain its behavior and add
-              # only the candidate's zero-value field required by ciallo.go.
+              # Keep the historical observer business code. Add only the
+              # zero-value struct fields required by current helper callers.
               python3 - <<'PY'
           from pathlib import Path
           import subprocess
@@ -110,8 +110,21 @@ jobs:
           anchor = b'\tmodelTraceAccounts        sync.Map\n'
           if candidate.count(field) != 1 or field in historical or historical.count(anchor) != 1:
               raise SystemExit('unexpected Ciallo compatibility field or historical struct')
-          path.write_bytes(historical.replace(anchor, anchor + field, 1))
+          old_options = b'type AccountTestOptions struct {\n\tImageDataURL string\n\tAudioDataURL string\n}\n'
+          current_options = b'type AccountTestOptions struct {\n\tImageDataURL string\n\tAudioDataURL string\n\tGroupID      int64\n\tPlatform     string\n}\n'
+          if historical.count(old_options) != 1 or candidate.count(current_options) != 1:
+              raise SystemExit('unexpected historical or candidate AccountTestOptions shape')
+          compatible = historical.replace(anchor, anchor + field, 1).replace(old_options, current_options, 1)
+          if compatible.replace(field, b'', 1).replace(current_options, old_options, 1) != historical:
+              raise SystemExit('compatibility overlay changed historical observer business code')
+          expected = subprocess.check_output(['git', 'hash-object', '--stdin'], input=compatible).strip()
+          path.write_bytes(compatible)
+          actual = subprocess.check_output(['git', 'hash-object', str(path)]).strip()
+          if actual != expected:
+              raise SystemExit('historical compatibility blob mismatch')
+          Path('evidence/observer-compile-compatibility-blob.txt').write_bytes(expected + b'\n')
           PY
+              git diff --exit-code HEAD -- '*test.go'
             else
               # The pinned repository predates the OpenAI rotation CAS tests.
               fixture=backend/internal/repository/account_repo_temp_unsched_test.go
