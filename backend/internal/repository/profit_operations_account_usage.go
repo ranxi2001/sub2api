@@ -20,15 +20,6 @@ func readAccountUsageProfit(ctx context.Context, tx *sql.Tx, f service.UpstreamO
 	if service.CollectProfitRows(ctx) {
 		size, offset = 10001, 0
 	}
-	sort := f.Sort
-	switch sort {
-	case "estimated_cost":
-		sort = "upstream_cost"
-	case "estimated_profit":
-		sort = "gross_profit"
-	case "margin":
-		sort = "gross_margin"
-	}
 	// sort and direction are allowlisted by NormalizeProfitOperationsFilter.
 	q := accountUsageWindow + `, cfg AS (
  SELECT * FROM jsonb_to_recordset($4::jsonb) AS c(id bigint,name text,key text,channel_id bigint,channel_name text,channel_code text,
@@ -56,8 +47,8 @@ func readAccountUsageProfit(ctx context.Context, tx *sql.Tx, f service.UpstreamO
 ), catalog AS (SELECT key,max(channel_id) AS channel_id,COALESCE(NULLIF(max(channel_name),''),key) AS name,count(*) AS accounts FROM members GROUP BY key)
  SELECT jsonb_build_object('basis','account_usage','summary',(SELECT to_jsonb(t)-'is_total' FROM totals t WHERE is_total=1),
  'total',(SELECT count(*) FROM totals WHERE is_total=0),
- 'rows',COALESCE((SELECT jsonb_agg(to_jsonb(t)-'is_total' ORDER BY ` + sort + ` ` + f.Direction + ` NULLS LAST,key) FROM (
- SELECT * FROM totals WHERE is_total=0 ORDER BY ` + sort + ` ` + f.Direction + ` NULLS LAST,key LIMIT $11 OFFSET $12)t),'[]'),
+ 'rows',COALESCE((SELECT jsonb_agg(to_jsonb(t)-'is_total' ORDER BY ` + f.Sort + ` ` + f.Direction + ` NULLS LAST,key) FROM (
+ SELECT * FROM totals WHERE is_total=0 ORDER BY ` + f.Sort + ` ` + f.Direction + ` NULLS LAST,key LIMIT $11 OFFSET $12)t),'[]'),
  'catalog_total',(SELECT count(*) FROM catalog),'catalog',COALESCE((SELECT jsonb_agg(to_jsonb(c) ORDER BY key) FROM (SELECT * FROM catalog ORDER BY key LIMIT $11 OFFSET $12)c),'[]'),
  'member_total',(SELECT count(*) FROM members),'members',COALESCE((SELECT jsonb_agg(to_jsonb(m) ORDER BY id) FROM (SELECT id,name FROM members ORDER BY id LIMIT $11 OFFSET $12)m),'[]'),
  'accounts','[]'::jsonb,'account_details_limit',0)`

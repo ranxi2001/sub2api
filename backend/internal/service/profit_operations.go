@@ -72,6 +72,16 @@ func NormalizeProfitOperationsFilter(f *UpstreamOperationsFilter) error {
 		}
 		f.ChannelID, f.Upstream = id, ""
 	}
+	if f.AccountUsage {
+		switch f.Sort {
+		case "estimated_cost":
+			f.Sort = "upstream_cost"
+		case "estimated_profit":
+			f.Sort = "gross_profit"
+		case "margin":
+			f.Sort = "gross_margin"
+		}
+	}
 	return ValidateProfitOperationsFilter(*f)
 }
 

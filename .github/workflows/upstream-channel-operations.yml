@@ -51,8 +51,10 @@ jobs:
           s=s[:s.index(begin)]+current[current.index(begin):current.index(end)]+s[s.index(end):]
           if '"strconv"' not in s:
               s=s.replace('import (\n', 'import (\n "strconv"\n', 1)
-          if '`json:"channel_id,omitempty"`' not in s:
-              s=s.replace('Upstream   string    `json:"upstream"`', 'Upstream   string    `json:"upstream"`\n ChannelID int64 `json:"channel_id,omitempty"`')
+          dto='type UpstreamOperationsFilter struct {'
+          def dto_end(source):
+              return source.index('\n}', source.index(dto))+2
+          s=s[:s.index(dto)]+current[current.index(dto):dto_end(current)]+s[dto_end(s):]
           s=re.sub(r'\n// OperationsCostMultiplier distinguishes.*?\n}\s*$', '\n', s, flags=re.S)
           assert '`json:"channel_id,omitempty"`' in s
           assert 'func OperationsCostMultiplier' not in s
