@@ -186,12 +186,16 @@ func TestOpenAIWSRetryDeadlineAtGenerationWrite(t *testing.T) {
 				map[string]string{service.SettingKeyCyberSessionBlockEnabled: "false"}, testutil.NewRedisGatewayCache(t),
 				func(key *service.APIKey) { key.AllowLongContext = true },
 				func(h *OpenAIGatewayHandler) {
+					mu.Lock()
 					gateway = h.gatewayService
+					mu.Unlock()
 					h.concurrencyHelper = NewConcurrencyHelper(service.NewConcurrencyService(slots), SSEPingFormatNone, time.Second)
 					require.NoError(t, service.RouteIssue842OAuthSocketsToLoopbackForTest(gateway, provider.URL))
 				},
 				func(a *service.Account, cfg *config.Config, _ *service.HTTPUpstream, repo *service.AccountRepository) {
+					mu.Lock()
 					accountID = a.ID
+					mu.Unlock()
 					a.Type = service.AccountTypeOAuth
 					a.Credentials["access_token"] = "fixture-deadline-owner"
 					a.Extra["codex_fingerprint_mode"] = "off"
