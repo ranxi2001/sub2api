@@ -290,8 +290,7 @@ func TestIssue914LegacyAccountPoolAndCancellation(t *testing.T) {
 				require.Empty(t, calls)
 			} else {
 				require.GreaterOrEqual(t, status, 400)
-				require.Contains(t, calls, int64(1))
-				require.Contains(t, calls, int64(2), "ordinary pre-output failure must be able to select another eligible account")
+				require.Equal(t, []int64{1, 1, 1, 1}, calls, "legacy history keeps the OAuth account through bounded transient retries")
 			}
 		})
 	}
