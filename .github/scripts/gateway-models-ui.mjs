@@ -441,6 +441,11 @@ try {
     await fields(page).locator('input[type=password]').fill('synthetic-narrow-key'); await selectProxy(page, 7)
     await page.evaluate(() => { localStorage.setItem('theme', 'dark'); document.documentElement.classList.add('dark') })
     await page.setViewportSize({ width: 430, height: 950 }); activeCase = `${lang}-narrow-dark`
+    // Wait for the input's real color transition before sampling and capturing it.
+    await settings(page).locator('input').first().evaluate(async input => {
+      getComputedStyle(input).backgroundColor
+      await Promise.all(input.getAnimations().map(animation => animation.finished))
+    })
     const dark = await css(page, 'narrow-dark'); assert(dark.dark); assert.notEqual(light.inputBackground, dark.inputBackground)
     await shot(page, `after-narrow-dark-${lang}.png`, settings(page))
     await syncPreview(page, state); assert.deepEqual(await modelValues(page), ['live', 'removable'])
