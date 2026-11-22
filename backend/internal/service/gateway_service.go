@@ -854,6 +854,9 @@ func (e *UpstreamFailoverError) ShouldReportAccountScheduleFailure() bool {
 	if e == nil || e.Reason == OpenAIWSModelUnavailableReason || e.Reason == ExcelBPSRateLimitedReason || e.Reason == GrokUnknownForbiddenReason || e.IsExcelBPSImageAdmissionRejection() {
 		return false
 	}
+	if e.RequestScopedTransient && e.Scope == GatewayFailureScopeRequest {
+		return false
+	}
 	return !e.IsCredentialFailure() || e.Scope == GatewayFailureScopeAccount
 }
 

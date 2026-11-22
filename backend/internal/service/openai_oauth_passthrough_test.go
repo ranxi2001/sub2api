@@ -1564,8 +1564,21 @@ func TestOpenAIGatewayService_OpenAIPassthrough_RetryableStatusesTriggerFailover
 		statusCode     int
 		body           string
 		expectFailover bool
+		keepBinding    bool
 		assertRepo     func(t *testing.T, repo *openAIPassthroughFailoverRepo, start time.Time)
 	}{
+		{
+			name:           "oauth_concurrency_wrapped_in_401",
+			accountType:    AccountTypeOAuth,
+			statusCode:     http.StatusUnauthorized,
+			body:           `{"error":{"type":"authentication_error","message":"authentication failed (status=503): {\"error\":\"Too many concurrent requests\"}"}}`,
+			expectFailover: true,
+			keepBinding:    true,
+			assertRepo: func(t *testing.T, repo *openAIPassthroughFailoverRepo, _ time.Time) {
+				require.Empty(t, repo.rateLimitCalls)
+				require.Empty(t, repo.overloadCalls)
+			},
+		},
 		{
 			name:        "oauth_429_rate_limit",
 			accountType: AccountTypeOAuth,
@@ -1598,7 +1611,8 @@ func TestOpenAIGatewayService_OpenAIPassthrough_RetryableStatusesTriggerFailover
 			accountType:    AccountTypeOAuth,
 			statusCode:     http.StatusBadGateway,
 			body:           `{"error":{"message":"bad gateway","type":"server_error"}}`,
-			expectFailover: false,
+			expectFailover: true,
+			keepBinding:    true,
 			assertRepo: func(t *testing.T, repo *openAIPassthroughFailoverRepo, _ time.Time) {
 				require.Empty(t, repo.rateLimitCalls)
 				require.Empty(t, repo.overloadCalls)
@@ -1609,7 +1623,8 @@ func TestOpenAIGatewayService_OpenAIPassthrough_RetryableStatusesTriggerFailover
 			accountType:    AccountTypeOAuth,
 			statusCode:     http.StatusServiceUnavailable,
 			body:           `{"error":{"message":"service unavailable","type":"server_error"}}`,
-			expectFailover: false,
+			expectFailover: true,
+			keepBinding:    true,
 			assertRepo: func(t *testing.T, repo *openAIPassthroughFailoverRepo, _ time.Time) {
 				require.Empty(t, repo.rateLimitCalls)
 				require.Empty(t, repo.overloadCalls)
@@ -1620,7 +1635,8 @@ func TestOpenAIGatewayService_OpenAIPassthrough_RetryableStatusesTriggerFailover
 			accountType:    AccountTypeOAuth,
 			statusCode:     http.StatusGatewayTimeout,
 			body:           `{"error":{"message":"gateway timeout","type":"server_error"}}`,
-			expectFailover: false,
+			expectFailover: true,
+			keepBinding:    true,
 			assertRepo: func(t *testing.T, repo *openAIPassthroughFailoverRepo, _ time.Time) {
 				require.Empty(t, repo.rateLimitCalls)
 				require.Empty(t, repo.overloadCalls)
@@ -1694,6 +1710,14 @@ func TestOpenAIGatewayService_OpenAIPassthrough_RetryableStatusesTriggerFailover
 			if tc.expectFailover {
 				require.ErrorAs(t, err, &failoverErr)
 				require.Equal(t, tc.statusCode, failoverErr.StatusCode)
+				require.Equal(t, tc.keepBinding, failoverErr.Scope == GatewayFailureScopeRequest && failoverErr.RequestScopedTransient)
+				if tc.keepBinding {
+					require.True(t, failoverErr.RetryableOnSameAccount)
+					if tc.statusCode == http.StatusUnauthorized {
+						require.True(t, failoverErr.IsOpenAICapacityShed())
+						require.Equal(t, http.StatusServiceUnavailable, failoverErr.ClientStatusCode)
+					}
+				}
 				require.False(t, c.Writer.Written(), "retryable passthrough 错误应返回 failover 错误给上层换号，而不是直接向客户端写响应")
 			} else {
 				require.False(t, errors.As(err, &failoverErr))

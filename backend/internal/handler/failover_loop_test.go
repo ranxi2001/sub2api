@@ -589,6 +589,19 @@ func TestHandleFailoverError_SameAccountRetry(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestHandleFailoverError_TempUnschedule(t *testing.T) {
+	t.Run("exhausted request-local failure preserves the bound account", func(t *testing.T) {
+		mock := &mockTempUnscheduler{}
+		state := NewFailoverState(5, true)
+		err := newTestFailoverErr(502, true, false)
+		err.Scope = service.GatewayFailureScopeRequest
+		err.RequestScopedTransient = true
+		state.SameAccountRetryCount[100] = 1
+		require.Equal(t, FailoverExhausted, state.HandleFailoverError(context.Background(), mock, 100, "openai", 1, err))
+		require.Empty(t, mock.calls)
+		require.Empty(t, state.FailedAccountIDs)
+		require.Zero(t, state.SwitchCount)
+		require.False(t, state.ForceCacheBilling)
+	})
 	t.Run("非重试错误不调用TempUnschedule", func(t *testing.T) {
 		mock := &mockTempUnscheduler{}
 		fs := NewFailoverState(3, false)

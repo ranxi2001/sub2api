@@ -1586,8 +1586,15 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				// text. Do not borrow field/compact/failover retry budgets here.
 				return s.handleErrorResponse(ctx, resp, c, account, body, resolveOpenAIErrorSchedulingModel(billingModel, upstreamModel))
 			}
-			if openAIAgentRecoveryPreservesHistory(ctx) {
+			if openAIAgentRecoveryPreservesHistory(ctx) && !openAIAgentQuotaFailoverAllowed(ctx, resp.StatusCode, respBody) {
 				return s.handleErrorResponse(ctx, resp, c, account, body, resolveOpenAIErrorSchedulingModel(billingModel, upstreamModel))
+			}
+			if openAIAgentQuotaFailoverAllowed(ctx, resp.StatusCode, respBody) {
+				if recovery := openAIAgentRecoveryFromContext(ctx); recovery.delivery != nil {
+					if err := recovery.delivery.rejectBeforeExecution(); err != nil {
+						return nil, err
+					}
+				}
 			}
 			if retryBody, reason, changed, retryErr := normalizeOpenAIResponsesRejectedFieldRetryBody(resp.StatusCode, body, respBody); retryErr != nil {
 				return nil, fmt.Errorf("normalize rejected Responses field retry body: %w", retryErr)

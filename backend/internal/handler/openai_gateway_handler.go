@@ -1383,7 +1383,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					if failoverErr.ShouldReportAccountScheduleFailure() {
 						h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, forwardModel, requireCompact, nil), false, nil, err)
 					}
-					if service.OpenAIAgentRecoveryNoReplay(c.Request.Context()) {
+					if service.OpenAIAgentRecoveryNoReplay(c.Request.Context(), failoverErr) {
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
 						return
 					}
@@ -1415,6 +1415,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 							}
 							continue
 						}
+					}
+					if failoverErr.RequestScopedTransient && failoverErr.Scope == service.GatewayFailureScopeRequest {
+						h.handleFailoverExhausted(c, failoverErr, streamStarted)
+						return
 					}
 					h.gatewayService.RecordOpenAIAccountSwitch()
 					failedAccountIDs[account.ID] = struct{}{}
@@ -2054,6 +2058,10 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 							}
 							continue
 						}
+					}
+					if failoverErr.RequestScopedTransient && failoverErr.Scope == service.GatewayFailureScopeRequest {
+						h.handleAnthropicFailoverExhausted(c, failoverErr, streamStarted)
+						return
 					}
 					h.gatewayService.RecordOpenAIAccountSwitch()
 					failedAccountIDs[account.ID] = struct{}{}
@@ -3488,6 +3496,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			return false
 		}
 		if ctx.Err() != nil {
+			return false
+		}
+		if failoverErr.RequestScopedTransient && failoverErr.Scope == service.GatewayFailureScopeRequest {
+			closeOpenAIWSFailoverExhausted(c, wsConn, failoverErr)
 			return false
 		}
 		h.gatewayService.RecordOpenAIAccountSwitch()
