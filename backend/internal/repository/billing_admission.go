@@ -22,14 +22,7 @@ type billingOwner struct {
 
 func (a *billingAdmission) acquire(ctx context.Context, user string, maxOpen int) (func(), error) {
 	a.mu.Lock()
-	if a.owners == nil {
-		a.owners = make(map[string]*billingOwner)
-		limit := 32
-		if maxOpen > 0 {
-			limit = min(limit, max(1, maxOpen/4))
-		}
-		a.global = semaphore.NewWeighted(int64(limit))
-	}
+	a.initLocked(maxOpen)
 	o := a.owners[user]
 	if o == nil {
 		o = &billingOwner{turn: semaphore.NewWeighted(1)}
@@ -60,4 +53,40 @@ func (a *billingAdmission) acquire(ctx context.Context, user string, maxOpen int
 		o.turn.Release(1)
 		drop()
 	}, nil
+}
+
+func (a *billingAdmission) initLocked(maxOpen int) {
+	if a.global != nil {
+		return
+	}
+	a.owners = make(map[string]*billingOwner)
+	limit := 32
+	if maxOpen > 0 {
+		limit = min(limit, max(1, maxOpen/4))
+	}
+	a.global = semaphore.NewWeighted(int64(limit))
+}
+
+// Every journal phase shares the settlement budget. In particular a canceled
+// owner waiter must not bypass it by spawning another SQL retry update.
+func (a *billingAdmission) acquireSQL(ctx context.Context, maxOpen int) (func(), error) {
+	a.mu.Lock()
+	a.initLocked(maxOpen)
+	gate := a.global
+	a.mu.Unlock()
+	if err := gate.Acquire(ctx, 1); err != nil {
+		return nil, err
+	}
+	return func() { gate.Release(1) }, nil
+}
+
+func (a *billingAdmission) trySQL(maxOpen int) (func(), bool) {
+	a.mu.Lock()
+	a.initLocked(maxOpen)
+	gate := a.global
+	a.mu.Unlock()
+	if !gate.TryAcquire(1) {
+		return nil, false
+	}
+	return func() { gate.Release(1) }, true
 }
