@@ -32,6 +32,34 @@ func gatewayProtocolFixture(target string) (*gatewayProtocolAdmissionRepo, conte
 	return &gatewayProtocolAdmissionRepo{account: a, group: g}, context.WithValue(context.Background(), ctxkey.Group, g)
 }
 
+func TestGatewayProtocolAdmissionUntouchedModelMappingRemainsUnrestricted(t *testing.T) {
+	for _, kind := range []string{"new_api", "sub2api"} {
+		for _, scenario := range []struct {
+			platform string
+			family   domain.PlatformGateway
+			model    string
+		}{
+			{PlatformOpenAI, domain.PlatformGatewayOpenAI, "gpt-6.1-sol"},
+			{PlatformGemini, domain.PlatformGatewayGemini, "gemini-3.1-pro"},
+		} {
+			t.Run(kind+"/"+scenario.platform, func(t *testing.T) {
+				repo, ctx := gatewayProtocolFixture(scenario.platform)
+				repo.account.Credentials["upstream_kind"] = kind
+				// The untouched create form saves an empty mapping: no provider's
+				// built-in whitelist may narrow this explicitly bound gateway.
+				repo.account.Credentials["model_mapping"] = map[string]any{}
+				view, err := prepareGatewayProtocolAccount(ctx, repo.account, repo, scenario.family, scenario.model)
+				require.NoError(t, err)
+				require.Equal(t, scenario.model, view.GetMappedModel(scenario.model))
+				// Explicit administrator restrictions still govern the same model.
+				repo.account.Credentials["model_mapping"] = map[string]any{"claude-sonnet-4": "claude-sonnet-4"}
+				_, err = prepareGatewayProtocolAccount(ctx, repo.account, repo, scenario.family, scenario.model)
+				require.ErrorIs(t, err, ErrGatewayAccountGroup)
+			})
+		}
+	}
+}
+
 func TestGatewayProtocolAdmissionAllFamiliesKeepOneIdentity(t *testing.T) {
 	for _, spec := range domain.Platforms() {
 		for _, composite := range []bool{false, true} {
