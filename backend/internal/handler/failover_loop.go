@@ -211,7 +211,7 @@ func (s *FailoverState) HandleFailoverError(
 	// 同账号重试不算切换账号，粘性会话仅在实际切换时强制缓存计费。
 	retryCount := s.SameAccountRetryCount[accountID]
 	sameAccountRetry := sameAccountRetryAllowed(failoverErr, retryCount, retryLimit)
-	if !sameAccountRetry && failoverErr.RequestScopedTransient && failoverErr.Scope == service.GatewayFailureScopeRequest {
+	if !sameAccountRetry && failoverErr.SameAccountRetryOnly() {
 		return FailoverExhausted
 	}
 	if needForceCacheBilling(s.hasBoundSession, failoverErr, sameAccountRetry) {

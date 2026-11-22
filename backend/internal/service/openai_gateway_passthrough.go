@@ -895,6 +895,9 @@ func stripOpenAILegacyResponsesBeta(headers http.Header) {
 }
 
 func shouldFailoverOpenAIPassthroughResponse(account *Account, statusCode int, responseBody []byte) bool {
+	if isOpenAIUpstreamSessionBlocked(responseBody) {
+		return false
+	}
 	if isSIWCEligibilityRejection(account, statusCode, responseBody) {
 		return false
 	}
@@ -2054,7 +2057,8 @@ func (s *OpenAIGatewayService) newOpenAIStreamFailoverErrorWithModel(
 	// A nil frame with this message is generated locally on a pre-output disconnect.
 	// Generic provider SSE errors also map to 502; that alone does not identify a disconnect.
 	if !shouldDisable && usesOpenAIOAuthRetryAffinity(account) && failoverErr.Scope == "" &&
-		((len(payload) == 0 && strings.HasPrefix(message, "OpenAI stream disconnected before completion")) ||
+		((len(payload) == 0 && (strings.HasPrefix(message, "OpenAI stream disconnected before completion") ||
+			message == "OpenAI stream ended before a terminal event")) ||
 			(statusCode == http.StatusServiceUnavailable && failoverErr.RequestScopedTransient)) {
 		failoverErr.preserveOpenAIOAuthBinding()
 	}

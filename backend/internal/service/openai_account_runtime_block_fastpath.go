@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/tidwall/gjson"
 )
 
 const (
@@ -35,10 +37,25 @@ const (
 	openAIOAuth429Quota5h
 	openAIOAuth429Quota7d
 	openAIOAuth429QuotaReset
+	openAIOAuth429QuotaExhausted
 )
 
-// classifyOpenAIOAuth429 区分账号配额耗尽信号与普通瞬时 429。只有窗口达到
-// 100% 或响应体明确给出 reset 时间时，才视为配额限流信号。
+// isOpenAIQuotaExhaustedResponse recognizes explicit quota codes even when the
+// provider omits a reset time. Use the same evidence for retry and replay proof.
+func isOpenAIQuotaExhaustedResponse(body []byte) bool {
+	if !openAIEncryptedJSONUnambiguous(body) {
+		return false
+	}
+	for _, path := range []string{"error.type", "error.code", "response.error.type", "response.error.code"} {
+		switch gjson.GetBytes(body, path).String() {
+		case "usage_limit_reached", "insufficient_quota", "quota_exceeded":
+			return true
+		}
+	}
+	return false
+}
+
+// classifyOpenAIOAuth429 distinguishes exhausted quota from transient throttling.
 func classifyOpenAIOAuth429(headers http.Header, responseBody []byte) (openAIOAuth429Disposition, *time.Time) {
 	if snapshot := ParseCodexRateLimitHeaders(headers); snapshot != nil {
 		if normalized := snapshot.Normalize(); normalized != nil {
@@ -66,6 +83,9 @@ func classifyOpenAIOAuth429(headers http.Header, responseBody []byte) (openAIOAu
 	if resetUnix := parseOpenAIRateLimitResetTime(responseBody); resetUnix != nil {
 		resetAt := time.Unix(*resetUnix, 0)
 		return openAIOAuth429QuotaReset, &resetAt
+	}
+	if isOpenAIQuotaExhaustedResponse(responseBody) {
+		return openAIOAuth429QuotaExhausted, nil
 	}
 	return openAIOAuth429Transient, nil
 }
@@ -106,6 +126,9 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 	// Apply the same exemption before access-state and custom cooldown fast
 	// paths, which can otherwise block the credential before the shared handler.
 	if isOpenAIRequestScoped403(account, statusCode, responseBody) || isOpenAIWrappedConcurrency401(account, statusCode, responseBody) {
+		if s != nil && s.rateLimitService != nil {
+			s.rateLimitService.resetOpenAIIPUnauthorizedStreak(account)
+		}
 		return false
 	}
 	// Capacity shedding describes this request, not account health. Keep the

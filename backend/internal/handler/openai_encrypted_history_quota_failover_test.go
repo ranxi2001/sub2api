@@ -21,9 +21,17 @@ import (
 )
 
 func TestEncryptedHistoryQuotaFailoverPreservesContinuation(t *testing.T) {
-	for _, kind := range []string{service.AccountTypeOAuth, service.AccountTypeAPIKey} {
+	for _, tc := range []struct{ kind, quotaCode string }{
+		{service.AccountTypeOAuth, "usage_limit_reached"},
+		{service.AccountTypeOAuth, "insufficient_quota"},
+		{service.AccountTypeOAuth, "quota_exceeded"},
+		{service.AccountTypeAPIKey, "usage_limit_reached"},
+		{service.AccountTypeAPIKey, "insufficient_quota"},
+		{service.AccountTypeAPIKey, "quota_exceeded"},
+	} {
+		kind := tc.kind
 		for _, stream := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/stream=%t", kind, stream), func(t *testing.T) {
+			t.Run(fmt.Sprintf("%s/%s/stream=%t", kind, tc.quotaCode, stream), func(t *testing.T) {
 				clients := issue805Redis(t)
 				var mu sync.Mutex
 				var identities []string
@@ -42,7 +50,7 @@ func TestEncryptedHistoryQuotaFailoverPreservesContinuation(t *testing.T) {
 					if attempt > 1 && r.Header.Get("Authorization") == "Bearer fixture-quota-1" {
 						w.Header().Set("Content-Type", "application/json")
 						w.WriteHeader(http.StatusTooManyRequests)
-						_, _ = io.WriteString(w, `{"error":{"type":"usage_limit_reached","message":"The usage limit has been reached","resets_at":4102444800}}`)
+						_, _ = fmt.Fprintf(w, `{"error":{"type":%q,"code":%q,"message":"The usage limit has been reached"}}`, tc.quotaCode, tc.quotaCode)
 						return
 					}
 					output := "[" + issue715Agent + "]"

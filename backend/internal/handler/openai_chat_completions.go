@@ -420,7 +420,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 							continue
 						}
 					}
-					if failoverErr.RequestScopedTransient && failoverErr.Scope == service.GatewayFailureScopeRequest {
+					if failoverErr.SameAccountRetryOnly() {
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
 						return
 					}

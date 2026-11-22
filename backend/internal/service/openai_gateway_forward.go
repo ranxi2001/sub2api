@@ -1543,7 +1543,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 
 		// Handle error response
 		if resp.StatusCode >= 400 {
-			respBody := s.readUpstreamErrorBody(resp)
+			respBody, errorBodyComplete := s.readUpstreamErrorBodyWithIntegrity(resp)
 			_ = resp.Body.Close()
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
 
@@ -1586,7 +1586,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				// text. Do not borrow field/compact/failover retry budgets here.
 				return s.handleErrorResponse(ctx, resp, c, account, body, resolveOpenAIErrorSchedulingModel(billingModel, upstreamModel))
 			}
-			quotaRejected := openAIAgentQuotaFailoverAllowed(ctx, resp.StatusCode, respBody)
+			quotaRejected := errorBodyComplete && openAIAgentQuotaFailoverAllowed(ctx, resp.StatusCode, respBody)
 			if openAIAgentRecoveryPreservesHistory(ctx) && !quotaRejected {
 				return s.handleErrorResponse(ctx, resp, c, account, body, resolveOpenAIErrorSchedulingModel(billingModel, upstreamModel))
 			}

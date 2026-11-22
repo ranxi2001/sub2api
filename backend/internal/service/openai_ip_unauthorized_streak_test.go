@@ -205,6 +205,7 @@ func TestOpenAIIPUnauthorizedGatewayEarlyReturnsBreakStreak(t *testing.T) {
 		{"ordinary_400_control", 400, "{\"error\":{\"message\":\"Invalid parameter\"}}"},
 		{"context_window_400", 400, "{\"error\":{\"code\":\"context_length_exceeded\",\"message\":\"maximum context length exceeded\"}}"},
 		{"capacity_shed_503", 503, "{\"error\":{\"code\":\"server_is_overloaded\",\"message\":\"The server is overloaded\"}}"},
+		{"wrapped_concurrency_401", 401, `{"error":{"type":"authentication_error","message":"authentication failed (status=503): Too many concurrent requests"}}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &ipUnauthorizedAccountRepo{}

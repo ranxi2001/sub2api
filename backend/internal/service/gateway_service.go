@@ -837,6 +837,12 @@ func (e *UpstreamFailoverError) ShouldRetryNextAccount() bool {
 	return e != nil && e.NextAccountAction != NextAccountStop
 }
 
+// SameAccountRetryOnly separates retry affinity from account-health scope.
+// An ambiguous Grok 403 is request-scoped too, but has its own one-backup budget.
+func (e *UpstreamFailoverError) SameAccountRetryOnly() bool {
+	return e != nil && e.RequestScopedTransient && e.Scope == GatewayFailureScopeRequest && e.Reason != GrokUnknownForbiddenReason
+}
+
 func (e *UpstreamFailoverError) IsCredentialFailure() bool {
 	return e != nil && e.Stage == GatewayFailureStageAccountAuth
 }

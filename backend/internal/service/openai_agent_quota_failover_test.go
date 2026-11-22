@@ -5,11 +5,69 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestExplicitQuotaWithoutResetSkipsTransientRetryWindow(t *testing.T) {
+	for _, code := range []string{"insufficient_quota", "quota_exceeded", "usage_limit_reached", "rate_limit_exceeded"} {
+		t.Run(code, func(t *testing.T) {
+			body := []byte(`{"error":{"code":"` + code + `"}}`)
+			account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+			svc := &OpenAIGatewayService{}
+			disposition, reset := classifyOpenAIOAuth429(nil, body)
+			require.Nil(t, reset)
+			transient := code == "rate_limit_exceeded"
+			require.Equal(t, transient, disposition == openAIOAuth429Transient)
+			require.Equal(t, transient, svc.ShouldRetryOpenAIOAuth429(account, nil, body))
+			failure := svc.newOpenAIHTTPAccountFailoverError(account, 429, nil, body, "", false, true)
+			require.Equal(t, transient, failure.RetryableOnSameAccount, "pool retry must not override explicit quota")
+			require.Equal(t, transient, !failure.SameAccountRetryDeadline.IsZero())
+			_, started := svc.openaiOAuth429RetryStartedAt.Load(account.ID)
+			require.Equal(t, transient, started, "quota must not open a two-minute retry window")
+		})
+	}
+}
+
+type quotaBodyErrorReader struct {
+	io.Reader
+}
+
+func (r quotaBodyErrorReader) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	if err == io.EOF {
+		err = io.ErrUnexpectedEOF
+	}
+	return n, err
+}
+
+func TestQuotaHTTPBodyIntegrity(t *testing.T) {
+	quota := `{"error":{"code":"insufficient_quota"}}`
+	limit := int(openAIUpstreamErrorBodyReadLimit)
+	for _, tc := range []struct {
+		name     string
+		reader   io.Reader
+		complete bool
+	}{
+		{"complete", strings.NewReader(quota), true},
+		{"complete_json_then_read_error", quotaBodyErrorReader{strings.NewReader(quota)}, false},
+		{"exact_limit", strings.NewReader(quota + strings.Repeat(" ", limit-len(quota))), true},
+		{"tail_after_limit", strings.NewReader(quota + strings.Repeat(" ", limit-len(quota)) + "x"), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := &OpenAIGatewayService{}
+			body, complete := svc.readUpstreamErrorBodyWithIntegrity(&http.Response{Body: io.NopCloser(tc.reader)})
+			require.Equal(t, tc.complete, complete)
+			require.LessOrEqual(t, len(body), limit)
+			require.True(t, isOpenAIQuotaExhaustedResponse(body), "a valid JSON prefix alone cannot establish completeness")
+		})
+	}
+}
 
 func TestAgentQuotaFailoverRetainsOtherReplayRestrictions(t *testing.T) {
 	quota := []byte(`{"error":{"type":"usage_limit_reached","resets_at":4102444800}}`)

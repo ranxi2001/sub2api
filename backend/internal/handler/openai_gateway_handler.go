@@ -1416,7 +1416,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 							continue
 						}
 					}
-					if failoverErr.RequestScopedTransient && failoverErr.Scope == service.GatewayFailureScopeRequest {
+					if failoverErr.SameAccountRetryOnly() {
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
 						return
 					}
@@ -2059,7 +2059,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 							continue
 						}
 					}
-					if failoverErr.RequestScopedTransient && failoverErr.Scope == service.GatewayFailureScopeRequest {
+					if failoverErr.SameAccountRetryOnly() {
 						h.handleAnthropicFailoverExhausted(c, failoverErr, streamStarted)
 						return
 					}
@@ -3498,7 +3498,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		if ctx.Err() != nil {
 			return false
 		}
-		if failoverErr.RequestScopedTransient && failoverErr.Scope == service.GatewayFailureScopeRequest {
+		if failoverErr.SameAccountRetryOnly() {
 			closeOpenAIWSFailoverExhausted(c, wsConn, failoverErr)
 			return false
 		}
