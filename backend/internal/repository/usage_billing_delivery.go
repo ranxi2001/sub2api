@@ -282,33 +282,6 @@ func (r *usageBillingRepository) applyStagedUsageBillingOne(ctx context.Context,
 	return nil, errors.Join(service.ErrUsageBillingOutcomeUnknown, err, checkErr)
 }
 
-func (r *usageBillingRepository) PendingUsageBilling(ctx context.Context, limit int) ([]service.UsageBillingEventKey, error) {
-	if limit < 1 || limit > 256 {
-		return nil, errors.New("invalid usage recovery batch size")
-	}
-	release, err := r.admission.acquireSQL(ctx, r.db.Stats().MaxOpenConnections)
-	if err != nil {
-		return nil, err
-	}
-	defer release()
-	rows, err := r.db.QueryContext(ctx, `SELECT request_id,api_key_id FROM usage_billing_events
-		WHERE state IN ('pending','applied') AND next_attempt_at<=NOW()
-		ORDER BY CASE WHEN state='pending' THEN 0 ELSE 1 END,next_attempt_at,staged_at LIMIT $1`, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	var keys []service.UsageBillingEventKey
-	for rows.Next() {
-		var key service.UsageBillingEventKey
-		if err := rows.Scan(&key.RequestID, &key.APIKeyID); err != nil {
-			return nil, err
-		}
-		keys = append(keys, key)
-	}
-	return keys, rows.Err()
-}
-
 func (r *usageBillingRepository) AcknowledgeUsageBillingCache(ctx context.Context, key service.UsageBillingEventKey) error {
 	release, err := r.admission.acquireSQL(ctx, r.db.Stats().MaxOpenConnections)
 	if err != nil {

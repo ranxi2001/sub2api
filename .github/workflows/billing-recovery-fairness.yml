@@ -1,0 +1,149 @@
+name: Billing recovery fairness
+
+on:
+  pull_request:
+    paths:
+      - 'backend/internal/repository/usage_billing*'
+      - 'backend/internal/repository/billing_admission*'
+      - 'backend/internal/service/usage_billing*'
+      - 'backend/internal/service/wire.go'
+      - 'backend/internal/repository/integration_harness_test.go'
+      - 'backend/internal/repository/billing_audit_fixture_integration_test.go'
+      - 'backend/go.mod'
+      - 'backend/go.sum'
+      - '.github/workflows/billing-recovery-fairness.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: billing-recovery-fairness-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  postgres-fairness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: fixture
+          POSTGRES_PASSWORD: fixture
+          POSTGRES_DB: billing_fairness
+        ports: ['15432:5432']
+        options: >-
+          --health-cmd "pg_isready -U fixture -d billing_fairness"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+      redis:
+        image: redis:7-alpine
+        ports: ['16379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      CANDIDATE: ${{ github.event.pull_request.head.sha || github.sha }}
+      BASELINE: c76d8d3de146408e35b79814955088b355c66135
+      SUB2API_TEST_POSTGRES_DSN: 'postgres://fixture:fixture@127.0.0.1:15432/billing_fairness?sslmode=disable&TimeZone=UTC'
+      SUB2API_TEST_REDIS_URL: 'redis://127.0.0.1:16379/0'
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.CANDIDATE }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Pin old source and identical regression oracle
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence_dir="$RUNNER_TEMP/billing-fairness-evidence"
+          red_dir="$RUNNER_TEMP/billing-fairness-red"
+          mkdir -p "$evidence_dir"
+          echo "EVIDENCE=$evidence_dir" >> "$GITHUB_ENV"
+          echo "RED_ROOT=$red_dir" >> "$GITHUB_ENV"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          test -z "$(git status --porcelain)"
+          git worktree add --detach "$red_dir" "$BASELINE"
+          fixture=backend/internal/repository/usage_billing_recovery_fairness_integration_test.go
+          cp "$fixture" "$red_dir/$fixture"
+          cmp "$fixture" "$red_dir/$fixture"
+          test -z "$(git -C "$red_dir" diff --name-only)"
+          test "$(git -C "$red_dir" ls-files --others --exclude-standard)" = "$fixture"
+          {
+            printf 'candidate=%s\nbaseline=%s\n' "$CANDIDATE" "$BASELINE"
+            git rev-parse HEAD
+            git -C "$red_dir" rev-parse HEAD
+            git hash-object "$fixture" "$red_dir/$fixture"
+            git rev-parse "$CANDIDATE:backend/internal/repository/usage_billing_recovery_scan.go"
+            git rev-parse "$BASELINE:backend/internal/repository/usage_billing_delivery.go"
+            git -C "$red_dir" status --short
+          } > "$evidence_dir/source-identities.txt"
+      - name: Old source behavioral RED
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          (cd "$RED_ROOT/backend" && go test -race -p=1 -json -tags=integration ./internal/repository -run '^TestUsageBillingRecoveryPassesLockedPrefixAndRevisitsReceipts$' -count=1 -timeout=5m) > "$EVIDENCE/red.jsonl" 2>&1
+          status=$?
+          set -e
+          printf '%s\n' "$status" > "$EVIDENCE/red.exit"
+          cat "$EVIDENCE/red.jsonl"
+          python3 - "$EVIDENCE/red.jsonl" "$status" <<'PY'
+          import json, pathlib, sys
+          raw = pathlib.Path(sys.argv[1]).read_text()
+          rows = [json.loads(line) for line in raw.splitlines() if line.startswith('{')]
+          name = 'TestUsageBillingRecoveryPassesLockedPrefixAndRevisitsReceipts'
+          assert int(sys.argv[2]) == 1, 'RED must be an executed test failure'
+          assert sum(r.get('Test') == name and r.get('Action') == 'run' for r in rows) == 1
+          assert sum(r.get('Test') == name and r.get('Action') == 'fail' for r in rows) == 1
+          assert 'BILLING_RECOVERY_LOCKED_PREFIX' in ''.join(r.get('Output', '') for r in rows if r.get('Test') == name)
+          assert not any(r.get('Action') == 'skip' for r in rows)
+          assert not any(token in raw for token in ('[build failed]', 'undefined:', 'syntax error', 'panic:', 'WARNING: DATA RACE', 'test timed out'))
+          PY
+      - name: Exact candidate GREEN and durable cancellation controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          test -z "$(git status --porcelain)"
+          set +e
+          (cd backend && go test -race -p=1 -json -tags=integration ./internal/repository -run '^TestUsageBilling(Recovery(PassesLockedPrefixAndRevisitsReceipts|RetainsCanceledAndOverflowedEvents|ScanBoundsSweepAndWraps)|AdmissionCancellation(RotatesRecoveryAndSettlesOnce|CannotOverwriteConcurrentReceipt))$' -count=1 -timeout=8m) > "$EVIDENCE/green.jsonl" 2>&1
+          status=$?
+          set -e
+          printf '%s\n' "$status" > "$EVIDENCE/green.exit"
+          cat "$EVIDENCE/green.jsonl"
+          python3 - "$EVIDENCE/green.jsonl" "$status" <<'PY'
+          import json, pathlib, sys
+          raw = pathlib.Path(sys.argv[1]).read_text()
+          rows = [json.loads(line) for line in raw.splitlines() if line.startswith('{')]
+          assert int(sys.argv[2]) == 0
+          names = [
+              'TestUsageBillingRecoveryPassesLockedPrefixAndRevisitsReceipts',
+              'TestUsageBillingRecoveryRetainsCanceledAndOverflowedEvents',
+              'TestUsageBillingRecoveryRetainsCanceledAndOverflowedEvents/canceled',
+              'TestUsageBillingRecoveryRetainsCanceledAndOverflowedEvents/overflow',
+              'TestUsageBillingRecoveryScanBoundsSweepAndWraps',
+              'TestUsageBillingAdmissionCancellationRotatesRecoveryAndSettlesOnce',
+              'TestUsageBillingAdmissionCancellationCannotOverwriteConcurrentReceipt',
+              'TestUsageBillingAdmissionCancellationCannotOverwriteConcurrentReceipt/applied',
+              'TestUsageBillingAdmissionCancellationCannotOverwriteConcurrentReceipt/complete',
+          ]
+          for name in names:
+              for action in ('run', 'pass'):
+                  assert sum(r.get('Test') == name and r.get('Action') == action for r in rows) == 1, (name, action)
+          assert not any(r.get('Action') in ('fail', 'skip') for r in rows)
+          assert not any(token in raw for token in ('[build failed]', 'panic:', 'WARNING: DATA RACE', 'test timed out'))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: billing-recovery-fairness-${{ env.CANDIDATE }}
+          path: ${{ runner.temp }}/billing-fairness-evidence
+          if-no-files-found: error
+          retention-days: 14
