@@ -374,7 +374,7 @@ func (u *grokCredentialHandlerUpstream) Do(req *http.Request, _ string, accountI
 			return &http.Response{
 				StatusCode: http.StatusOK,
 				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
-				Body: io.NopCloser(strings.NewReader("data: {\"id\":\"chatcmpl_healthy\",\"object\":\"chat.completion.chunk\",\"model\":\"grok-4.5\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\ndata: {\"id\":\"chatcmpl_healthy\",\"object\":\"chat.completion.chunk\",\"model\":\"grok-4.5\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")),
+				Body:       io.NopCloser(strings.NewReader("data: {\"id\":\"chatcmpl_healthy\",\"object\":\"chat.completion.chunk\",\"model\":\"grok-4.5\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\ndata: {\"id\":\"chatcmpl_healthy\",\"object\":\"chat.completion.chunk\",\"model\":\"grok-4.5\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")),
 			}, nil
 		}
 		return &http.Response{
