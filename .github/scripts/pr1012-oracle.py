@@ -37,6 +37,7 @@ def green_tests():
         "TestStrictSessionAffinityLosingFirstTurnReleasesSlot",
         "TestOAuthNormalEOFBeforeOutputPreservesAccount",
         "TestOAuthNormalEOFAfterOutputCannotReplay",
+        "TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_ClientDisconnectStillDrainsUpstream",
         "TestOpenAIResponseFlush_BareErrorFollowedByCompletedUsesCompletedTerminal",
         "TestOpenAIStreamingPassthroughBareErrorTerminatesBeforeDone",
         "TestOpenAIStreamingPassthroughBareErrorDrainsAuthoritativeFailedUsage",

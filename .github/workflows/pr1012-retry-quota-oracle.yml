@@ -123,7 +123,7 @@ jobs:
           printf '%s\n' "$status" > "$evidence/red-b3.exitcode"
           cat "$evidence/red-b3.jsonl"
           python3 .github/scripts/pr1012-oracle.py red-b3 "$evidence/red-b3.exitcode" "$evidence/red-b3.jsonl" 2>&1 | tee "$evidence/red-b3-verdict.txt"
-      - name: GREEN all retry stages, quota, strict owner, output and Issue917 policy controls
+      - name: GREEN all retry stages, initial drain, quota, strict owner, output and Issue917 policy controls
         if: ${{ !cancelled() && steps.prerequisites.outcome == 'success' }}
         shell: bash
         run: |
@@ -132,7 +132,7 @@ jobs:
           test -z "$(git status --porcelain)"
           evidence="$RUNNER_TEMP/pr1012-evidence"
           set +e
-          (cd backend && go test -p=2 -race -tags=unit,retrydeadline,issue917pg ./internal/service ./internal/handler -run '^Test(OpenAIWSRetryDeadlineAtGenerationWrite|SSETypeOnlyQuotaReaders|SSEQuotaBareErrorCanComplete|SSEQuotaClassificationRetainsExplicitCodeAndIntegrity|SSEQuotaTerminalDoesNotGrantHTTPRejectionProof|SSEQuotaWithoutResetUsesBoundedAccountFailover|StrictSameAccountRetryRequiresCurrentBinding|SameAccountRetrySchedulerCannotEscape|StrictSessionAffinityLosingFirstTurnReleasesSlot|OAuthRetryOwnerBusyAfterSlotRelease|OAuthNormalEOFBeforeOutputPreservesAccount|OAuthNormalEOFAfterOutputCannotReplay|OpenAIResponseFlush_BareErrorFollowedByCompletedUsesCompletedTerminal|OpenAIStreamingPassthroughBareErrorTerminatesBeforeDone|OpenAIStreamingPassthroughBareErrorDrainsAuthoritativeFailedUsage|Issue917ResponsesCooldown)$' -count=1 -json -timeout=12m) > "$evidence/green.jsonl" 2>&1
+          (cd backend && go test -p=2 -race -tags=unit,retrydeadline,issue917pg ./internal/service ./internal/handler -run '^Test(OpenAIWSRetryDeadlineAtGenerationWrite|SSETypeOnlyQuotaReaders|SSEQuotaBareErrorCanComplete|SSEQuotaClassificationRetainsExplicitCodeAndIntegrity|SSEQuotaTerminalDoesNotGrantHTTPRejectionProof|SSEQuotaWithoutResetUsesBoundedAccountFailover|StrictSameAccountRetryRequiresCurrentBinding|SameAccountRetrySchedulerCannotEscape|StrictSessionAffinityLosingFirstTurnReleasesSlot|OAuthRetryOwnerBusyAfterSlotRelease|OAuthNormalEOFBeforeOutputPreservesAccount|OAuthNormalEOFAfterOutputCannotReplay|OpenAIGatewayService_ProxyResponsesWebSocketFromClient_ClientDisconnectStillDrainsUpstream|OpenAIResponseFlush_BareErrorFollowedByCompletedUsesCompletedTerminal|OpenAIStreamingPassthroughBareErrorTerminatesBeforeDone|OpenAIStreamingPassthroughBareErrorDrainsAuthoritativeFailedUsage|Issue917ResponsesCooldown)$' -count=1 -json -timeout=12m) > "$evidence/green.jsonl" 2>&1
           status=$?
           set -e
           printf '%s\n' "$status" > "$evidence/green.exitcode"
