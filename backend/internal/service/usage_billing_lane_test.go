@@ -648,3 +648,30 @@ func TestUsageBillingProviderPreservesDurableRecoveryAndDirectApply(t *testing.T
 	require.True(t, result.Applied)
 	require.Equal(t, []string{"direct"}, direct.applyCalls)
 }
+
+type recoveryLaneTestRepo struct {
+	*durableLaneTestRepo
+	workerCalls []string
+}
+
+func (r *recoveryLaneTestRepo) RecoverStagedUsageBilling(ctx context.Context, key UsageBillingEventKey) (*UsageBillingRecovery, error) {
+	r.workerCalls = append(r.workerCalls, key.RequestID)
+	if key.RequestID == "first" {
+		return nil, nil // hot wallet is already settling; keep scanning
+	}
+	return r.recovery.ApplyStagedUsageBilling(ctx, key)
+}
+
+func TestUsageBillingProviderPreservesRecoveryBusyWalletBypass(t *testing.T) {
+	recovery := &recoveryCacheRepo{seen: map[string]bool{}}
+	underlying := &recoveryLaneTestRepo{durableLaneTestRepo: &durableLaneTestRepo{
+		laneTestRepo: newLaneTestRepo(), DurableUsageBillingRepository: recovery, recovery: recovery,
+	}}
+	lanes := newLaneTestCombiner(underlying, 16)
+	t.Cleanup(lanes.Stop)
+	repo := ProvideUsageBillingRepository(lanes).(DurableUsageBillingRepository)
+	require.NoError(t, recoverUsageBillingBatch(context.Background(), repo, nil, nil))
+	require.Equal(t, []string{"first", "second"}, underlying.workerCalls)
+	require.Equal(t, []string{"second"}, recovery.acked)
+	require.NotContains(t, recovery.seen, "first", "busy owner must not fall back to live settlement")
+}
