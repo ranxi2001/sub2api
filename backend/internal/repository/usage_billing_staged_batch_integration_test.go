@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/google/uuid"
@@ -173,4 +174,49 @@ func TestStagedBillingBatchTwoProcessesSettleOnce(t *testing.T) {
 	require.Equal(t, "98.80000000", balance)
 	require.NoError(t, repo.db.QueryRowContext(ctx, `SELECT count(*) FROM usage_logs WHERE user_id=$1`, cmd.UserID).Scan(&logs))
 	require.Equal(t, 12, logs)
+}
+
+func TestStagedBillingPublicPathBatchesArrivalsBehindOwner(t *testing.T) {
+	ctx := context.Background()
+	repo, cmd, usage, _ := durableBillingFixture(t)
+	keys := stageBillingBatchFixture(t, repo, cmd, usage, 9)
+	owner := strconv.FormatInt(cmd.UserID, 10)
+	hold, err := repo.admission.acquire(ctx, owner, repo.db.Stats().MaxOpenConnections)
+	require.NoError(t, err)
+	released := false
+	t.Cleanup(func() {
+		if !released {
+			hold()
+		}
+	})
+	results := make(chan error, len(keys))
+	go func() { _, err := repo.ApplyStagedUsageBilling(ctx, keys[0]); results <- err }()
+	requireBillingOwnerRefs(t, repo, cmd.UserID, 2)
+	for _, key := range keys[1:] {
+		go func() { _, err := repo.ApplyStagedUsageBilling(ctx, key); results <- err }()
+	}
+	require.Eventually(t, func() bool {
+		repo.stagedLanes.mu.Lock()
+		defer repo.stagedLanes.mu.Unlock()
+		return len(repo.stagedLanes.owners[owner]) == 8
+	}, 5*time.Second, time.Millisecond)
+	hold()
+	released = true
+	for range keys {
+		select {
+		case err := <-results:
+			require.NoError(t, err)
+		case <-time.After(10 * time.Second):
+			t.Fatal("staged lane did not finish")
+		}
+	}
+	// A transaction timestamp is stored in applied_at: first immediate command
+	// and the eight queued commands must produce exactly two commit groups.
+	var commits, events int
+	var balance string
+	require.NoError(t, repo.db.QueryRowContext(ctx, `SELECT count(DISTINCT applied_at),count(*) FROM usage_billing_events WHERE api_key_id=$1 AND state='applied'`, cmd.APIKeyID).Scan(&commits, &events))
+	require.Equal(t, 2, commits)
+	require.Equal(t, 9, events)
+	require.NoError(t, repo.db.QueryRowContext(ctx, `SELECT balance::text FROM users WHERE id=$1`, cmd.UserID).Scan(&balance))
+	require.Equal(t, "99.10000000", balance)
 }
