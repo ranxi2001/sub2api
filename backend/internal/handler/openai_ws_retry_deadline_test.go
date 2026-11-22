@@ -189,7 +189,9 @@ func TestOpenAIWSRetryDeadlineAtGenerationWrite(t *testing.T) {
 					mu.Lock()
 					gateway = h.gatewayService
 					mu.Unlock()
-					h.concurrencyHelper = NewConcurrencyHelper(service.NewConcurrencyService(slots), SSEPingFormatNone, time.Second)
+					concurrency := service.NewConcurrencyService(slots)
+					service.SetOpenAIRetryConcurrencyForTest(gateway, concurrency)
+					h.concurrencyHelper = NewConcurrencyHelper(concurrency, SSEPingFormatNone, time.Second)
 					require.NoError(t, service.RouteIssue842OAuthSocketsToLoopbackForTest(gateway, provider.URL))
 				},
 				func(a *service.Account, cfg *config.Config, _ *service.HTTPUpstream, repo *service.AccountRepository) {
