@@ -746,10 +746,7 @@ func openAIAgentQuotaFailoverAllowed(ctx context.Context, status int, body []byt
 	return false
 }
 
-func OpenAIAgentRecoveryNoReplay(ctx context.Context, failure *UpstreamFailoverError) bool {
-	if failure != nil && openAIAgentQuotaFailoverAllowed(ctx, failure.StatusCode, failure.ResponseBody) {
-		return false
-	}
+func OpenAIAgentRecoveryNoReplay(ctx context.Context) bool {
 	return OpenAIAgentToolResultContinuation(ctx) || openAIAgentRecoveryPreservesHistory(ctx)
 }
 

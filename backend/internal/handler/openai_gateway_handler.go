@@ -1383,7 +1383,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					if failoverErr.ShouldReportAccountScheduleFailure() {
 						h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, forwardModel, requireCompact, nil), false, nil, err)
 					}
-					if service.OpenAIAgentRecoveryNoReplay(c.Request.Context(), failoverErr) {
+					if service.OpenAIAgentRecoveryNoReplay(c.Request.Context()) && !failoverErr.QuotaRejectedBeforeExecution {
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
 						return
 					}

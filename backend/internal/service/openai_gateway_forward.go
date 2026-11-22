@@ -1586,15 +1586,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				// text. Do not borrow field/compact/failover retry budgets here.
 				return s.handleErrorResponse(ctx, resp, c, account, body, resolveOpenAIErrorSchedulingModel(billingModel, upstreamModel))
 			}
-			if openAIAgentRecoveryPreservesHistory(ctx) && !openAIAgentQuotaFailoverAllowed(ctx, resp.StatusCode, respBody) {
+			quotaRejected := openAIAgentQuotaFailoverAllowed(ctx, resp.StatusCode, respBody)
+			if openAIAgentRecoveryPreservesHistory(ctx) && !quotaRejected {
 				return s.handleErrorResponse(ctx, resp, c, account, body, resolveOpenAIErrorSchedulingModel(billingModel, upstreamModel))
-			}
-			if openAIAgentQuotaFailoverAllowed(ctx, resp.StatusCode, respBody) {
-				if recovery := openAIAgentRecoveryFromContext(ctx); recovery.delivery != nil {
-					if err := recovery.delivery.rejectBeforeExecution(); err != nil {
-						return nil, err
-					}
-				}
 			}
 			if retryBody, reason, changed, retryErr := normalizeOpenAIResponsesRejectedFieldRetryBody(resp.StatusCode, body, respBody); retryErr != nil {
 				return nil, fmt.Errorf("normalize rejected Responses field retry body: %w", retryErr)
@@ -1645,8 +1639,15 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					Detail:             upstreamDetail,
 				})
 
+				if quotaRejected {
+					if recovery := openAIAgentRecoveryFromContext(ctx); recovery.delivery != nil {
+						if err := recovery.delivery.rejectBeforeExecution(); err != nil {
+							return nil, err
+						}
+					}
+				}
 				shouldDisable := s.handleFailoverSideEffects(ctx, resp, account, respBody, upstreamModel)
-				return nil, s.newOpenAIHTTPAccountFailoverError(
+				failover := s.newOpenAIHTTPAccountFailoverError(
 					account,
 					resp.StatusCode,
 					resp.Header,
@@ -1655,6 +1656,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					shouldDisable,
 					!shouldDisable && account.IsPoolMode() && (account.IsPoolModeRetryableStatus(resp.StatusCode) || isOpenAITransientProcessingError(resp.StatusCode, upstreamMsg, respBody)),
 				)
+				failover.QuotaRejectedBeforeExecution = quotaRejected
+				return nil, failover
 			}
 			return s.handleErrorResponse(ctx, resp, c, account, body, resolveOpenAIErrorSchedulingModel(billingModel, upstreamModel))
 		}

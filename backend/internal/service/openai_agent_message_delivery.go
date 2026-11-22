@@ -185,30 +185,6 @@ func (d *openAIAgentRecoveryDelivery) reserve(items [][32]byte) error {
 	return nil
 }
 
-// A rejected HTTP request has produced no output. Restore only the discovery
-// receipts reserved by this attempt, so the next account can consume them.
-func (d *openAIAgentRecoveryDelivery) rejectBeforeExecution() error {
-	if len(d.keys) != 0 || len(d.epochs) != 0 || len(d.tools) != 0 {
-		return openAIAgentRecoveryError("owner_conflict")
-	}
-	for key, pending := range d.discoveryBindings {
-		original, ok := d.request.toolProofs[key]
-		if !ok {
-			return openAIAgentRecoveryError("owner_conflict")
-		}
-		restored, err := d.service.compareAndSwapToolProof(d.ctx, key, pending.raw, original.raw)
-		if err != nil {
-			return openAIAgentRecoveryError("store_unavailable")
-		}
-		if !restored {
-			return openAIAgentRecoveryError("owner_conflict")
-		}
-		delete(d.discoveryBindings, key)
-	}
-	d.finish(false)
-	return nil
-}
-
 func (d *openAIAgentRecoveryDelivery) finish(completed bool) {
 	d.once.Do(func() {
 		final := make(map[[32]byte]bool)

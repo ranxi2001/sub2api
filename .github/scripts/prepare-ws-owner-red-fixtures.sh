@@ -65,6 +65,7 @@ exclude_new_fixture() {
 # New service tests require new private proof/diagnostic types. Their own RED
 # uses handler tests; every candidate GREEN retains them and all negative cases.
 exclude_new_fixture backend/internal/service/openai_ws_owner_conflict_test.go
+exclude_new_fixture backend/internal/service/openai_agent_quota_failover_test.go
 # Issue892's later matrix also imports the OAuth dial seam and 400/842 test
 # helpers absent from these historical overlays. It is not a selected oracle
 # here; its own RED and every clean candidate GREEN retain both exact files.

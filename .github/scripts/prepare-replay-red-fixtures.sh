@@ -178,3 +178,12 @@ if ! git -C "$tree" show "$baseline:$contract" |
     fi
   done
 fi
+
+# The quota tests use the newer request and discovery receipt types. Preserve
+# them on the candidate, including all GREEN jobs.
+contract=backend/internal/service/openai_agent_message_recovery.go
+target=backend/internal/service/openai_agent_quota_failover_test.go
+if test -f "$tree/$target" && ! grep -q 'func openAIAgentQuotaFailoverAllowed' "$tree/$contract" &&
+   test "$(git -C "$tree" hash-object "$contract")" = "$(git -C "$tree" rev-parse "$baseline:$contract")"; then
+  exclude_absent_fixture "$target" "$contract"
+fi
