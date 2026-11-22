@@ -2565,3 +2565,43 @@ func TestOpenAIWSHTTPBridge_IdleTimeoutClosesClientSession(t *testing.T) {
 	}
 	require.Len(t, upstream.bodies, 1, "an idle client must not leave a continuation request running")
 }
+
+func BenchmarkOpenAIWSHTTPBridgeLongTurn(b *testing.B) {
+	for _, tc := range []struct {
+		name, platform, accountType, model string
+		repetitions                        int
+	}{
+		{"OpenAI-OAuth", PlatformOpenAI, AccountTypeOAuth, "gpt-5", 36_000},
+		{"OpenAI-APIKey", PlatformOpenAI, AccountTypeAPIKey, "gpt-5", 36_000},
+		{"Grok-OAuth", PlatformGrok, AccountTypeOAuth, "grok-4.5", 36_000},
+		{"OpenAI-OAuth-16MiB", PlatformOpenAI, AccountTypeOAuth, "gpt-5", 600_000},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			history := strings.Repeat(`synthetic code: \"example\"\n`, tc.repetitions)
+			payload := []byte(`{"type":"response.create","model":"` + tc.model +
+				`","instructions":"test","input":[{"role":"user","content":"` + history +
+				`"}],"tools":[{"type":"function","name":"example","parameters":{"type":"object"}}]}`)
+			upstream := &httpUpstreamStub{resp: &http.Response{
+				StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}},
+			}}
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+			account := &Account{ID: 1, Platform: tc.platform, Type: tc.accountType, Concurrency: 1}
+			const completed = "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_fixture\",\"usage\":{\"input_tokens\":11,\"output_tokens\":3}}}\n\n"
+			b.SetBytes(int64(len(payload)))
+			b.ReportAllocs()
+			for b.Loop() {
+				upstream.resp.Body = io.NopCloser(strings.NewReader(completed))
+				c, _ := gin.CreateTestContext(httptest.NewRecorder())
+				c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+				result, err := svc.proxyOpenAIWSHTTPBridgeTurn(b.Context(), c, account, "fixture", payload, len(payload),
+					tc.model, "", "", "", "", 1, func([]byte) error { return nil })
+				if err != nil {
+					b.Fatal(err)
+				}
+				if result.Usage.InputTokens != 11 || result.Usage.OutputTokens != 3 {
+					b.Fatalf("unexpected usage: %+v", result.Usage)
+				}
+			}
+		})
+	}
+}
