@@ -13,6 +13,8 @@ on:
       - 'backend/go.mod'
       - 'backend/go.sum'
       - '.github/workflows/issue1010-gateway-connection.yml'
+      - '.github/scripts/issue1010_evidence.py'
+      - '.github/scripts/test_issue1010_evidence.py'
 
 permissions:
   contents: read
@@ -61,6 +63,11 @@ jobs:
             cmp backend/internal/integration/accountconnectiontiming/gateway_account_connection_test.go \
               "$RUNNER_TEMP/issue1010-baseline/backend/internal/integration/accountconnectiontiming/gateway_account_connection_test.go"
           fi
+      - name: Per-leaf evidence validator regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s .github/scripts -p 'test_issue1010_evidence.py' -v
       - name: Same native HTTP oracle on baseline and candidate
         shell: bash
         run: |
@@ -74,22 +81,7 @@ jobs:
           set -e
           cat evidence/oracle.jsonl
           if [ "$MODE" = red ]; then test "$result" -ne 0; else test "$result" -eq 0; fi
-          python3 - <<'PY'
-          import json, os, pathlib
-          raw = pathlib.Path('evidence/oracle.jsonl').read_text()
-          events = [json.loads(line) for line in raw.splitlines() if line.startswith('{')]
-          assert events, 'missing executed Go test events'
-          assert not any(e.get('Action') == 'skip' for e in events), 'skipped oracle'
-          assert not any(token in raw for token in ('[build failed]', 'build-fail', 'no tests to run', 'panic:', 'WARNING: DATA RACE')), raw
-          action = 'fail' if os.environ['MODE'] == 'red' else 'pass'
-          for kind in ('new_api', 'sub2api'):
-              for protocol in ('responses', 'chat', 'anthropic', 'gemini'):
-                  name = f'TestGatewayAccountConnectionNativeHTTP/{kind}/{protocol}'
-                  assert any(e.get('Test') == name and e.get('Action') == action for e in events), name
-          if action == 'fail':
-              assert 'gateway probe must reach synthetic upstream exactly once' in raw, 'wrong RED failure'
-              assert 'GATEWAY_PROTOCOLS_PENDING' in raw, 'missing historical guard evidence'
-          PY
+          python3 .github/scripts/issue1010_evidence.py "$MODE" evidence/oracle.jsonl
       - name: Candidate error cancellation admission and legacy lifecycle regressions
         if: matrix.mode == 'green'
         working-directory: backend
