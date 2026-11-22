@@ -1619,7 +1619,7 @@ func normalizeOpenAIResponsesCompatibilityBodyWithOptions(body []byte, account *
 		}
 	}
 	needsOrphanCleanup := account != nil && account.IsOpenAIOAuthLike() &&
-		gjson.GetBytes(normalized, "input").IsArray() && openAIResponsesMayNeedOrphanCleanup(normalized)
+		gjson.Get(openAIWSPayloadStringView(normalized), "input").IsArray() && openAIResponsesMayNeedOrphanCleanup(normalized)
 	if needsOrphanCleanup || openAIResponsesInputMayNeedTruncation(normalized) {
 		var reqBody map[string]any
 		if err := decodeOpenAIJSONUseNumber(normalized, &reqBody); err != nil {
