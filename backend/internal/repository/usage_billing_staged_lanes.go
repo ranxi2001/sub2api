@@ -8,6 +8,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
+var errStagedBillingBatchOutcomeMismatch = errors.New("durable billing batch outcome count mismatch")
+
 const stagedBillingBatchSize = 128
 const stagedBillingMaxPending = 4096
 
@@ -114,7 +116,7 @@ func (l *stagedBillingLanes) execute(owner string, repo stagedBillingExecutor, b
 	}
 	out, err := repo.applyStagedUsageBillingBatch(active[0].ctx, owner, keys)
 	if err == nil && len(out) != len(active) {
-		err = errUsageBillingLaneBatchOutcomeMismatch
+		err = errStagedBillingBatchOutcomeMismatch
 	}
 	// Do not fall back to N independent transactions on SQL failure. Pending
 	// events remain recoverable; the recovery worker can isolate a poison event.
