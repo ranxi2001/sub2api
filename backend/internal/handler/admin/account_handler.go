@@ -1420,9 +1420,11 @@ func (h *AccountHandler) Delete(c *gin.Context) {
 
 // TestAccountRequest represents the request body for testing an account
 type TestAccountRequest struct {
-	ModelID string `json:"model_id"`
-	Prompt  string `json:"prompt"`
-	Mode    string `json:"mode"`
+	ModelID  string `json:"model_id"`
+	Prompt   string `json:"prompt"`
+	Mode     string `json:"mode"`
+	GroupID  int64  `json:"group_id"`
+	Platform string `json:"platform"`
 	// Optional media for Grok (and future) real generation tests.
 	// ImageDataURL / AudioDataURL are data:<mime>;base64,... payloads.
 	ImageDataURL string `json:"image_data_url"`
@@ -1468,6 +1470,8 @@ func (h *AccountHandler) Test(c *gin.Context) {
 	opts := service.AccountTestOptions{
 		ImageDataURL: req.ImageDataURL,
 		AudioDataURL: req.AudioDataURL,
+		GroupID:      req.GroupID,
+		Platform:     req.Platform,
 	}
 
 	// Use AccountTestService to test the account with SSE streaming
@@ -1476,7 +1480,7 @@ func (h *AccountHandler) Test(c *gin.Context) {
 		return
 	}
 
-	if h.rateLimitService != nil {
+	if h.rateLimitService != nil && !service.IsGatewayAccountTest(c.Request.Context()) {
 		if _, err := h.rateLimitService.RecoverAccountAfterSuccessfulTest(c.Request.Context(), accountID); err != nil {
 			_ = c.Error(err)
 		}
