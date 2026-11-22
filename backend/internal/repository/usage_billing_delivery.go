@@ -21,6 +21,11 @@ func (r *usageBillingRepository) StageUsageBillingForReceipt(ctx context.Context
 		usage.RequestID != cmd.RequestID || usage.APIKeyID != cmd.APIKeyID || usage.UserID != cmd.UserID || usage.AccountID != cmd.AccountID {
 		return false, service.ErrUsageBillingRequestConflict
 	}
+	releaseSQL, err := r.admission.acquireSQL(ctx, r.db.Stats().MaxOpenConnections)
+	if err != nil {
+		return false, err
+	}
+	defer releaseSQL()
 	cmd.Normalize()
 	e := service.UsageBillingEvent{Version: 1, Command: *cmd, Usage: *usage}
 	e.Usage.User, e.Usage.APIKey, e.Usage.Account, e.Usage.Group, e.Usage.Subscription = nil, nil, nil, nil, nil
@@ -94,13 +99,47 @@ func validateUsageBillingEvent(e *service.UsageBillingEvent, key service.UsageBi
 }
 
 func (r *usageBillingRepository) ApplyStagedUsageBilling(ctx context.Context, key service.UsageBillingEventKey) (_ *service.UsageBillingRecovery, err error) {
+	return r.settleStagedUsageBilling(ctx, key, false)
+}
+
+// RecoverStagedUsageBilling lets the serial recovery worker move past a wallet
+// with in-flight work. The durable event stays available for a later cycle.
+func (r *usageBillingRepository) RecoverStagedUsageBilling(ctx context.Context, key service.UsageBillingEventKey) (*service.UsageBillingRecovery, error) {
+	return r.settleStagedUsageBilling(ctx, key, true)
+}
+
+func (r *usageBillingRepository) settleStagedUsageBilling(ctx context.Context, key service.UsageBillingEventKey, recovery bool) (*service.UsageBillingRecovery, error) {
 	// Use the immutable staged owner for both live delivery and recovery. This
 	// indexed lookup releases its connection before a hot wallet starts waiting.
 	var owner string
-	if err := r.db.QueryRowContext(ctx, `SELECT COALESCE(payload #>> '{command,UserID}', '')
-		FROM usage_billing_events WHERE request_id=$1 AND api_key_id=$2`, key.RequestID, key.APIKeyID).Scan(&owner); err != nil {
+	releaseSQL, err := r.admission.acquireSQL(ctx, r.db.Stats().MaxOpenConnections)
+	if err != nil {
 		return nil, err
 	}
+	err = r.db.QueryRowContext(ctx, `SELECT COALESCE(payload #>> '{command,UserID}', '')
+		FROM usage_billing_events WHERE request_id=$1 AND api_key_id=$2`, key.RequestID, key.APIKeyID).Scan(&owner)
+	releaseSQL()
+	if err != nil {
+		return nil, err
+	}
+	out, err := r.stagedLanes.apply(ctx, owner, key, r, recovery)
+	if errors.Is(err, errStagedBillingOwnerBusy) {
+		if release, ok := r.admission.trySQL(r.db.Stats().MaxOpenConnections); ok {
+			defer release()
+			_, err = r.db.ExecContext(ctx, `WITH due AS (
+				SELECT request_id,api_key_id FROM usage_billing_events
+				WHERE request_id=$1 AND api_key_id=$2 AND state IN ('pending','applied') AND next_attempt_at<=NOW()
+				FOR UPDATE SKIP LOCKED
+			) UPDATE usage_billing_events e SET next_attempt_at=NOW()+INTERVAL '1 second'
+			FROM due WHERE e.request_id=due.request_id AND e.api_key_id=due.api_key_id`, key.RequestID, key.APIKeyID)
+			return nil, err
+		}
+		return nil, nil
+	}
+	return out, err
+}
+
+func (r *usageBillingRepository) applyStagedUsageBillingOne(ctx context.Context, key service.UsageBillingEventKey, owner string) (_ *service.UsageBillingRecovery, err error) {
 	var release func()
 	defer func() {
 		if release != nil {
@@ -110,6 +149,15 @@ func (r *usageBillingRepository) ApplyStagedUsageBilling(ctx context.Context, ke
 	defer func() {
 		if err == nil {
 			return
+		}
+		// An admission failure holds no SQL permit. Retry metadata is best-effort;
+		// leave the durable event pending when all permits are already occupied.
+		if release == nil {
+			retryRelease, ok := r.admission.trySQL(r.db.Stats().MaxOpenConnections)
+			if !ok {
+				return
+			}
+			defer retryRelease()
 		}
 		code, state := "apply_failed", "pending"
 		if errors.Is(err, service.ErrUsageBillingRequestConflict) || errors.Is(err, service.ErrUsageBillingEventVersion) {
@@ -226,6 +274,7 @@ func (r *usageBillingRepository) ApplyStagedUsageBilling(ctx context.Context, ke
 	if checkErr == nil && (committedState == "applied" || committedState == "complete") {
 		if checkErr = json.Unmarshal(committedResult, &recovered.Result); checkErr == nil {
 			recovered.Settled = recovered.Result.Applied
+			recovered.Result.Applied = false
 			recovered.NeedsCache = committedState == "applied"
 			return recovered, nil
 		}
@@ -237,6 +286,11 @@ func (r *usageBillingRepository) PendingUsageBilling(ctx context.Context, limit 
 	if limit < 1 || limit > 256 {
 		return nil, errors.New("invalid usage recovery batch size")
 	}
+	release, err := r.admission.acquireSQL(ctx, r.db.Stats().MaxOpenConnections)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	rows, err := r.db.QueryContext(ctx, `SELECT request_id,api_key_id FROM usage_billing_events
 		WHERE state IN ('pending','applied') AND next_attempt_at<=NOW()
 		ORDER BY CASE WHEN state='pending' THEN 0 ELSE 1 END,next_attempt_at,staged_at LIMIT $1`, limit)
@@ -256,12 +310,22 @@ func (r *usageBillingRepository) PendingUsageBilling(ctx context.Context, limit 
 }
 
 func (r *usageBillingRepository) AcknowledgeUsageBillingCache(ctx context.Context, key service.UsageBillingEventKey) error {
-	_, err := r.db.ExecContext(ctx, `UPDATE usage_billing_events SET state='complete',completed_at=NOW(),failure_code=NULL
+	release, err := r.admission.acquireSQL(ctx, r.db.Stats().MaxOpenConnections)
+	if err != nil {
+		return err
+	}
+	defer release()
+	_, err = r.db.ExecContext(ctx, `UPDATE usage_billing_events SET state='complete',completed_at=NOW(),failure_code=NULL
 		WHERE request_id=$1 AND api_key_id=$2 AND state='applied'`, key.RequestID, key.APIKeyID)
 	return err
 }
 
 func (r *usageBillingRepository) DeferUsageBillingCache(ctx context.Context, key service.UsageBillingEventKey) error {
+	release, ok := r.admission.trySQL(r.db.Stats().MaxOpenConnections)
+	if !ok {
+		return nil
+	}
+	defer release()
 	_, err := r.db.ExecContext(ctx, `UPDATE usage_billing_events SET next_attempt_at=NOW()+INTERVAL '30 seconds',
 		attempts=attempts+1,failure_code='cache_invalidation_failed' WHERE request_id=$1 AND api_key_id=$2 AND state='applied'`, key.RequestID, key.APIKeyID)
 	return err

@@ -1218,10 +1218,19 @@ func ProvideUsageBillingRepository(lanes *UsageBillingLaneCombiner) UsageBilling
 }
 
 // Staged delivery keeps its transactional journal and cache acknowledgement.
-// Direct Apply users still use lanes; journal application is not batched.
+// Direct Apply users use service lanes; staged delivery uses repository lanes.
 type durableUsageBillingLanes struct {
 	*UsageBillingLaneCombiner
 	DurableUsageBillingRepository
+}
+
+func (r *durableUsageBillingLanes) RecoverStagedUsageBilling(ctx context.Context, key UsageBillingEventKey) (*UsageBillingRecovery, error) {
+	if worker, ok := r.DurableUsageBillingRepository.(interface {
+		RecoverStagedUsageBilling(context.Context, UsageBillingEventKey) (*UsageBillingRecovery, error)
+	}); ok {
+		return worker.RecoverStagedUsageBilling(ctx, key)
+	}
+	return r.ApplyStagedUsageBilling(ctx, key)
 }
 
 // Preserve retry rotation so a failed cache invalidation cannot starve later receipts.

@@ -308,6 +308,8 @@ func monthlyMaybeReset(prevUsage float64, prevStart *time.Time, cost float64, no
 	return prevUsage + cost, *prevStart
 }
 
+const lockActivePlatformQuotasSQL = `SELECT id FROM user_platform_quotas WHERE user_id=$1 AND deleted_at IS NULL ORDER BY id FOR UPDATE`
+
 // UpsertForUser 全量替换该用户的所有平台限额（事务内）：
 //  1. 软删除未在 records 中出现、或在 records 中但三档全空的所有 active 行
 //  2. 对每条至少配置了一档限额的 record 尝试 UPDATE active 行；UPDATE 行数为 0 时 INSERT 新行
@@ -320,6 +322,9 @@ func (r *userPlatformQuotaRepository) UpsertForUser(ctx context.Context, userID 
 		return err
 	}
 	return r.withTx(ctx, func(txCtx context.Context, txClient *dbent.Client) error {
+		if _, err := txClient.ExecContext(txCtx, lockActivePlatformQuotasSQL, userID); err != nil {
+			return err
+		}
 		platforms := make([]string, 0, len(records))
 		for _, rec := range records {
 			platforms = append(platforms, rec.Platform)

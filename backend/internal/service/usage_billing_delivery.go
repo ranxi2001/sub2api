@@ -202,12 +202,18 @@ func recoverUsageBillingBatch(ctx context.Context, repo DurableUsageBillingRepos
 	if err != nil {
 		return err
 	}
+	apply := repo.ApplyStagedUsageBilling
+	if worker, ok := repo.(interface {
+		RecoverStagedUsageBilling(context.Context, UsageBillingEventKey) (*UsageBillingRecovery, error)
+	}); ok {
+		apply = worker.RecoverStagedUsageBilling
+	}
 	var failures error
 	for _, key := range keys {
 		if ctx.Err() != nil {
 			return errors.Join(failures, ctx.Err())
 		}
-		r, err := repo.ApplyStagedUsageBilling(ctx, key)
+		r, err := apply(ctx, key)
 		if err == nil {
 			err = invalidateDurableUsageBilling(ctx, r, cache, auth)
 		}
