@@ -46,7 +46,7 @@ func readAccountUsageProfit(ctx context.Context, tx *sql.Tx, f service.UpstreamO
 ), totals AS (
  SELECT grouping(key) AS is_total,key,max(name) AS name,COALESCE(sum(requests),0) AS requests,
  COALESCE(sum(standard_charge),0) AS standard_charge,COALESCE(sum(user_charge),0) AS request_income,COALESCE(sum(account_charge),0) AS upstream_cost,
- COALESCE(sum(user_charge-account_charge),0) AS gross_profit,sum(user_charge-account_charge)/NULLIF(sum(user_charge),0) AS gross_margin,
+ COALESCE(sum(user_charge),0)-COALESCE(sum(account_charge),0) AS gross_profit,(sum(user_charge)-COALESCE(sum(account_charge),0))/NULLIF(sum(user_charge),0) AS gross_margin,
  'account_usage'::text AS cost_source,CASE WHEN $10='upstream' THEN max(channel_id) END AS channel_id,
  max(channel_code) AS channel_code,max(channel_remark) AS channel_remark,max(assignment) AS assignment
  FROM named GROUP BY GROUPING SETS ((key),())
