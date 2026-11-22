@@ -178,7 +178,7 @@ func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Co
 	}
 	if classifyUpstreamTransportError(err).Persistent {
 		s.tempUnscheduleOpenAITransportError(ctx, account, safeErr)
-	} else if isOpenAIOAuthAccount(account) {
+	} else if usesOpenAIOAuthRetryAffinity(account) {
 		failoverErr.preserveOpenAIOAuthBinding()
 	}
 	return failoverErr

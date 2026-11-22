@@ -180,6 +180,13 @@ func isOpenAIRequestScopedCapacityShed(upstreamMsg string, upstreamBody []byte) 
 	return isOpenAICapacityShedMessage(upstreamMsg) || isOpenAICapacityShedMessage(string(upstreamBody))
 }
 
+// Specialized upstreams have their own failover and cooldown contracts.
+func usesOpenAIOAuthRetryAffinity(account *Account) bool {
+	return account != nil && account.IsOpenAIOAuth() && !account.IsExcelOAuth() &&
+		!account.IsExcelBPSEnabled() && !account.IsSIWCEnabled() && !account.IsCopilotSDKEnabled() &&
+		!account.HasManagedOpenAIConnections() && account.AuthConnectionID == "" && !accountHasPrismBrowser(account)
+}
+
 func isOpenAIOAuthTransientServerStatus(status int) bool {
 	switch status {
 	case 500, 502, 503, 504, 520, 521, 522, 523, 524:
@@ -191,7 +198,7 @@ func isOpenAIOAuthTransientServerStatus(status int) bool {
 // Some relays wrap their own 503 concurrency rejection in an HTTP 401.
 // Only the provider's error field can establish that the credential is healthy.
 func isOpenAIWrappedConcurrency401(account *Account, status int, body []byte) bool {
-	if !isOpenAIOAuthAccount(account) || status != http.StatusUnauthorized {
+	if !usesOpenAIOAuthRetryAffinity(account) || status != http.StatusUnauthorized {
 		return false
 	}
 	providerError := gjson.GetBytes(body, "error")
@@ -488,7 +495,7 @@ func (s *OpenAIGatewayService) newOpenAIHTTPAccountFailoverError(
 	retryableOnSameAccount bool,
 ) *UpstreamFailoverError {
 	failoverErr := s.newOpenAIAccountFailoverError(account, statusCode, responseHeaders, responseBody, upstreamMsg, shouldDisable, retryableOnSameAccount)
-	if shouldDisable || !isOpenAIOAuthAccount(account) || failoverErr.Scope != "" {
+	if shouldDisable || !usesOpenAIOAuthRetryAffinity(account) || failoverErr.Scope != "" {
 		return failoverErr
 	}
 	if isOpenAIWrappedConcurrency401(account, statusCode, responseBody) {

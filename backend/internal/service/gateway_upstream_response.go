@@ -1304,7 +1304,7 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 						ResponseBody:           body,
 						RetryableOnSameAccount: true,
 					}
-					if isOpenAIOAuthAccount(account) && !classifyUpstreamTransportError(ev.err).Persistent {
+					if usesOpenAIOAuthRetryAffinity(account) && !classifyUpstreamTransportError(ev.err).Persistent {
 						failoverErr.preserveOpenAIOAuthBinding()
 					}
 					return nil, failoverErr
