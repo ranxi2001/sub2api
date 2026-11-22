@@ -473,7 +473,21 @@ func (s *OpenAIGatewayService) newOpenAIAccountFailoverError(
 	shouldDisable bool,
 	retryableOnSameAccount bool,
 ) *UpstreamFailoverError {
-	failoverErr := s.newOpenAIAccountFailoverErrorWithClassificationHeaders(account, statusCode, responseHeaders, responseHeaders, responseBody, upstreamMsg, shouldDisable, retryableOnSameAccount)
+	return s.newOpenAIAccountFailoverErrorWithClassificationHeaders(account, statusCode, responseHeaders, responseHeaders, responseBody, upstreamMsg, shouldDisable, retryableOnSameAccount)
+}
+
+// Only raw text-response HTTP failures participate in the OAuth affinity
+// policy. Synthetic capability errors retain their caller's retry decision.
+func (s *OpenAIGatewayService) newOpenAIHTTPAccountFailoverError(
+	account *Account,
+	statusCode int,
+	responseHeaders http.Header,
+	responseBody []byte,
+	upstreamMsg string,
+	shouldDisable bool,
+	retryableOnSameAccount bool,
+) *UpstreamFailoverError {
+	failoverErr := s.newOpenAIAccountFailoverError(account, statusCode, responseHeaders, responseBody, upstreamMsg, shouldDisable, retryableOnSameAccount)
 	if shouldDisable || !isOpenAIOAuthAccount(account) || failoverErr.Scope != "" {
 		return failoverErr
 	}

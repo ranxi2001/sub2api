@@ -1646,7 +1646,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				})
 
 				shouldDisable := s.handleFailoverSideEffects(ctx, resp, account, respBody, upstreamModel)
-				return nil, s.newOpenAIAccountFailoverError(
+				return nil, s.newOpenAIHTTPAccountFailoverError(
 					account,
 					resp.StatusCode,
 					resp.Header,
@@ -1756,7 +1756,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 							Message:            signal.message,
 						})
 						shouldDisable := s.handleFailoverSideEffects(ctx, compactResp, account, compactBody, upstreamModel)
-						return nil, s.newOpenAIAccountFailoverError(
+						return nil, s.newOpenAIHTTPAccountFailoverError(
 							account, compactResp.StatusCode, compactResp.Header, compactBody, signal.message, shouldDisable,
 							!shouldDisable && account.IsPoolMode() && (account.IsPoolModeRetryableStatus(compactResp.StatusCode) || isOpenAITransientProcessingError(compactResp.StatusCode, signal.message, compactBody)),
 						)

@@ -1055,7 +1055,7 @@ func (s *OpenAIGatewayService) handleFailoverErrorResponsePassthrough(
 		Detail:               upstreamDetail,
 		UpstreamResponseBody: upstreamDetail,
 	})
-	return s.newOpenAIAccountFailoverError(
+	return s.newOpenAIHTTPAccountFailoverError(
 		account,
 		resp.StatusCode,
 		resp.Header,
