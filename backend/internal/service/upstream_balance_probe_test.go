@@ -7,8 +7,10 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/stretchr/testify/require"
 )
 
@@ -263,6 +265,58 @@ func runUpstreamBalanceProbe(t *testing.T, account *Account, upstream *httpUpstr
 	require.NotNil(t, persisted)
 	require.Equal(t, snapshot.Status, persisted.Status)
 	return snapshot
+}
+
+// The usage endpoint aggregates statistics before returning the key quota.
+type slowKeyUsageUpstream struct {
+	httpUpstreamRecorder
+	rateDelay time.Duration
+}
+
+func (u *slowKeyUsageUpstream) DoWithTLS(req *http.Request, proxy string, id int64, concurrency int, profile *tlsfingerprint.Profile) (*http.Response, error) {
+	delay := u.rateDelay
+	if req.URL.Path == upstreamBalanceProbePath {
+		delay = 12 * time.Second
+	}
+	select {
+	case <-req.Context().Done():
+		return nil, req.Context().Err()
+	case <-time.After(delay):
+	}
+	if req.URL.Path == upstreamBalanceProbePath {
+		return upstreamBalanceProbeJSONResponse(http.StatusOK, `{"isValid":true,"mode":"quota_limited","quota":{"remaining":42},"unit":"USD"}`), nil
+	}
+	return u.httpUpstreamRecorder.DoWithTLS(req, proxy, id, concurrency, profile)
+}
+
+func TestUpstreamBalanceProbeSlowBusinessKeyQuota(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		rateDelay  time.Duration
+		rateStatus string
+	}{
+		{"rate available", 0, UpstreamBillingProbeStatusOK},
+		{"rate times out", 15 * time.Second, UpstreamBillingProbeStatusFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				account := newUpstreamBalanceProbeTestAccount(61, nil)
+				repo := &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{account.ID: account}}
+				upstream := &slowKeyUsageUpstream{rateDelay: tc.rateDelay}
+				upstream.resp = &http.Response{StatusCode: http.StatusOK, Body: upstreamBillingProbeValidBody()}
+				svc := newUpstreamBillingProbeTestService(repo, upstream, &upstreamBillingProbeSettingRepo{})
+				snapshot, err := svc.ProbeAccount(context.Background(), account.ID)
+				require.NoError(t, err)
+				require.Equal(t, tc.rateStatus, snapshot.Status)
+				persisted := decodeUpstreamBillingProbeSnapshot(account.Extra)
+				require.NotNil(t, persisted)
+				require.NotNil(t, persisted.Balance)
+				require.Equal(t, UpstreamBillingProbeStatusOK, persisted.Balance.Status)
+				require.Equal(t, 42.0, persisted.Balance.Data["remaining"])
+				require.Empty(t, persisted.Balance.LastError)
+			})
+		})
+	}
 }
 
 func TestUpstreamBalanceProbeReadsBalanceWhenRateIsUnsupported(t *testing.T) {

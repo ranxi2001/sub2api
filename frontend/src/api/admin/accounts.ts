@@ -1108,14 +1108,18 @@ export async function setUpstreamBillingProbeEnabled(id: number, enabled: boolea
 }
 
 export async function probeUpstreamBilling(id: number): Promise<UpstreamBillingProbeResult> {
-  const { data } = await apiClient.post<UpstreamBillingProbeResult>(`/admin/accounts/${id}/upstream-billing-probe`)
+  const { data } = await apiClient.post<UpstreamBillingProbeResult>(
+    `/admin/accounts/${id}/upstream-billing-probe`, undefined, { timeout: 45_000 }
+  )
   return data
 }
 
 export async function probeUpstreamBillingBatch(accountIds: number[]): Promise<UpstreamBillingProbeResult[]> {
   const { data } = await apiClient.post<{ results: UpstreamBillingProbeResult[] }>(
     '/admin/accounts/upstream-billing-probe/batch',
-    { account_ids: accountIds }
+    { account_ids: accountIds },
+    // Up to five waves of four accounts, each doing a rate and a balance GET.
+    { timeout: 225_000 }
   )
   return data.results
 }
