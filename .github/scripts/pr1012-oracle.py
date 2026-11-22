@@ -13,6 +13,7 @@ PKG = "github.com/Wei-Shaw/sub2api/internal/"
 WS = "TestOpenAIWSRetryDeadlineAtGenerationWrite"
 READERS = "TestSSETypeOnlyQuotaReaders"
 NORMALIZED = "TestSSEQuotaNormalizedExplicitCodeReaders"
+POOL429 = "TestSSEQuotaNormalizedPool429Readers"
 QUOTAS = ("insufficient_quota", "quota_exceeded", "usage_limit_reached")
 BOOLS = ("false", "true")
 STAGES = ("backoff", "user_slot", "account_slot", "handshake", "inflight", "output", "canceled")
@@ -36,12 +37,23 @@ def normalized_quota_leaves():
     }
 
 
+def pool429_quota_leaves():
+    return {
+        f"{POOL429}/{kind}/{quota}/{variant}/passthrough={passthrough}/pool={policy}"
+        for kind, quota, variant, passthrough, policy in itertools.product(
+            ("oauth", "apikey"), QUOTAS, ("uppercase", "padded"), BOOLS, ("default", "explicit429")
+        )
+    }
+
+
 def green_tests():
-    service = quota_leaves() | normalized_quota_leaves() | {
+    service = quota_leaves() | normalized_quota_leaves() | pool429_quota_leaves() | {
         READERS,
         NORMALIZED,
+        POOL429,
         "TestSSEQuotaBareErrorCanComplete",
         "TestSSEQuotaClassificationRetainsExplicitCodeAndIntegrity",
+        "TestSSEQuotaNormalizedAfterOutputCannotReplay",
         "TestSSEQuotaTerminalDoesNotGrantHTTPRejectionProof",
         "TestStrictSameAccountRetryRequiresCurrentBinding",
         "TestSameAccountRetrySchedulerCannotEscape",
@@ -54,6 +66,12 @@ def green_tests():
         "TestOpenAIStreamingPassthroughBareErrorDrainsAuthoritativeFailedUsage",
     }
     service.update(f"TestSSEQuotaBareErrorCanComplete/{quota}" for quota in QUOTAS)
+    service.update(
+        f"TestSSEQuotaNormalizedAfterOutputCannotReplay/{kind}/{quota}/{variant}/passthrough={passthrough}"
+        for kind, quota, variant, passthrough in itertools.product(
+            ("oauth", "apikey"), QUOTAS, ("uppercase", "padded"), BOOLS
+        )
+    )
     service.update(f"TestStrictSameAccountRetryRequiresCurrentBinding/{owner}" for owner in ("947101", "947102", "0"))
     service.update(
         f"TestSameAccountRetrySchedulerCannotEscape/advanced={advanced}/weighted={weighted}/{scenario}"
@@ -95,7 +113,8 @@ def verify(mode, status_path, log_path):
     forbidden = r"WARNING: DATA RACE|race detected during execution of test|panic:|fatal error:|test timed out|build failed|setup failed|undefined:|syntax error:|no tests to run|signal: killed|fixture read timed out|handler did not release the retry|upstream retry lease remained open|retry handshake was not observed|retry never reached the held handshake"
     assert not re.search(forbidden, output, re.I), "non-behavior failure in evidence"
     assert not any(row.get("Action") in ("skip", "build-fail") for row in rows), "skipped/build-failed execution"
-    packages = {PKG + "service", PKG + "handler"} if mode == "green" else {PKG + ("handler" if mode == "red-b1" else "service")}
+    handler_red = mode in ("red-b1", "red-backoff")
+    packages = {PKG + "service", PKG + "handler"} if mode == "green" else {PKG + ("handler" if handler_red else "service")}
     assert all(row.get("Package") in packages for row in rows), "unexpected package or compiler event"
     assert all(row.get("Action") in ("start", "run", "output", "pass", "fail", "pause", "cont") for row in rows), "unexpected Go event"
     counts = Counter((row.get("Package"), row.get("Test"), row.get("Action")) for row in rows)
@@ -113,27 +132,40 @@ def verify(mode, status_path, log_path):
             assert counts[(package, None, "fail")] == 0, f"package failed: {package}"
     else:
         assert status == 1, f"RED must be a test failure, got {status}"
-        assert mode in ("red-b1", "red-b3", "red-f1"), mode
-        package = PKG + ("handler" if mode == "red-b1" else "service")
-        names = {WS + "/handshake"} if mode == "red-b1" else quota_leaves()
+        assert mode in ("red-b1", "red-b3", "red-f1", "red-f2", "red-backoff"), mode
+        package = PKG + ("handler" if handler_red else "service")
+        names = {WS + ("/handshake" if mode == "red-b1" else "/backoff")} if handler_red else quota_leaves()
         if mode == "red-f1":
             names = normalized_quota_leaves()
+        if mode == "red-f2":
+            names = pool429_quota_leaves()
         expected = {(package, name) for name in names}
         terminal = "fail"
         # Slash-containing names passed to one t.Run do not create parent tests.
-        expected_failures = expected | {(package, WS if mode == "red-b1" else READERS)}
+        expected_failures = expected | {(package, WS if handler_red else READERS)}
         if mode == "red-f1":
             expected_failures = expected | {(package, NORMALIZED)}
+        if mode == "red-f2":
+            expected_failures = expected | {(package, POOL429)}
         assert failed == expected_failures, f"missing or unexpected RED assertions: {failed ^ expected_failures}"
         assert counts[(package, None, "fail")] == 1, "missing package failure"
         assert counts[(package, None, "pass")] == 0, "unexpected package PASS"
         assert not re.search(r"context deadline exceeded|runtime error:|panic_recovered|signal:", output, re.I), "runtime/setup failure is not RED"
         for key in expected:
             observed = fragments[key]
-            if mode == "red-b1":
-                assert "retry deadline observation: stage=handshake generations=2" in observed, key
+            if handler_red:
+                stage = "handshake" if mode == "red-b1" else "backoff"
+                assert f"retry deadline observation: stage={stage} generations=2" in observed, key
                 assert "retry deadline: no generation may start after D" in observed, key
+                if mode == "red-backoff":
+                    assert "retry deadline fallback observation: stage=backoff second_after_deadline=true owners=[Bearer fixture-deadline-owner Bearer fixture-healthy-backup]" in observed, key
                 wanted, actual = 1, 2
+            elif mode == "red-f2":
+                assert "SSE pool quota observation: semantic_status=429 retry=true deadline_zero=true rejection_proof=false output_bytes=0 retry_started=false raw_preserved=true" in observed, key
+                assert "terminal normalized quota must veto same-account pool retry" in observed, key
+                assert re.search(r"Error:\s+Should be false", observed), key
+                assert len(re.findall(r"Error Trace:", observed)) == 1, key
+                continue
             elif mode == "red-f1":
                 assert "SSE normalized quota observation:" in observed, key
                 assert "semantic_status=502" in observed, key

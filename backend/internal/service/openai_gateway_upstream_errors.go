@@ -533,7 +533,8 @@ func (s *OpenAIGatewayService) newOpenAIAccountFailoverErrorWithClassificationHe
 		upstreamMsg,
 		retryableOnSameAccount || oauth429Retry,
 	)
-	if statusCode == http.StatusTooManyRequests && isOpenAIQuotaExhaustedResponse(responseBody) {
+	if statusCode == http.StatusTooManyRequests &&
+		(isOpenAIQuotaExhaustedResponse(responseBody) || isOpenAITerminalQuotaExhaustedResponse(responseBody)) {
 		// Exhausted quota cannot recover within a pool-mode retry budget either.
 		failoverErr.RetryableOnSameAccount = false
 	}

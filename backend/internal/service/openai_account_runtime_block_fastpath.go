@@ -55,6 +55,23 @@ func isOpenAIQuotaExhaustedResponse(body []byte) bool {
 	return false
 }
 
+// isOpenAITerminalQuotaExhaustedResponse shares normalized SSE quota evidence
+// between semantic classification and the final retry veto. It does not prove
+// that an HTTP 200 stream rejected the request before execution.
+func isOpenAITerminalQuotaExhaustedResponse(body []byte) bool {
+	if gjson.GetBytes(body, "type").String() != "response.failed" || !openAIEncryptedJSONUnambiguous(body) {
+		return false
+	}
+	switch openAIStreamFailedEventErrorCode(body) {
+	case "usage_limit_reached", "insufficient_quota", "quota_exceeded":
+		return true
+	case "":
+		return isOpenAIQuotaExhaustedResponse(body)
+	default:
+		return false // An unrelated explicit code keeps its own policy.
+	}
+}
+
 // classifyOpenAIOAuth429 distinguishes exhausted quota from transient throttling.
 func classifyOpenAIOAuth429(headers http.Header, responseBody []byte) (openAIOAuth429Disposition, *time.Time) {
 	if snapshot := ParseCodexRateLimitHeaders(headers); snapshot != nil {
@@ -87,13 +104,8 @@ func classifyOpenAIOAuth429(headers http.Header, responseBody []byte) (openAIOAu
 	if isOpenAIQuotaExhaustedResponse(responseBody) {
 		return openAIOAuth429QuotaExhausted, nil
 	}
-	// SSE semantic status normalizes explicit codes. Keep that terminal quota
-	// evidence for OAuth retry policy without rewriting the body used by rules.
-	if gjson.GetBytes(responseBody, "type").String() == "response.failed" && openAIEncryptedJSONUnambiguous(responseBody) {
-		switch openAIStreamFailedEventErrorCode(responseBody) {
-		case "usage_limit_reached", "insufficient_quota", "quota_exceeded":
-			return openAIOAuth429QuotaExhausted, nil
-		}
+	if isOpenAITerminalQuotaExhaustedResponse(responseBody) {
+		return openAIOAuth429QuotaExhausted, nil
 	}
 	return openAIOAuth429Transient, nil
 }

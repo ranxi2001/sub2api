@@ -111,6 +111,7 @@ func TestOpenAIWSRetryDeadlineAtGenerationWrite(t *testing.T) {
 			var generations, handshakes int
 			var deadline time.Time
 			var owners []string
+			var generationTimes []time.Time
 			handshakeEntered := make(chan time.Time, 1)
 			handshakeClosed := make(chan struct{}, 1)
 			cancelHandshake := make(chan struct{})
@@ -147,6 +148,7 @@ func TestOpenAIWSRetryDeadlineAtGenerationWrite(t *testing.T) {
 					generations++
 					generation := generations
 					owners = append(owners, r.Header.Get("Authorization"))
+					generationTimes = append(generationTimes, time.Now())
 					if generation == 1 {
 						window := 1500 * time.Millisecond
 						if stage == "backoff" {
@@ -281,12 +283,14 @@ func TestOpenAIWSRetryDeadlineAtGenerationWrite(t *testing.T) {
 			mu.Lock()
 			observedGenerations := generations
 			observedOwners := append([]string(nil), owners...)
+			secondAfterDeadline := len(generationTimes) > 1 && !generationTimes[1].Before(deadline)
 			mu.Unlock()
 			want := 1
 			if stage == "inflight" {
 				want = 3
 			}
 			t.Logf("retry deadline observation: stage=%s generations=%d", stage, observedGenerations)
+			t.Logf("retry deadline fallback observation: stage=%s second_after_deadline=%t owners=%v", stage, secondAfterDeadline, observedOwners)
 			require.Equal(t, want, observedGenerations, "retry deadline: no generation may start after D")
 			require.False(t, readTimedOut, "fixture read timed out before observing retry closure")
 			require.False(t, unexpectedCompletion, "expired retry must not complete a generation")
