@@ -69,6 +69,30 @@ func TestRegionalAuthMiddlewareLocalIdentityAndIP(t *testing.T) {
 	}
 }
 
+func TestRegionalAuthRejectsUsageRecordsBeforeReadingSnapshot(t *testing.T) {
+	called := false
+	auth := regionalAuthStub{}
+	r := gin.New()
+	r.Use(RegionalAPIKeyAuth(regionalAuthAuthenticatorFunc(func(context.Context, string) (*service.APIKey, error) {
+		called = true
+		return auth.GetRegionalByKey(context.Background(), "valid")
+	}), &config.Config{}))
+	r.GET("/v1/usage/records", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+	req := httptest.NewRequest(http.MethodGet, "/v1/usage/records?start_time=0&end_time=1", nil)
+	req.Header.Set("Authorization", "Bearer valid")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusServiceUnavailable, w.Code)
+	require.Contains(t, w.Body.String(), "primary site")
+	require.False(t, called, "regional usage records must not consult the potentially stale snapshot")
+}
+
+type regionalAuthAuthenticatorFunc func(context.Context, string) (*service.APIKey, error)
+
+func (f regionalAuthAuthenticatorFunc) GetRegionalByKey(ctx context.Context, key string) (*service.APIKey, error) {
+	return f(ctx, key)
+}
+
 type regionalRevocationStub struct {
 	calls int
 	limit int

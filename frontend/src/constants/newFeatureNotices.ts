@@ -71,6 +71,7 @@ export const NEW_FEATURE_NOTICES = {
   apiKeyModelPolicy: 'api-key-model-policy-initial-announcement',
   apiKeyLongContext: 'api-key-long-context-control-initial-announcement',
   apiKeyContextTokenLimit: 'api-key-context-token-limit-initial-announcement',
+  usageRecordsApi: 'usage-records-api-initial-announcement',
   apiKeyUsageDateRange: 'api-key-usage-date-range-initial-announcement',
   providerProfit: 'profit-operations-provider-reconciliation',
   profitOperationsToday: 'profit-operations-today-filter-initial-announcement',

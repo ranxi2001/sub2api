@@ -28,6 +28,7 @@ describe('NewFeatureBadge', () => {
     ['image usage billing', NEW_FEATURE_NOTICES.imageUsageBilling],
     ['channel UltraFast pricing', NEW_FEATURE_NOTICES.channelUltrafastPricing],
     ['user live load', NEW_FEATURE_NOTICES.userLiveLoad],
+    ['usage records API', NEW_FEATURE_NOTICES.usageRecordsApi],
     ['Free UltraFast', NEW_FEATURE_NOTICES.groupFreeUltrafast],
     ['force UltraFast', NEW_FEATURE_NOTICES.groupForceUltrafast],
     ['passthrough model filter', NEW_FEATURE_NOTICES.passthroughModelFilter],

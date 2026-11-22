@@ -30,3 +30,5 @@
 `GET /api/v1/keys` 支持 `sort_by=usage&sort_order=desc`，并接收相同的 `start_date`、`end_date`、`timezone` 参数，在分页前按该时段的 `actual_cost` 总和排序。未指定 `sort_order` 时使用降序，没有使用记录的 Key 按零处理。不传日期时使用滚动 30 天；未指定 `sort_by` 的旧客户端保持原有的创建时间排序。
 
 管理员日期选择旁登记的新功能提示 ID 为 `api-key-usage-date-range-initial-announcement`，关闭状态沿用按管理员、按浏览器保存的提示机制。
+
+需要用脚本按小时导入逐条记录时，使用网关的 API Key 明细查询。 [逐条用量 API](usage-records-api.md)

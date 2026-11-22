@@ -42,6 +42,46 @@ end
 return {current, repaired}
 `)
 
+// rateLimitPairScript checks two fixed-window buckets before incrementing
+// either count. A rejected request consumes neither quota. When both limits
+// are exhausted, the second bucket is reported so the caller can surface the
+// user-wide limit.
+var rateLimitPairScript = redis.NewScript(`
+local function window_ttl(key)
+  local ttl = redis.call('PTTL', key)
+  if ttl == -1 then
+    redis.call('PEXPIRE', key, ARGV[1])
+    return tonumber(ARGV[1])
+  end
+  return ttl
+end
+
+local key_count = tonumber(redis.call('GET', KEYS[1]) or '0')
+local user_count = tonumber(redis.call('GET', KEYS[2]) or '0')
+local key_limit = tonumber(ARGV[2])
+local user_limit = tonumber(ARGV[3])
+local key_ttl = window_ttl(KEYS[1])
+local user_ttl = window_ttl(KEYS[2])
+
+if key_count >= key_limit or user_count >= user_limit then
+  local blocked = 1
+  if user_count >= user_limit then
+    blocked = 2
+  end
+  return {0, blocked, key_count, user_count, key_ttl, user_ttl}
+end
+
+key_count = redis.call('INCR', KEYS[1])
+if key_ttl == -2 then
+  redis.call('PEXPIRE', KEYS[1], ARGV[1])
+end
+user_count = redis.call('INCR', KEYS[2])
+if user_ttl == -2 then
+  redis.call('PEXPIRE', KEYS[2], ARGV[1])
+end
+return {1, 0, key_count, user_count, redis.call('PTTL', KEYS[1]), redis.call('PTTL', KEYS[2])}
+`)
+
 // rateLimitRun 允许测试覆写脚本执行逻辑
 var rateLimitRun = func(ctx context.Context, client *redis.Client, key string, windowMillis int64) (int64, bool, error) {
 	values, err := rateLimitScript.Run(ctx, client, []string{key}, windowMillis).Slice()
@@ -86,6 +126,16 @@ type AllowResult struct {
 	RetryAfter time.Duration
 }
 
+// PairAllowResult is the atomic result for two related fixed-window buckets.
+// BlockedScope is "key" or "user" when Allowed is false.
+type PairAllowResult struct {
+	Allowed      bool
+	BlockedScope string
+	KeyCount     int64
+	UserCount    int64
+	RetryAfter   time.Duration
+}
+
 // Allow 对给定 key（不含 "rate_limit:" 前缀）执行一次固定窗口计数判定。
 // 供需要自定义限流维度（如按用户 ID）的调用方使用；Redis 错误由调用方决定 fail-open/close。
 func (r *RateLimiter) Allow(ctx context.Context, key string, limit int, window time.Duration) (AllowResult, error) {
@@ -108,6 +158,66 @@ func (r *RateLimiter) Allow(ctx context.Context, key string, limit int, window t
 		}
 	}
 	return result, nil
+}
+
+// AllowTogether checks and increments a per-key and a per-user bucket in one
+// Redis Lua transaction. If either bucket is exhausted, neither count changes.
+func (r *RateLimiter) AllowTogether(ctx context.Context, key string, keyLimit int, userKey string, userLimit int, window time.Duration) (PairAllowResult, error) {
+	windowMillis := windowTTLMillis(window)
+	values, err := rateLimitPairScript.Run(ctx, r.redis,
+		[]string{r.prefix + key, r.prefix + userKey}, windowMillis, keyLimit, userLimit).Slice()
+	if err != nil {
+		return PairAllowResult{}, err
+	}
+	if len(values) < 6 {
+		return PairAllowResult{}, fmt.Errorf("rate limit pair script returned %d values", len(values))
+	}
+	allowed, err := parseInt64(values[0])
+	if err != nil {
+		return PairAllowResult{}, err
+	}
+	blocked, err := parseInt64(values[1])
+	if err != nil {
+		return PairAllowResult{}, err
+	}
+	keyCount, err := parseInt64(values[2])
+	if err != nil {
+		return PairAllowResult{}, err
+	}
+	userCount, err := parseInt64(values[3])
+	if err != nil {
+		return PairAllowResult{}, err
+	}
+	keyTTL, err := parseInt64(values[4])
+	if err != nil {
+		return PairAllowResult{}, err
+	}
+	userTTL, err := parseInt64(values[5])
+	if err != nil {
+		return PairAllowResult{}, err
+	}
+	result := PairAllowResult{Allowed: allowed == 1, KeyCount: keyCount, UserCount: userCount}
+	if result.Allowed {
+		return result, nil
+	}
+	if blocked == 2 {
+		result.BlockedScope = "user"
+		result.RetryAfter = retryAfterFromPTTL(userTTL, window)
+	} else {
+		result.BlockedScope = "key"
+		result.RetryAfter = retryAfterFromPTTL(keyTTL, window)
+	}
+	return result, nil
+}
+
+func retryAfterFromPTTL(ttl int64, fallback time.Duration) time.Duration {
+	if ttl == 0 {
+		return time.Second
+	}
+	if ttl > 0 {
+		return time.Duration(ttl) * time.Millisecond
+	}
+	return fallback
 }
 
 // clientIPForRateLimit 返回 IP 维度限流使用的客户端地址。

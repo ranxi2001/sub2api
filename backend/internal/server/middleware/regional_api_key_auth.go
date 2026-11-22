@@ -22,6 +22,10 @@ type regionalAPIKeyAuthenticator interface {
 
 func RegionalAPIKeyAuth(svc regionalAPIKeyAuthenticator, cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if c.Request != nil && c.Request.URL != nil && c.Request.URL.Path == "/v1/usage/records" {
+			AbortWithError(c, http.StatusServiceUnavailable, "REGIONAL_USAGE_RECORDS_UNAVAILABLE", "Usage records are available on the primary site. Please use the primary site address.")
+			return
+		}
 		if apiKeyHeadersTooLarge(c) {
 			AbortWithError(c, http.StatusUnauthorized, "INVALID_API_KEY", "Invalid API key")
 			return
