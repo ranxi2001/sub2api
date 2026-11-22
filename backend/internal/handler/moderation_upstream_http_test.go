@@ -44,8 +44,8 @@ func TestModerationUpstreamHTTPSelectionAndFailover(t *testing.T) {
 							writesB.Add(1)
 						}
 						if isA && strings.HasPrefix(scenario, "failover") {
-							w.WriteHeader(503)
-							_, _ = w.Write([]byte(`{"error":{"message":"fixture overloaded"}}`))
+							w.WriteHeader(http.StatusTooManyRequests)
+							_, _ = w.Write([]byte(`{"error":{"type":"usage_limit_reached","message":"fixture account quota exhausted","resets_at":4102444800}}`))
 							return
 						}
 						if stream || accountType == service.AccountTypeOAuth {

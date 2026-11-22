@@ -428,7 +428,7 @@ func TestHTTP2PeerResetHTTP502Control(t *testing.T) {
 	for len(opsErrorLogQueue) > 0 {
 		flushOpsErrorLogBatch([]opsErrorLogJob{<-opsErrorLogQueue})
 	}
-	require.Equal(t, int32(2), submissions.Load(), "actual HTTP refusal retains existing account failover")
+	require.Equal(t, int32(4), submissions.Load(), "actual OAuth HTTP refusal uses the bounded same-account retry policy")
 	require.Equal(t, 502, rec.Code)
 	require.Len(t, repo.entries, 1)
 	require.NotNil(t, repo.entries[0].UpstreamStatusCode)
