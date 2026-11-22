@@ -93,7 +93,8 @@ func TestSanitizeOpenAIResponsesOrphanToolOutputs(t *testing.T) {
 		input := []any{orphan, "first", orphan, orphan, "last", orphan}
 		reqBody := map[string]any{"input": input}
 		require.True(t, sanitizeOpenAIResponsesOrphanToolOutputs(reqBody, input, false))
-		result := reqBody["input"].([]any)
+		result, ok := reqBody["input"].([]any)
+		require.True(t, ok)
 		require.Equal(t, []any{"first", "last"}, result)
 		result[0] = "updated"
 		require.Equal(t, []any{orphan, "first", orphan, orphan, "last", orphan}, input)
