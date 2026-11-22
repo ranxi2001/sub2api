@@ -53,6 +53,7 @@ func TestSanitizeOpenAIResponsesOrphanToolOutputs(t *testing.T) {
 		require.True(t, sanitizeOpenAIResponsesOrphanToolOutputs(reqBody, input, false))
 		got, ok := reqBody["input"].([]any)
 		require.True(t, ok)
+		require.NotNil(t, got)
 		require.Empty(t, got)
 	})
 
@@ -85,6 +86,18 @@ func TestSanitizeOpenAIResponsesOrphanToolOutputs(t *testing.T) {
 
 		require.False(t, sanitizeOpenAIResponsesOrphanToolOutputs(reqBody, input, true))
 		require.Equal(t, input, reqBody["input"])
+	})
+
+	t.Run("removing separated orphans preserves the caller's slice", func(t *testing.T) {
+		orphan := map[string]any{"type": "function_call_output", "call_id": "missing"}
+		input := []any{orphan, "first", orphan, orphan, "last", orphan}
+		reqBody := map[string]any{"input": input}
+		require.True(t, sanitizeOpenAIResponsesOrphanToolOutputs(reqBody, input, false))
+		result, ok := reqBody["input"].([]any)
+		require.True(t, ok)
+		require.Equal(t, []any{"first", "last"}, result)
+		result[0] = "updated"
+		require.Equal(t, []any{orphan, "first", orphan, orphan, "last", orphan}, input)
 	})
 }
 
