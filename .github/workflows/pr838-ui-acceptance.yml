@@ -184,7 +184,6 @@ jobs:
           git rev-parse HEAD > "$EVIDENCE_DIR/candidate.txt"
           git -C .gateway-models-baseline rev-parse HEAD > "$EVIDENCE_DIR/baseline.txt"
           pnpm --dir frontend install --frozen-lockfile
-          ln -s "$GITHUB_WORKSPACE/frontend/node_modules" .gateway-models-baseline/frontend/node_modules
           npm install --prefix "$RUNNER_TEMP/gateway-models-browser" --no-save --ignore-scripts playwright@1.56.1
           node "$RUNNER_TEMP/gateway-models-browser/node_modules/playwright/cli.js" install --with-deps chromium
       - name: Same gateway discovery oracle on candidate and disposable original base
@@ -224,6 +223,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
+          ln -s "$GITHUB_WORKSPACE/frontend/node_modules" .gateway-models-baseline/frontend/node_modules
           node .github/scripts/pr838-ui-build.mjs 2>&1 | tee "$EVIDENCE_DIR/build.log"
       - name: Real dialog transitions with canonical synthetic API fixtures
         if: ${{ !cancelled() && steps.gateway-build.outcome == 'success' }}

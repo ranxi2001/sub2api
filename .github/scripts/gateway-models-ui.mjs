@@ -413,8 +413,10 @@ try {
     const light = await css(page, 'light-before-dark')
     if (lang === 'en') {
       assert.equal(await settings(page).getByTestId('new-feature-badge').count(), 1, 'new B remains visible after actual A dismissal')
+      const listNotice = rowFor(page, 'Fixture new_api').locator('[data-testid="gateway-sync-saved"] + [data-testid="new-feature-badge"]')
+      assert.equal(await listNotice.count(), 1, 'list entry shares B before dismissal')
       await settings(page).getByTestId('new-feature-badge').click(); await close(page)
-      assert.equal(await rowFor(page, 'Fixture new_api').getByTestId('new-feature-badge').count(), 0, 'Create dismissal hides actual list entry')
+      await listNotice.waitFor({ state: 'detached' })
       await openEdit(page, lang, 'Fixture new_api')
       assert.equal(await settings(page).getByTestId('new-feature-badge').count(), 0, 'same dismissal hides actual Edit entry')
       await close(page); await page.reload(); await openCreate(page, lang)
