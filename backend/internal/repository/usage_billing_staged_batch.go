@@ -21,7 +21,7 @@ type stagedBillingRow struct {
 // All durable state transitions and the aggregated monetary effects commit in
 // one transaction. Existing upstream batch helpers retain decimal arithmetic,
 // sorted row locks, and each request's post-charge balance/quota result.
-func (r *usageBillingRepository) applyStagedUsageBillingBatch(ctx context.Context, owner string, keys []service.UsageBillingEventKey) ([]*service.UsageBillingRecovery, error) {
+func (r *usageBillingRepository) applyStagedUsageBillingBatch(ctx context.Context, owner string, keys []service.UsageBillingEventKey) (_ []*service.UsageBillingRecovery, err error) {
 	if len(keys) == 0 || len(keys) > stagedBillingBatchSize {
 		return nil, errors.New("invalid staged billing batch size")
 	}
