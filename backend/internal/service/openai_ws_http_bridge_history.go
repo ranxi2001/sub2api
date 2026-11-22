@@ -4,9 +4,30 @@ import (
 	"encoding/json"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
+	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 )
+
+// Each bridge has a single authenticated connection. Compare declared identity
+// components separately: a follow-up can omit a thread or first supply one.
+type openAIWSBridgeIdentity struct {
+	thread, session, lane string
+}
+
+func openAIWSBridgeFrameIdentity(c *gin.Context, raw []byte) openAIWSBridgeIdentity {
+	return openAIWSBridgeIdentity{
+		thread:  resolveOpenAIWSClientThreadID(c, raw),
+		session: explicitOpenAIRequestSessionID(c, raw),
+		lane:    resolveOpenAIWSExecutionLane(c, raw),
+	}
+}
+
+func (id openAIWSBridgeIdentity) conflicts(next openAIWSBridgeIdentity) bool {
+	return (id.thread != "" && next.thread != "" && next.thread != id.thread) ||
+		(id.session != "" && next.session != "" && next.session != id.session) || id.lane != next.lane
+}
 
 // This history belongs to one ordinary OAuth bridge turn. Observe only events
 // whose client write succeeded; an upstream completion alone is not delivery.
@@ -33,8 +54,10 @@ func (h *openAIWSHTTPBridgeOutputHistory) delivered(message []byte) {
 		response := gjson.GetBytes(message, "response")
 		// Older compatible providers omit status on a completed event. Preserve
 		// that convention while rejecting every explicit unsuccessful status.
-		implicitCompletion := !response.Get("status").Exists() && response.Get("error").Type == gjson.Null && !response.Get("incomplete_details").Exists()
-		if !openAIAgentCompletedResponse(message, true) && !implicitCompletion {
+		status := response.Get("status")
+		if !utf8.Valid(message) || !openAIEncryptedJSONUnambiguous(message) ||
+			response.Get("error").Type != gjson.Null || response.Get("incomplete_details").Type != gjson.Null ||
+			(status.Exists() && status.String() != "completed") {
 			return
 		}
 		h.responseID = strings.TrimSpace(gjson.GetBytes(message, "response.id").String())

@@ -1382,7 +1382,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		bridgeAccountFailoverInputExists := false
 		preserveOAuthOutput := account.IsOpenAIOAuth() && openAIWSPlaintextBridgeAccount(account) && !smartStateful
 		bridgeResponseID := ""
-		bridgeScope, _ := resolveOpenAIWSExecutionScope(c, firstPayload.clientPayloadRaw, apiKeyID)
+		bridgeIdentity := openAIWSBridgeFrameIdentity(c, firstPayload.clientPayloadRaw)
 		for turn := 1; ; turn++ {
 			if turn > 1 && hooks != nil {
 				if err := hooks.beforeRequest(turn, currentBridgePayload.payloadRaw, currentBridgePayload.clientPayloadRaw, currentBridgePayload.originalModel); err != nil {
@@ -1435,20 +1435,23 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "continuation does not belong to this HTTP session", nil)
 			}
 			if preserveOAuthOutput {
-				scope, _ := resolveOpenAIWSExecutionScope(c, currentBridgePayload.clientPayloadRaw, apiKeyID)
-				if scope == "" {
-					// Incremental frames may omit a body-only identity. The
-					// bridge is connection-local; only a declared change conflicts.
-					scope = bridgeScope
-				}
-				if currentBridgePayload.previousResponseID != "" && (bridgeResponseID == "" || currentBridgePayload.previousResponseID != bridgeResponseID || scope != bridgeScope) {
+				identity := openAIWSBridgeFrameIdentity(c, currentBridgePayload.clientPayloadRaw)
+				conflict := bridgeIdentity.conflicts(identity)
+				if currentBridgePayload.previousResponseID != "" && (currentBridgePayload.previousResponseID != bridgeResponseID || conflict) {
 					return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "continuation does not belong to this HTTP session", nil)
 				}
-				if scope != bridgeScope {
+				if conflict {
 					bridgeReplayInput, bridgeAccountFailoverInput = nil, nil
 					bridgeReplayInputExists, bridgeAccountFailoverInputExists = false, false
 					bridgeResponseID, turnState = "", ""
-					bridgeScope = scope
+					bridgeIdentity = identity
+				} else {
+					if identity.thread != "" {
+						bridgeIdentity.thread = identity.thread
+					}
+					if identity.session != "" {
+						bridgeIdentity.session = identity.session
+					}
 				}
 			}
 			bridgePayloadRaw := currentBridgePayload.payloadRaw
