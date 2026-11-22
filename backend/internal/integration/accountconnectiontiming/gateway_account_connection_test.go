@@ -65,9 +65,11 @@ func (r *gatewayTestAccounts) UpdateExtra(context.Context, int64, map[string]any
 
 type gatewayTestTransport struct {
 	service.HTTPUpstream
-	calls  atomic.Int64
-	closed atomic.Int64
-	seen   chan gatewayTestEgress
+	calls     atomic.Int64
+	closed    atomic.Int64
+	seen      chan gatewayTestEgress
+	firstRead chan struct{}
+	readOnce  atomic.Bool
 }
 
 type gatewayTestEgress struct {
@@ -79,8 +81,18 @@ type gatewayTestEgress struct {
 
 type gatewayTestBody struct {
 	io.ReadCloser
-	closed *atomic.Int64
-	once   atomic.Bool
+	closed    *atomic.Int64
+	once      atomic.Bool
+	firstRead chan struct{}
+	readOnce  *atomic.Bool
+}
+
+func (b *gatewayTestBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if n > 0 && b.firstRead != nil && b.readOnce.CompareAndSwap(false, true) {
+		close(b.firstRead)
+	}
+	return n, err
 }
 
 func (b *gatewayTestBody) Close() error {
@@ -95,7 +107,7 @@ func (u *gatewayTestTransport) Do(req *http.Request, proxy string, id int64, con
 	u.seen <- gatewayTestEgress{req.URL.String(), proxy, id, concurrency}
 	resp, err := u.HTTPUpstream.Do(req, proxy, id, concurrency)
 	if resp != nil && resp.Body != nil {
-		resp.Body = &gatewayTestBody{ReadCloser: resp.Body, closed: &u.closed}
+		resp.Body = &gatewayTestBody{ReadCloser: resp.Body, closed: &u.closed, firstRead: u.firstRead, readOnce: &u.readOnce}
 	}
 	return resp, err
 }
@@ -388,6 +400,7 @@ func TestGatewayAccountConnectionExplicitCompositeRoute(t *testing.T) {
 
 func TestGatewayAccountConnectionCancellationReleasesReader(t *testing.T) {
 	entered, cancelled := make(chan struct{}), make(chan struct{})
+	firstRead := make(chan struct{})
 	var hits atomic.Int64
 	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -404,11 +417,15 @@ func TestGatewayAccountConnectionCancellationReleasesReader(t *testing.T) {
 	defer origin.Close()
 	repo, cfg := gatewayTestFixture(origin.URL, service.PlatformOpenAI)
 	router, transport := newGatewayTestRouter(repo, cfg)
+	transport.firstRead = firstRead
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	finished := make(chan *httptest.ResponseRecorder, 1)
 	go func() { finished <- gatewayTestRequest(router, ctx, `{"model_id":"gpt-6.1-sol"}`) }()
 	timingWait(t, entered)
+	// Server Flush precedes client response acquisition. Wait for the native
+	// parser's first positive body read so cancellation exercises an owned reader.
+	timingWait(t, firstRead)
 	cancel()
 	select {
 	case recorder := <-finished:
