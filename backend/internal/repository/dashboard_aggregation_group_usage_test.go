@@ -543,6 +543,7 @@ func TestDashboardAggregationRepositoryCleanupUsageLogsPartitionedInvalidatesRet
 		WillReturnRows(sqlmock.NewRows([]string{"min"}).AddRow(nil))
 	mock.ExpectExec(`DROP TABLE IF EXISTS "usage_logs_202604"`).
 		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(`INSERT INTO account_usage_financial_pending`).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 	// 6 月分区含保留下界之后的记录：删除后按其中最早时刻失效。
 	mock.ExpectBegin()
@@ -554,6 +555,7 @@ func TestDashboardAggregationRepositoryCleanupUsageLogsPartitionedInvalidatesRet
 		WillReturnRows(sqlmock.NewRows([]string{"min"}).AddRow(retainedInJunePartition))
 	mock.ExpectExec(`DROP TABLE IF EXISTS "usage_logs_202606"`).
 		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(`INSERT INTO account_usage_financial_pending`).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(groupRollupInvalidateSQL).
 		WithArgs(retainedInJunePartition, "UTC").
 		WillReturnResult(sqlmock.NewResult(0, 0))

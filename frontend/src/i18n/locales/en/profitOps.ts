@@ -1,4 +1,9 @@
 export default {
+  "accountUsageAttribution": "Channels use current account assignments. Reassigning an account moves its subtotal for the selected window to the new channel.",
+  "accountUsageFormula": "User charges and account charges come from account usage statistics. Gross profit is user charges less account charges. Margin uses the totals.",
+  "accountUsageCost": "Account charge",
+  "accountUsageIncome": "User charge",
+  "accountUsageBuilding": "Account statistics for this window are being updated. Refresh shortly.",
  "entityScope": "Filtered channel ID",
  "currentMembers":"Current account membership","memberNote":"Paged current configuration includes accounts with no requests in the window. Drill into models without claiming historical destinations or model support.",
  "unknownIncome":"Unknown charge records","unknownStandard":"Unknown standard-base records","unmeteredZero":"Zero-amount rows without metering evidence",

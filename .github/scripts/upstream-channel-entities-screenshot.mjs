@@ -44,6 +44,11 @@ apiClient.defaults.adapter=async config=>{
   const drilled=params.dimension==='account'||params.dimension==='model'||Number(params.account_id)>0||Number(params.group_id)>0||String(params.model||'')!=='';
   const metrics={requests:2,standard_charge:20,request_income:8,supplier_requests:2,bill_requests:0,estimated_requests:0,upstream_cost:drilled?null:(yesterday?4:5),gross_profit:drilled?null:(yesterday?4:3),gross_margin:drilled?null:(yesterday?0.5:0.375),cost_covered_requests:2,unknown_cost_requests:0,unknown_upstream_requests:0,cost_source:drilled?'wallet_not_split':(yesterday?'wallet_window':'wallet_today'),wallet_basis:yesterday?'wallet_window':'wallet_today',wallet_currency:'USD'};
   data={scope:params,queried_at:now,currency:'USD',usage:{summary:metrics,wallet_synced_at:now,rows:[{...metrics,key:drilled?'41':'channel:7',name:drilled?'合成账号 41':channel.name,provider_id:1,provider_site_type:'sub2api',channel_id:7,channel_code:channel.code,channel_remark:channel.remark,assignment:'explicit'}],total:1,catalog:[{key:'channel:7',name:channel.name,accounts:2,channel_id:7,channel_code:channel.code,channel_remark:channel.remark,assignment:'explicit'}],catalog_total:1,members:[],member_total:0,accounts:[],capacity:{accounts:2,schedulable:2,configured_concurrency:6}},quality:{status:'ready',data:{summary:{},rows:[]}},errors:{status:'ready',data:{rows:[]}}};
+  if (params.basis === 'account_usage' && sessionStorage.getItem('account-usage-fixture')) {
+    data.usage.basis='account_usage';
+    for (const m of [data.usage.summary,...data.usage.rows]) Object.assign(m,{cost_source:'account_usage',upstream_cost:2,gross_profit:6,gross_margin:.75});
+    delete data.usage.wallet_synced_at;
+  }
  }else if(url==='/admin/profit-operations/channel-accounts')data={account_ids:[41,42]};
  else if(url==='/admin/account-ops/config')data={config:{enabled:false,recipient:'',balance_low:false,weekly_quota:false,cooldown_minutes:30,groups:[],webhooks:[],balance_thresholds:[],quota_thresholds:[]},encryption_key_configured:true};
  else if(url==='/admin/account-ops/threshold-accounts')data={items:[...Array.from({length:15},(_,i)=>({account_id:i+1,account_name:'示例成员 '+(i+1),type:'apikey',platform:'openai',provider_id:1,group_id:'manual-demo-wallet',group_mode:'manual',unit:'USD',balance:420,balance_status:'ok',received_at:now,usage_windows:[]})),{account_id:42,account_name:'示例官方账号',platform:'openai',type:'oauth',usage_windows:[],unit:'%',balance:null,balance_status:'unsupported',received_at:null}]};
@@ -112,8 +117,11 @@ try{
  // Render the same real edit/bulk dialogs through table actions where exposed.
  await page.getByRole('button',{name:'编辑',exact:true}).first().click();await page.getByTestId('open-channel-bindings').click();await page.getByTestId('upstream-channel-select').waitFor();await page.getByTestId('upstream-channel-select').selectOption('0');await page.getByTestId('confirm-channel-binding').check();await page.getByTestId('save-channel-binding').click();await page.getByText('已保存并从服务器读回确认',{exact:true}).waitFor();await page.screenshot({path:path.join(output,'entity-account-edit-bindings.png'),fullPage:true});await page.keyboard.press('Escape')
  await page.locator('table input[type="checkbox"]').first().check();await page.getByRole('button',{name:'批量编辑',exact:false}).first().click();await page.getByTestId('open-channel-bindings').click();await page.getByTestId('upstream-channel-select').focus();await page.getByTestId('upstream-channel-select').selectOption('7');await page.getByTestId('confirm-channel-binding').check();await page.getByTestId('save-channel-binding').click();await page.getByText('已保存并从服务器读回确认',{exact:true}).waitFor();await page.screenshot({path:path.join(output,'entity-account-bulk-bindings.png'),fullPage:true})
+ await page.evaluate(()=>sessionStorage.setItem('account-usage-fixture','1'))
  await page.goto('http://127.0.0.1:4185/admin/channel-config',{waitUntil:'networkidle'})
  await page.getByTestId('profit-summary').waitFor()
+ await page.getByTestId('profit-summary').locator('[data-field="gross_margin"]').filter({hasText:'75.00%'}).waitFor()
+ await page.getByTestId('profit-summary').getByText('账号计费',{exact:true}).waitFor()
  await page.screenshot({path:path.join(output,'channel-config-profit.png'),fullPage:true})
  const reportCalls=await page.evaluate(()=>globalThis.__entityFixture.calls.filter(c=>c.url==='/admin/profit-operations/snapshot').length)
  const management=page.getByTestId('config-panel-channels')

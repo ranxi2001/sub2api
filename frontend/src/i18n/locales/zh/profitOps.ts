@@ -1,4 +1,9 @@
 export default {
+  "accountUsageAttribution": "渠道按账号当前归属汇总。调整归属后，所选时段的账号小计随账号归入当前渠道。",
+  "accountUsageFormula": "用户扣费和账号计费取自账号「使用统计」。毛利润为用户扣费减账号计费，毛利率按合计金额计算。",
+  "accountUsageCost": "账号计费",
+  "accountUsageIncome": "用户扣费",
+  "accountUsageBuilding": "此时段的账号小计正在后台更新，请稍后刷新。",
  "entityScope": "筛选渠道 ID",
  "currentMembers":"当前账号归属","memberNote":"当前配置成员独立分页，包括窗口内没有请求的账号；可下钻模型。这里只展示配置归属，不声明历史真实去向或模型支持状态。",
  "unknownIncome":"未知收费记录","unknownStandard":"未知标准基数记录","unmeteredZero":"无计量证据的零额记录",

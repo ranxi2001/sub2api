@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -921,14 +922,36 @@ func (r *usageLogRepository) GetAccountUsageStats(ctx context.Context, accountID
 			COALESCE(SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens), 0) as tokens,
 			COALESCE(SUM(total_cost), 0) as cost,
 			COALESCE(SUM(COALESCE(account_stats_cost, total_cost) * COALESCE(account_rate_multiplier, 1)), 0) as actual_cost,
-			COALESCE(SUM(actual_cost), 0) as user_cost
+			COALESCE(SUM(actual_cost), 0) as user_cost,COALESCE(sum(duration_ms),0),count(duration_ms)
 		FROM usage_logs
 		WHERE account_id = $1 AND created_at >= $2 AND created_at < $3
 		GROUP BY date
 		ORDER BY date ASC
 	`
 
-	rows, err := r.sql.QueryContext(ctx, query, accountID, startTime, endTime)
+	reader := r.sql
+	args := []any{accountID, startTime, endTime}
+	var tx *sql.Tx
+	if r.db != nil {
+		tx, err = r.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = tx.Rollback() }()
+		err = accountUsageReady(ctx, tx, startTime, endTime)
+		if err == nil {
+			query = accountUsageWindow + ` SELECT TO_CHAR(at,'YYYY-MM-DD') AS date,sum(requests),sum(tokens),sum(standard_charge),sum(account_charge),sum(user_charge),sum(duration_sum),sum(duration_count)
+ FROM facts GROUP BY date ORDER BY date`
+			reader = tx
+			args = []any{startTime, endTime, accountID}
+		} else if !errors.Is(err, service.ErrAccountUsageBuilding) {
+			return nil, err
+		} else {
+			// The existing single-account dialog remains available during backfill.
+			_ = tx.Rollback()
+		}
+	}
+	rows, err := reader.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -941,6 +964,8 @@ func (r *usageLogRepository) GetAccountUsageStats(ctx context.Context, accountID
 		}
 	}()
 
+	var durationSum float64
+	var durationCount int64
 	history := make([]AccountUsageHistory, 0)
 	for rows.Next() {
 		var date string
@@ -949,9 +974,13 @@ func (r *usageLogRepository) GetAccountUsageStats(ctx context.Context, accountID
 		var cost float64
 		var actualCost float64
 		var userCost float64
-		if err = rows.Scan(&date, &requests, &tokens, &cost, &actualCost, &userCost); err != nil {
+		var dayDuration float64
+		var daySamples int64
+		if err = rows.Scan(&date, &requests, &tokens, &cost, &actualCost, &userCost, &dayDuration, &daySamples); err != nil {
 			return nil, err
 		}
+		durationSum += dayDuration
+		durationCount += daySamples
 		t, _ := time.Parse("2006-01-02", date)
 		history = append(history, AccountUsageHistory{
 			Date:       date,
@@ -992,10 +1021,12 @@ func (r *usageLogRepository) GetAccountUsageStats(ctx context.Context, accountID
 		actualDaysUsed = 1
 	}
 
-	avgQuery := "SELECT COALESCE(AVG(duration_ms), 0) as avg_duration_ms FROM usage_logs WHERE account_id = $1 AND created_at >= $2 AND created_at < $3"
 	var avgDuration float64
-	if err := scanSingleRow(ctx, r.sql, avgQuery, []any{accountID, startTime, endTime}, &avgDuration); err != nil {
-		return nil, err
+	if durationCount > 0 {
+		avgDuration = durationSum / float64(durationCount)
+	}
+	if tx != nil {
+		_ = tx.Rollback()
 	}
 
 	summary := AccountUsageSummary{
