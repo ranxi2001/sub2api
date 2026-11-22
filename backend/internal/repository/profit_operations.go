@@ -342,6 +342,9 @@ func (r *channelRepository) ReadProfitOperations(ctx context.Context, f service.
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if f.AccountUsage {
+		return readAccountUsageProfit(ctx, tx, f)
+	}
 	raw, err := profitOperationsAccounts(ctx, tx, f)
 	if err != nil {
 		return nil, err

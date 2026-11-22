@@ -27,6 +27,7 @@ func (h *ChannelHandler) ProfitOperations(c *gin.Context) {
 		return
 	}
 	f := service.UpstreamOperationsFilter{From: from, Until: until, Upstream: c.Query("upstream"), ChannelID: channel, AccountID: account, GroupID: group, Model: c.Query("model"), ModelScope: c.DefaultQuery("model_scope", "public"), Dimension: c.DefaultQuery("dimension", "upstream"), Sort: c.DefaultQuery("sort", "requests"), Direction: c.DefaultQuery("direction", "desc"), Page: int(page), PageSize: int(size)}
+	f.AccountUsage = c.Query("basis") == "account_usage"
 	if err := service.NormalizeProfitOperationsFilter(&f); err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -39,7 +40,9 @@ func (h *ChannelHandler) ProfitOperations(c *gin.Context) {
 	}
 	started := time.Now()
 	out, err := h.profitReports.read(c.Request.Context(), f, func(ctx context.Context, collect bool) (*service.ProfitOperationsSnapshot, error) {
-		h.refreshBoundProviderSpend(ctx, f.From, f.Until, force)
+		if !f.AccountUsage {
+			h.refreshBoundProviderSpend(ctx, f.From, f.Until, force)
+		}
 		if collect {
 			ctx = service.WithProfitRowCollection(ctx)
 		}
@@ -47,6 +50,10 @@ func (h *ChannelHandler) ProfitOperations(c *gin.Context) {
 	})
 	if err != nil {
 		status, reason, message := http.StatusInternalServerError, "PROFIT_OPERATIONS_QUERY_FAILED", "Upstream operations query failed; retry"
+		if errors.Is(err, service.ErrAccountUsageBuilding) {
+			response.ErrorFrom(c, err)
+			return
+		}
 		if errors.Is(err, context.DeadlineExceeded) {
 			status, reason, message = http.StatusGatewayTimeout, "PROFIT_OPERATIONS_TIMEOUT", "Profit operations query timed out; retry later"
 		}

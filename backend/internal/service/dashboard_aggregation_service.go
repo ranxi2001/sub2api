@@ -97,6 +97,23 @@ func (s *DashboardAggregationService) Start() {
 	if s == nil || s.repo == nil || s.timingWheel == nil {
 		return
 	}
+	if worker, ok := s.repo.(interface {
+		RefreshAccountUsageFinancial(context.Context) (bool, error)
+	}); ok {
+		s.timingWheel.ScheduleRecurring("account:financial-rollups", time.Minute, func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+			defer cancel()
+			for ctx.Err() == nil {
+				more, err := worker.RefreshAccountUsageFinancial(ctx)
+				if err != nil && ctx.Err() == nil {
+					slog.Warn("account usage rollup failed", "error", err)
+				}
+				if err != nil || !more {
+					return
+				}
+			}
+		})
+	}
 	if !s.cfg.Enabled {
 		logger.LegacyPrintf("service.dashboard_aggregation", "[DashboardAggregation] 聚合作业已禁用")
 		// Explicit runtime retention remains available without dashboard aggregation.

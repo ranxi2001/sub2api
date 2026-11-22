@@ -32,6 +32,8 @@ const ProfitWalletTodaySkew = 5 * time.Minute
 // [from, until). A manual refresh ignores it.
 const ProfitSpendFreshness = 2 * time.Minute
 
+var ErrAccountUsageBuilding = infraerrors.ServiceUnavailable("ACCOUNT_USAGE_BUILDING", "Account usage statistics are being aggregated")
+
 const profitOperationsQueryTimeout = 5 * time.Minute
 
 type ProfitOperationsSnapshot struct {

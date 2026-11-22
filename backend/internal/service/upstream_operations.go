@@ -16,19 +16,20 @@ import (
 var ErrUpstreamOperationsValidation = infraerrors.BadRequest("UPSTREAM_OPERATIONS_VALIDATION", "运维查询参数无效：请检查时间范围、分页、模型口径及安全上游网址")
 
 type UpstreamOperationsFilter struct {
-	From       time.Time `json:"from"`
-	Until      time.Time `json:"until"`
-	Upstream   string    `json:"upstream"`
-	ChannelID  int64     `json:"channel_id,omitempty"`
-	AccountID  int64     `json:"account_id"`
-	GroupID    int64     `json:"group_id"`
-	Model      string    `json:"model"`
-	ModelScope string    `json:"model_scope"`
-	Dimension  string    `json:"dimension"`
-	Sort       string    `json:"sort"`
-	Direction  string    `json:"direction"`
-	Page       int       `json:"page"`
-	PageSize   int       `json:"page_size"`
+	AccountUsage bool      `json:"account_usage,omitempty"`
+	From         time.Time `json:"from"`
+	Until        time.Time `json:"until"`
+	Upstream     string    `json:"upstream"`
+	ChannelID    int64     `json:"channel_id,omitempty"`
+	AccountID    int64     `json:"account_id"`
+	GroupID      int64     `json:"group_id"`
+	Model        string    `json:"model"`
+	ModelScope   string    `json:"model_scope"`
+	Dimension    string    `json:"dimension"`
+	Sort         string    `json:"sort"`
+	Direction    string    `json:"direction"`
+	Page         int       `json:"page"`
+	PageSize     int       `json:"page_size"`
 }
 
 type UpstreamOperationsSnapshot struct {
