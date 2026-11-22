@@ -1723,7 +1723,8 @@ func normalizeOpenAIPassthroughOAuthBody(body []byte, compact bool) ([]byte, boo
 		changed = true
 	}
 
-	if inputResult := gjson.GetBytes(normalized, "input"); inputResult.Exists() {
+	// Inspect the input in place so an already-normalized history array is never copied here.
+	if inputResult := gjson.Get(openAIWSPayloadStringView(normalized), "input"); inputResult.Exists() {
 		switch {
 		case inputResult.Type == gjson.String:
 			text := inputResult.String()
