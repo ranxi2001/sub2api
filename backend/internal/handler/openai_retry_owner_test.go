@@ -81,10 +81,11 @@ func (s *retryOwnerSlots) ReleaseAccountSlot(_ context.Context, id int64, _ stri
 
 type retryOwnerUpstream struct {
 	service.HTTPUpstream
-	mu      sync.Mutex
-	ids     []int64
-	exhaust bool
-	quota   string
+	mu       sync.Mutex
+	ids      []int64
+	exhaust  bool
+	quota    string
+	typeOnly bool
 }
 
 func (u *retryOwnerUpstream) Do(req *http.Request, _ string, id int64, _ int) (*http.Response, error) {
@@ -95,6 +96,9 @@ func (u *retryOwnerUpstream) Do(req *http.Request, _ string, id int64, _ int) (*
 	u.mu.Unlock()
 	if first && u.quota != "" {
 		frame := fmt.Sprintf("data: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_quota\",\"status\":\"failed\",\"error\":{\"code\":%q,\"type\":%q,\"message\":\"Quota exhausted\"}}}\n\n", u.quota, u.quota)
+		if u.typeOnly {
+			frame = fmt.Sprintf("data: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_quota\",\"status\":\"failed\",\"error\":{\"type\":%q,\"message\":\"Quota exhausted\"}}}\n\n", u.quota)
+		}
 		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(frame))}, nil
 	}
 	if fail {
@@ -113,18 +117,21 @@ func (u *retryOwnerUpstream) Do(req *http.Request, _ string, id int64, _ int) (*
 func TestSSEQuotaWithoutResetUsesBoundedAccountFailover(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, kind := range []string{service.AccountTypeOAuth, service.AccountTypeAPIKey} {
-		for _, code := range []string{"insufficient_quota", "quota_exceeded", "usage_limit_reached"} {
+		for _, form := range []string{"insufficient_quota", "quota_exceeded", "usage_limit_reached", "type:insufficient_quota", "type:quota_exceeded", "type:usage_limit_reached"} {
+			code := strings.TrimPrefix(form, "type:")
 			for _, passthrough := range []bool{false, true} {
 				for _, stream := range []bool{false, true} {
-					t.Run(fmt.Sprintf("%s/%s/passthrough=%t/stream=%t", kind, code, passthrough, stream), func(t *testing.T) {
+					t.Run(fmt.Sprintf("%s/%s/passthrough=%t/stream=%t", kind, form, passthrough, stream), func(t *testing.T) {
 						accounts := issue715Accounts()
 						for i := range accounts {
 							accounts[i].Type = kind
 							accounts[i].Credentials["api_key"] = "fixture-key"
 							accounts[i].Credentials["pool_mode"] = true
+							accounts[i].Credentials["pool_mode_retry_status_codes"] = []any{float64(http.StatusBadGateway)}
+							accounts[i].Credentials["pool_mode_retry_count"] = float64(1)
 							accounts[i].Extra = map[string]any{"openai_passthrough": passthrough}
 						}
-						upstream := &retryOwnerUpstream{quota: code}
+						upstream := &retryOwnerUpstream{quota: code, typeOnly: strings.HasPrefix(form, "type:")}
 						h := newOpenAIResponsesFailoverTestHandler(t, upstream, accounts...)
 						c, rec := newOpenAIResponsesFailoverTestContext(t, nil)
 						body := fmt.Sprintf(`{"model":"gpt-5.1","input":"hello","stream":%t}`, stream)

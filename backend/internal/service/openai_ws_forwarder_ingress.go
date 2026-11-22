@@ -1978,6 +1978,12 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 			return nil, openAIWSAgentRecoveryClose(err)
 		}
+		// Lease acquisition and admission can outlast the retry window. Check
+		// after those waits, without cancelling a generation already admitted
+		// on this ingress or imposing its deadline on later client turns.
+		if latencyGenerationStartedTurn == 0 && (!OpenAISameAccountRetryAdmissible(ctx, latest.ID) || !OpenAIWSIngressCanFailover(priorityLatencyCtx, c)) {
+			return nil, denyOpenAITurn("same_account_retry_unavailable")
+		}
 		latencyGenerationStartedTurn = turn
 		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(payload), s.openAIWSWriteTimeout()); err != nil {
 			return nil, wrapOpenAIWSIngressTurnError(
