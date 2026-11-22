@@ -192,6 +192,8 @@ watch(
     () => props.accountId,
     () => props.syncCredentials?.platform,
     () => props.syncCredentials?.type,
+    () => props.syncCredentials?.upstream_kind,
+    () => props.syncCredentials?.account_id,
     () => props.syncCredentials?.base_url,
     () => props.syncCredentials?.api_key,
     () => props.syncCredentials?.proxy_id

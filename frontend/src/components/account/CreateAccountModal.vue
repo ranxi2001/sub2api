@@ -280,6 +280,8 @@
 
       <GatewayAccountFields v-if="form.platform === 'gateway'" v-model:kind="gatewayKind" v-model:base-url="gatewayBaseUrl"
         v-model:api-key="gatewayApiKey" v-model:probe="upstreamBillingAutoProbeEnabled" />
+      <GatewayModelSettings v-if="form.platform === 'gateway'" v-model:models="allowedModels" v-model:mappings="modelMappings"
+        :sync-credentials="gatewaySyncCredentials" />
       <QwenPlatformNotice :user-id="authStore.user?.id" />
       <QwenCacheSettings v-if="form.platform === 'qwen'" v-model:session-cache="qwenSessionCache" v-model:strict-affinity="qwenStrictAffinity" :user-id="authStore.user?.id" @base-url="setQwenBaseUrl" />
 
@@ -4449,6 +4451,7 @@ import ProxySelector from '@/components/common/ProxySelector.vue'
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
+import GatewayModelSettings from '@/components/account/GatewayModelSettings.vue'
 import AccountAutoBPSSection from '@/components/account/AccountAutoBPSSection.vue'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
 import Toggle from '@/components/common/Toggle.vue'
@@ -5004,6 +5007,11 @@ const openAICompactModelMappings = ref<ModelMapping[]>([])
 const modelRestrictionMode = ref<'whitelist' | 'mapping'>('whitelist')
 const allowedModels = ref<string[]>([])
 const upstreamModelsPreviewed = ref(false)
+const gatewaySyncCredentials = computed(() => gatewayApiKey.value.trim() ? {
+  platform: 'gateway', type: 'gateway', upstream_kind: gatewayKind.value,
+  base_url: gatewayBaseUrl.value.trim(), api_key: gatewayApiKey.value.trim(),
+  proxy_id: authStore.isObserver ? undefined : form.proxy_id ?? undefined
+} : undefined)
 const DEFAULT_POOL_MODE_RETRY_COUNT = 3
 const MAX_POOL_MODE_RETRY_COUNT = 10
 const DEFAULT_POOL_MODE_RETRY_STATUS_CODES = [401, 403, 429]
@@ -6558,7 +6566,8 @@ const handleSubmit = async () => {
     await createAccountAndFinish('gateway', 'gateway', {
       upstream_kind: gatewayKind.value,
       base_url: gatewayBaseUrl.value,
-      api_key: gatewayApiKey.value
+      api_key: gatewayApiKey.value,
+      model_mapping: buildModelMappingObject('combined', allowedModels.value, modelMappings.value) ?? {}
     })
     return
   }

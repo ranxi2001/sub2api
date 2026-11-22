@@ -6,10 +6,14 @@ import { pathToFileURL } from 'node:url'
 
 const repo = resolve('.'), output = process.env.EVIDENCE_DIR
 if (!output || process.env.GITHUB_ACTIONS !== 'true') throw Error('Isolated CI only')
+const baselineRoot = resolve(process.env.BASELINE_FRONTEND_ROOT || '.pr838-baseline/frontend')
+const noticeKeys = process.env.EVIDENCE_SCENARIO === 'gateway-models'
+  ? { A: 'crossPlatformGatewayAccounts', B: 'gatewayModelSync', C: 'fixture-gateway-models-future-announcement-C' }
+  : { A: 'vipAutoCredit', B: 'tempUnschedStreamCountWindow', C: 'fixture-pr838-future-announcement-C' }
 mkdirSync(output, { recursive: true })
 const { build } = await import(pathToFileURL(join(repo, 'frontend/node_modules/vite/dist/node/index.js')))
 for (const mode of ['before', 'after']) {
-  const root = join(repo, mode === 'before' ? '.pr838-baseline/frontend' : 'frontend')
+  const root = mode === 'before' ? baselineRoot : join(repo, 'frontend')
   const extra = join(root, 'pr838-notices.html'), entry = join(root, '.pr838-notices.js')
   try {
     if (mode === 'after') {
@@ -22,7 +26,9 @@ import {i18n,loadLocaleMessages} from '/src/i18n/index.ts';import '/src/style.cs
 async function mountNotices(){
 await loadLocaleMessages('en');i18n.global.locale.value='en';
 // Future C is deliberately a test-only registered ID, not a product announcement.
-const registry={A:ids.vipAutoCredit,B:ids.tempUnschedStreamCountWindow,C:'fixture-pr838-future-announcement-C'};
+const keys=${JSON.stringify(noticeKeys)};
+const registry={A:ids[keys.A],B:ids[keys.B],C:keys.C};
+if(!registry.A||!registry.B)throw Error('Requested notice IDs must exist in the actual candidate registry');
 const p=new URLSearchParams(location.search), phase=p.get('phase')||'a',user=Number(p.get('user'));
 if(!Number.isSafeInteger(user)||user<1)throw Error('Fictional fixture administrator required');
 const entries=phase==='a'?['A']:phase==='b'?['A','B','B']:['A','B','B','C'];

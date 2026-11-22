@@ -1,5 +1,16 @@
 name: PR838 isolated administration acceptance
 on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        type: choice
+        options: [pr838, gateway-models]
+        default: gateway-models
+        description: Actual application acceptance scenario
+      candidate:
+        type: string
+        required: true
+        description: Exact candidate commit SHA (must match the dispatched workflow ref)
   pull_request:
     branches: [production]
     paths:
@@ -7,6 +18,7 @@ on:
       - 'frontend/src/stores/newFeatureNotices.ts'
       - '.github/fixtures/pr838-ui/**'
       - '.github/scripts/pr838-ui-*.mjs'
+      - '.github/scripts/gateway-models-ui.mjs'
       - '.github/workflows/pr838-ui-acceptance.yml'
 permissions:
   contents: read
@@ -15,10 +27,11 @@ concurrency:
   cancel-in-progress: true
 jobs:
   administration:
+    if: github.event_name == 'pull_request' || inputs.scenario == 'pr838'
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     env:
-      CANDIDATE: ${{ github.event.pull_request.head.sha }}
+      CANDIDATE: ${{ github.event.pull_request.head.sha || inputs.candidate }}
       # Full production frontend before this feature; never overlay components.
       BASELINE: b347249687db84dac3f5272189fda6cf86eb9035
     steps:
@@ -112,5 +125,124 @@ jobs:
             ${{ runner.temp }}/pr838-ui/*.txt
             ${{ runner.temp }}/pr838-ui/*.log
             ${{ runner.temp }}/pr838-ui/*.png
+          if-no-files-found: error
+          retention-days: 30
+
+  gateway-models:
+    if: github.event_name == 'workflow_dispatch' && inputs.scenario == 'gateway-models'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      CANDIDATE: ${{ inputs.candidate }}
+      BASELINE: c76d8d3de146408e35b79814955088b355c66135
+      EVIDENCE_SCENARIO: gateway-models
+      NODE_OPTIONS: --max-old-space-size=6144
+    steps:
+      - name: Require immutable candidate from the selected workflow revision
+        env:
+          WORKFLOW_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE" =~ ^[0-9a-f]{40}$ ]]
+          test "$CANDIDATE" = "$WORKFLOW_SHA"
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.CANDIDATE }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.BASELINE }}
+          path: .gateway-models-baseline
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Configure isolated evidence and verify original source trees
+        run: |
+          set -euo pipefail
+          printf 'EVIDENCE_DIR=%s/gateway-models-evidence\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          printf 'BASELINE_FRONTEND_ROOT=%s/.gateway-models-baseline/frontend\n' "$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+          printf 'SUB2API_PLAYWRIGHT_MODULE=%s/gateway-models-browser/node_modules/playwright/index.mjs\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          test "$(git -C .gateway-models-baseline rev-parse HEAD)" = "$BASELINE"
+          cmp frontend/package.json .gateway-models-baseline/frontend/package.json
+          cmp frontend/pnpm-lock.yaml .gateway-models-baseline/frontend/pnpm-lock.yaml
+      - name: Prepare locked frontend and isolated browser on remote runner only
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVIDENCE_DIR"
+          git rev-parse HEAD > "$EVIDENCE_DIR/candidate.txt"
+          git -C .gateway-models-baseline rev-parse HEAD > "$EVIDENCE_DIR/baseline.txt"
+          pnpm --dir frontend install --frozen-lockfile
+          npm install --prefix "$RUNNER_TEMP/gateway-models-browser" --no-save --ignore-scripts playwright@1.56.1
+          node "$RUNNER_TEMP/gateway-models-browser/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Same gateway discovery oracle on candidate and disposable original base
+        shell: bash
+        run: |
+          set -euo pipefail
+          oracle=backend/internal/service/gateway_upstream_models_test.go
+          sha256sum "$oracle" > "$EVIDENCE_DIR/oracle.sha256"
+          git -C .gateway-models-baseline status --porcelain > "$EVIDENCE_DIR/baseline-before-oracle.txt"
+          test ! -s "$EVIDENCE_DIR/baseline-before-oracle.txt"
+          cp "$oracle" ".gateway-models-baseline/$oracle"
+          status=0
+          (cd .gateway-models-baseline/backend && go test -tags=unit ./internal/service -run '^TestGatewayUpstreamModelsDiscoveryAndApply$' -count=1 -v -timeout=10m) > "$EVIDENCE_DIR/discovery-red.log" 2>&1 || status=$?
+          printf '%s\n' "$status" > "$EVIDENCE_DIR/discovery-red-exit.txt"
+          cat "$EVIDENCE_DIR/discovery-red.log"
+          test "$status" -ne 0
+          grep -F 'Unsupported platform for upstream model sync: gateway' "$EVIDENCE_DIR/discovery-red.log"
+          if grep -Eq 'build failed|setup failed|undefined:|no tests to run|--- SKIP:|panic:|WARNING: DATA RACE' "$EVIDENCE_DIR/discovery-red.log"; then exit 1; fi
+          for kind in new_api sub2api; do
+            for action in discovery apply; do
+              grep -F -- "--- FAIL: TestGatewayUpstreamModelsDiscoveryAndApply/$kind/$action" "$EVIDENCE_DIR/discovery-red.log"
+            done
+          done
+          status=0
+          (cd backend && go test -tags=unit ./internal/service -run '^TestGatewayUpstreamModelsDiscoveryAndApply$' -count=1 -v -timeout=10m) > "$EVIDENCE_DIR/discovery-green.log" 2>&1 || status=$?
+          printf '%s\n' "$status" > "$EVIDENCE_DIR/discovery-green-exit.txt"
+          cat "$EVIDENCE_DIR/discovery-green.log"
+          test "$status" -eq 0
+          if grep -Eq 'no tests to run|--- SKIP:' "$EVIDENCE_DIR/discovery-green.log"; then exit 1; fi
+          for kind in new_api sub2api; do
+            for action in discovery apply; do
+              grep -F -- "--- PASS: TestGatewayUpstreamModelsDiscoveryAndApply/$kind/$action" "$EVIDENCE_DIR/discovery-green.log"
+            done
+          done
+      - name: Render complete original before and candidate applications with project CSS
+        id: gateway-build
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          ln -s "$GITHUB_WORKSPACE/frontend/node_modules" .gateway-models-baseline/frontend/node_modules
+          node .github/scripts/pr838-ui-build.mjs 2>&1 | tee "$EVIDENCE_DIR/build.log"
+      - name: Real dialog transitions with canonical synthetic API fixtures
+        if: ${{ !cancelled() && steps.gateway-build.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          status=0
+          node .github/scripts/gateway-models-ui.mjs > "$EVIDENCE_DIR/browser.log" 2>&1 || status=$?
+          printf '%s\n' "$status" > "$EVIDENCE_DIR/browser-exit.txt"
+          cat "$EVIDENCE_DIR/browser.log"
+          exit "$status"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: gateway-models-${{ env.CANDIDATE }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/gateway-models-evidence/*.json
+            ${{ runner.temp }}/gateway-models-evidence/*.txt
+            ${{ runner.temp }}/gateway-models-evidence/*.log
+            ${{ runner.temp }}/gateway-models-evidence/*.sha256
+            ${{ runner.temp }}/gateway-models-evidence/*.png
           if-no-files-found: error
           retention-days: 30

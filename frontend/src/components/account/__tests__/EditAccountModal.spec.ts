@@ -100,6 +100,7 @@ const BaseDialogStub = defineComponent({
 const ModelWhitelistSelectorStub = defineComponent({
   name: 'ModelWhitelistSelector',
   props: {
+    syncCredentials: Object,
     modelMappings: { type: Array, default: () => [] },
     modelValue: {
       type: Array,
@@ -356,6 +357,60 @@ function mountModal(account = buildAccount(), renderGroupSelector = false) {
 }
 
 describe('EditAccountModal', () => {
+  it('announces gateway model settings independently and shares persistent dismissal', async () => {
+    localStorage.removeItem('sub2api:new-feature-notices:v1:41')
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const notices = useNewFeatureNoticeStore()
+    notices.dismiss(41, NEW_FEATURE_NOTICES.crossPlatformGatewayAccounts)
+    const account = { ...buildAccount(), platform: 'gateway', type: 'gateway',
+      credentials: { upstream_kind: 'new_api', base_url: 'https://relay.example.com' } } as any
+    const wrapper = mountModal(account)
+    await flushPromises()
+    const badge = wrapper.findAllComponents(NewFeatureBadge).find(item => item.props('noticeId') === NEW_FEATURE_NOTICES.gatewayModelSync)!
+    expect(badge.find('button').exists()).toBe(true)
+    const sibling = mount(NewFeatureBadge, { props: { noticeId: NEW_FEATURE_NOTICES.gatewayModelSync, userId: 41 }, global: { plugins: [pinia] } })
+    await badge.get('button').trigger('click')
+    expect(sibling.find('button').exists()).toBe(false)
+    wrapper.unmount()
+    sibling.unmount()
+    setActivePinia(createPinia())
+    const reloaded = mountModal(account)
+    await flushPromises()
+    const reloadedBadge = reloaded.findAllComponents(NewFeatureBadge).find(item => item.props('noticeId') === NEW_FEATURE_NOTICES.gatewayModelSync)!
+    expect(reloadedBadge.find('button').exists()).toBe(false)
+    expect(useNewFeatureNoticeStore().isDismissed(41, NEW_FEATURE_NOTICES.crossPlatformGatewayAccounts)).toBe(true)
+    const future = mount(NewFeatureBadge, { props: { noticeId: 'fixture-future-gateway-notice-C', userId: 41 } })
+    expect(future.find('button').exists()).toBe(true)
+    future.unmount()
+  })
+
+  it.each(['new_api', 'sub2api'])('keeps %s gateway models across connection and group edits', async (kind) => {
+    const account = { ...buildAccount(), platform: 'gateway', type: 'gateway', group_ids: [10],
+      credentials: { upstream_kind: kind, base_url: 'https://relay.example.com',
+        model_mapping: { live: 'live', public: 'live' }, unknown_option: { keep: true } } } as any
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await flushPromises()
+    const selector = wrapper.getComponent(ModelWhitelistSelectorStub)
+    expect(selector.props('modelValue')).toEqual(['live'])
+    expect(selector.props('modelMappings')).toEqual([{ from: 'public', to: 'live' }])
+    const fields = wrapper.get('[data-testid="gateway-account-fields"]')
+    await fields.get('input[type="url"]').setValue('https://edited.example.com')
+    await fields.get('input[type="password"]').setValue('synthetic-new-key')
+    wrapper.getComponent(GroupSelectorStub).vm.$emit('update:modelValue', [20])
+    await flushPromises()
+    expect(selector.props('syncCredentials')).toMatchObject({ account_id: account.id,
+      upstream_kind: kind, base_url: 'https://edited.example.com', api_key: 'synthetic-new-key' })
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[0]?.[1]).toMatchObject({ group_ids: [20], credentials: {
+      upstream_kind: kind, base_url: 'https://edited.example.com', api_key: 'synthetic-new-key',
+      model_mapping: account.credentials.model_mapping
+    } })
+  })
+
   it('keeps the target platform announcement independent, shared and persistent', async () => {
     const noticeId = NEW_FEATURE_NOTICES.accountEditPlatform
     localStorage.removeItem('sub2api:new-feature-notices:v1:41')

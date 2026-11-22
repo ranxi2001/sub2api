@@ -87,6 +87,7 @@ export function isKnownPlatform(platform: string | null | undefined): boolean {
 
 /** 与后端 buildUpstreamModelsRequest 支持的平台保持一致。 */
 export function supportsUpstreamModelSync(platform: string | null | undefined): boolean {
+  if (platform?.trim().toLowerCase() === 'gateway') return true
   const spec = getPlatformSpec(platform?.trim().toLowerCase())
   if (!spec) return false
   return !!spec.multi_protocol || ['anthropic', 'openai', 'gemini', 'antigravity', 'grok'].includes(spec.id)

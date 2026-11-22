@@ -88,6 +88,40 @@ func TestApplyUpstreamModelsPreservesCredentialsAndInvalidatesScheduler(t *testi
 	require.Len(t, cache.setAccounts, 1, "a skipped CAS must not publish a stale scheduler snapshot")
 }
 
+func TestGatewayUpstreamModelsPersistOnlyAccountMapping(t *testing.T) {
+	for _, kind := range []string{"new_api", "sub2api"} {
+		t.Run(kind, func(t *testing.T) {
+			ctx := t.Context()
+			tx := testEntTx(t)
+			repo := newAccountRepositoryWithSQL(tx.Client(), tx, nil)
+			account := mustCreateAccount(t, tx.Client(), &service.Account{
+				Name: "gateway-model-sync", Platform: service.PlatformGateway, Type: service.AccountTypeGateway,
+				Credentials: map[string]any{"upstream_kind": kind, "api_key": "synthetic-key", "base_url": "https://relay.example",
+					"unrelated": map[string]any{"keep": true}, "model_mapping": map[string]any{"old": "old"}},
+			})
+			group, err := tx.Client().Group.Create().SetName("gateway-model-group").SetPlatform(service.PlatformOpenAI).Save(ctx)
+			require.NoError(t, err)
+			require.NoError(t, repo.BindGroups(ctx, account.ID, []int64{group.ID}))
+			beforeGroup, err := tx.Client().Group.Get(ctx, group.ID)
+			require.NoError(t, err)
+			expected, err := repo.GetByID(ctx, account.ID)
+			require.NoError(t, err)
+			applied, err := repo.UpdateUpstreamModelMappingIfUnchanged(ctx, expected, map[string]string{"live": "live", "public": "live"})
+			require.NoError(t, err)
+			require.True(t, applied)
+			latest, err := repo.GetByID(ctx, account.ID)
+			require.NoError(t, err)
+			require.Equal(t, "synthetic-key", latest.GetCredential("api_key"))
+			require.Equal(t, map[string]any{"keep": true}, latest.Credentials["unrelated"])
+			require.Equal(t, map[string]any{"live": "live", "public": "live"}, latest.Credentials["model_mapping"])
+			require.Equal(t, []int64{group.ID}, latest.GroupIDs)
+			afterGroup, err := tx.Client().Group.Get(ctx, group.ID)
+			require.NoError(t, err)
+			require.Equal(t, beforeGroup.ModelAllowlist, afterGroup.ModelAllowlist, "fetch/apply must never distribute models into groups")
+		})
+	}
+}
+
 func TestOAuthDegradationNativeModelSyncFencesAccountAvailabilityChanges(t *testing.T) {
 	for _, change := range []string{"scheduling paused", "status changed"} {
 		t.Run(change, func(t *testing.T) {

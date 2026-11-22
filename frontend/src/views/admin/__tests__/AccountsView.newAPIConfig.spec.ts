@@ -3,13 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import AccountsView from '../AccountsView.vue'
 
-const { list, getConfig, saveConfig, probe, auth } = vi.hoisted(() => ({ list: vi.fn(), getConfig: vi.fn(), saveConfig: vi.fn(), probe: vi.fn(), auth: { user: { id: 42 }, token: 'test-token', isAdmin: true, isSimpleMode: false } }))
+const { list, getConfig, saveConfig, probe, syncModels, auth } = vi.hoisted(() => ({ list: vi.fn(), getConfig: vi.fn(), saveConfig: vi.fn(), probe: vi.fn(), syncModels: vi.fn(), auth: { user: { id: 42 }, token: 'test-token', isAdmin: true, isSimpleMode: false } }))
 vi.mock('@/api/admin', () => ({ adminAPI: {
   accounts: {
     getManagementCapabilities: vi.fn().mockResolvedValue({ concurrency_upgrade_enabled: false }), list,
     getBatchTodayStats: vi.fn().mockResolvedValue({ stats: {} }),
     getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({ enabled: true, interval_minutes: 30 }),
     probeUpstreamBilling: probe,
+    syncUpstreamModels: syncModels,
     getUpstreamBillingRatesWithEtag: vi.fn().mockResolvedValue({ notModified: true, data: null })
   }, proxies: { getAll: vi.fn().mockResolvedValue([]) }, groups: { getAll: vi.fn().mockResolvedValue([]) }
 } }))
@@ -23,7 +24,7 @@ const open = async () => {
   wrapper = mount(AccountsView, { global: { plugins: [createPinia()], stubs: {
     AppLayout: { template: '<div><slot /></div>' },
     TablePageLayout: { template: '<div><slot name="table" /></div>' },
-    DataTable: { props: ['data'], template: '<div><div v-for="row in data" :key="row.id"><slot name="cell-upstream_billing_rate" :row="row" /></div></div>' },
+    DataTable: { props: ['data'], template: '<div><div v-for="row in data" :key="row.id"><slot name="cell-upstream_billing_rate" :row="row" /><slot name="cell-actions" :row="row" /></div></div>' },
     AccountTableActions: true, AccountTableFilters: true, AccountBulkActionsBar: true, Pagination: true,
     ConfirmDialog: true, AccountActionMenu: true, ImportDataModal: true, ReAuthAccountModal: true,
     AccountTestModal: true, AccountStatsModal: true, IQTestModal: true, ScheduledTestsPanel: true,
@@ -46,6 +47,17 @@ beforeEach(() => {
 afterEach(() => wrapper?.unmount())
 
 describe('account page New API configuration', () => {
+  it.each(['new_api', 'sub2api'])('applies %s saved models only after the explicit gateway action', async (kind) => {
+    list.mockResolvedValue({ items: [{ ...row, platform: 'gateway', type: 'gateway', credentials: { upstream_kind: kind } }], total: 1, page: 1, page_size: 20, pages: 1 })
+    syncModels.mockResolvedValue({ models: ['live'], applied: true, changed: true })
+    const wrapper = await open()
+    expect(syncModels).not.toHaveBeenCalled()
+    await wrapper.get('[data-testid="gateway-sync-saved"]').trigger('click')
+    await flushPromises()
+    expect(syncModels).toHaveBeenCalledWith(7, { apply: true, whitelist_only: true })
+    expect(list).toHaveBeenCalledTimes(2)
+  })
+
   it('opens the dialog for the clicked account and refreshes list bindings after saving', async () => {
     const wrapper = await open()
     await wrapper.get('[data-testid="upstream-billing-configure"]').trigger('click')

@@ -12,6 +12,7 @@ export const NEW_FEATURE_NOTICES = {
   channelConfig: 'channel-configuration-20261119',
   imageUsageBilling: 'image-usage-minimum-charge-20261119',
   crossPlatformGatewayAccounts: 'cross-platform-gateway-accounts',
+  gatewayModelSync: 'gateway-account-model-sync-20261122',
   newAPICostConversion: 'new-api-cost-conversion-20261119',
   accountOpsBalanceNotification: 'account-ops-per-account-balance-notification-20261119',
   channelUltrafastPricing: 'channel-ultrafast-pricing-initial-announcement',

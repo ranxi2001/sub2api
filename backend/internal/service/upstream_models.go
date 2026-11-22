@@ -237,6 +237,11 @@ func visibleUpstreamModelIDs(account *Account, models []string) []string {
 // snapshot. When no model is complete, the existing account snapshot is left
 // untouched.
 func (s *AccountTestService) SyncUpstreamModelCatalog(ctx context.Context, account *Account) (*UpstreamModelCatalog, error) {
+	// A gateway aggregates providers. Discovery must neither infer provider
+	// capabilities nor write metadata/health state; only explicit apply saves IDs.
+	if account != nil && (account.IsGateway() || account.Platform == PlatformGateway) {
+		return s.fetchWhitelistCatalog(ctx, account)
+	}
 	fetched, err := s.fetchUpstreamModelListWithObservation(ctx, account)
 	var (
 		models          []string
@@ -1035,6 +1040,8 @@ func listVertexGeminiPublisherModels(location string, fetchPage func(page int, l
 
 func (s *AccountTestService) buildUpstreamModelsRequest(ctx context.Context, account *Account) (*http.Request, error) {
 	switch {
+	case account.IsGateway() || account.Platform == PlatformGateway:
+		return s.buildGatewayUpstreamModelsRequest(ctx, account)
 	case account.Platform == PlatformAntigravity:
 		return s.buildAntigravityAPIKeyModelsRequest(ctx, account)
 	case account.IsGrok():
@@ -1051,6 +1058,26 @@ func (s *AccountTestService) buildUpstreamModelsRequest(ctx context.Context, acc
 			fmt.Sprintf("Unsupported platform for upstream model sync: %s", account.Platform), nil,
 		)
 	}
+}
+
+func (s *AccountTestService) buildGatewayUpstreamModelsRequest(ctx context.Context, account *Account) (*http.Request, error) {
+	if err := ValidateGatewayAccountIdentity(account.Platform, account.Type, account.Credentials); err != nil {
+		return nil, newUpstreamModelSyncConfigError("Invalid gateway account credentials", err)
+	}
+	if account.ProxyID != nil && *account.ProxyID > 0 && account.Proxy == nil {
+		return nil, newUpstreamModelSyncConfigError("Selected proxy is unavailable", nil)
+	}
+	baseURL, err := s.validateUpstreamBaseURL(account.GetCredential("base_url"))
+	if err != nil {
+		return nil, newUpstreamModelSyncConfigError("Invalid gateway base URL", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, buildV1ModelsURL(baseURL), nil)
+	if err != nil {
+		return nil, newUpstreamModelSyncConfigError("Invalid gateway model list URL", err)
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(account.GetCredential("api_key")))
+	return req, nil
 }
 
 func (s *AccountTestService) buildGrokUpstreamModelsRequest(ctx context.Context, account *Account) (*http.Request, error) {

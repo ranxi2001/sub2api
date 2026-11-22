@@ -8,6 +8,12 @@ import { buildModelMappingObject, getModelsByPlatform, getPresetMappingsByPlatfo
 import { BUILTIN_PLATFORM_CATALOG, resetPlatformCatalog, setPlatformCatalog } from '@/constants/platformCatalog'
 
 describe('useModelWhitelist', () => {
+  it('leaves gateway model defaults unrestricted without changing legacy platform defaults', () => {
+    expect(getModelsByPlatform('gateway')).toEqual([])
+    expect(getModelsByPlatform('anthropic').length).toBeGreaterThan(0)
+    expect(getModelsByPlatform('bedrock')).toEqual(getModelsByPlatform('anthropic'))
+  })
+
   it('平台清单中没有内置模型列表的多协议供应商不预填白名单', () => {
     setPlatformCatalog({
       ...BUILTIN_PLATFORM_CATALOG,
