@@ -21,10 +21,12 @@ func isOpenAIResponsesLiteHeader(value string) bool {
 }
 
 func isOpenAIResponsesLiteWebSocketPayload(body []byte) bool {
-	if len(body) == 0 || !gjson.ValidBytes(body) {
+	if len(body) == 0 {
 		return false
 	}
-	return isOpenAIResponsesLiteHeader(gjson.GetBytes(body, "client_metadata."+responsesLiteWSMetadataKey).String())
+	flag := gjson.GetBytes(body, "client_metadata."+responsesLiteWSMetadataKey).String()
+	// A lookup can succeed on incomplete JSON. Validate the entire frame before enabling Lite.
+	return isOpenAIResponsesLiteHeader(flag) && gjson.ValidBytes(body)
 }
 
 // ImageGenerationPermissionMessage returns the stable end-user error text for disabled groups.

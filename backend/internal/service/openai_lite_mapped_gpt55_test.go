@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -13,6 +14,43 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
+
+func TestOpenAIResponsesLiteWebSocketPayload(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want bool
+	}{
+		{"string header", `{"client_metadata":{"ws_request_header_x_openai_internal_codex_responses_lite":" TRUE "}}`, true},
+		{"escaped keys", `{"client_\u006detadata":{"ws_request_header_x_openai_internal_codex_responses_\u006cite":true}}`, true},
+		{"text only", `{"input":"ws_request_header_x_openai_internal_codex_responses_lite"}`, false},
+		{"first duplicate wins", `{"client_metadata":{"ws_request_header_x_openai_internal_codex_responses_lite":false,"ws_request_header_x_openai_internal_codex_responses_lite":true}}`, false},
+		{"trailing data", `{"client_metadata":{"ws_request_header_x_openai_internal_codex_responses_lite":true}} x`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, isOpenAIResponsesLiteWebSocketPayload([]byte(tc.body)))
+		})
+	}
+}
+
+func BenchmarkOpenAIResponsesLiteWebSocketPayload(b *testing.B) {
+	const line = `func work() { log(\"hello\") }\n`
+	history := strings.Repeat(line, (1<<20)/len(line))
+	for _, tc := range []struct{ name, metadata string }{
+		{"no_metadata", ""},
+		{"thread_metadata", `"client_metadata":{"thread_id":"sample"},`},
+		{"enabled", `"client_metadata":{"ws_request_header_x_openai_internal_codex_responses_lite":true},`},
+		{"escaped_flag", `"client_metadata":{"ws_request_header_x_openai_internal_codex_responses_\u006cite":true},`},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			body := []byte(`{` + tc.metadata + `"input":[{"type":"message","content":"` + history + `"}]}`)
+			b.ReportAllocs()
+			for b.Loop() {
+				isOpenAIResponsesLiteWebSocketPayload(body)
+			}
+		})
+	}
+}
 
 func TestMappedGPT55LiteCompatibility(t *testing.T) {
 	for _, tc := range []struct {
