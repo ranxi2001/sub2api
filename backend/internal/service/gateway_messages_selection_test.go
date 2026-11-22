@@ -194,6 +194,27 @@ func TestGatewayProtocolCatalogFollowsLiveBindings(t *testing.T) {
 	require.Empty(t, svc.GetAvailableModels(ctx, &base.group.ID, PlatformOpenAI))
 }
 
+func TestGatewayProtocolCatalogSavedModelsAndGroupPrecedence(t *testing.T) {
+	base, ctx := gatewayProtocolFixture(PlatformOpenAI)
+	base.account.Credentials["model_mapping"] = map[string]any{"saved": "wire", "other": "other"}
+	svc := &GatewayService{accountRepo: &gatewayMessagesCandidateRepo{gatewayProtocolAdmissionRepo: base}}
+	models, err := svc.GetGroupModelCatalog(ctx, base.group.ID, PlatformOpenAI)
+	require.NoError(t, err)
+	require.Equal(t, []string{"other", "saved"}, models, "saved IDs replace platform defaults")
+	base.group.ModelAllowlist = GroupModelAllowlist{Enabled: true, Models: []string{"saved"}}
+	models, err = svc.GetGroupModelCatalog(ctx, base.group.ID, PlatformOpenAI)
+	require.NoError(t, err)
+	require.Equal(t, []string{"saved"}, models)
+	base.account.Credentials["model_mapping"] = map[string]any{"*": "wire"}
+	models, err = svc.GetGroupModelCatalog(ctx, base.group.ID, PlatformOpenAI)
+	require.NoError(t, err)
+	require.Equal(t, []string{"saved"}, models, "explicit group IDs seed wildcard account mappings")
+	base.account.AccountGroups[0].AllowedModels = []string{"other"}
+	models, err = svc.GetGroupModelCatalog(ctx, base.group.ID, PlatformOpenAI)
+	require.NoError(t, err)
+	require.Empty(t, models, "a fetched catalog must not bypass binding admission")
+}
+
 func TestGatewayProtocolOpenAIChannelModelKeepsBinding(t *testing.T) {
 	base, ctx := gatewayProtocolFixture(PlatformOpenAI)
 	ctx = WithGatewayOpenAISelection(ctx, "public", "public")

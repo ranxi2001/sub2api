@@ -33,6 +33,8 @@
       </div>
       <GatewayAccountFields v-if="editingAccount.type === 'gateway'" v-model:kind="gatewayKind" v-model:base-url="editBaseUrl"
         v-model:api-key="editApiKey" v-model:probe="upstreamBillingAutoProbeEnabled" editing />
+      <GatewayModelSettings v-if="editingAccount.type === 'gateway'" v-model:models="allowedModels" v-model:mappings="modelMappings"
+        :sync-credentials="gatewaySyncCredentials" />
       <QwenPlatformNotice v-if="editingAccount?.platform === 'qwen'" :user-id="authStore.user?.id" />
       <QwenCacheSettings v-if="editingAccount.platform === 'qwen' && editingAccount.type === 'apikey'" v-model:session-cache="qwenSessionCache" v-model:strict-affinity="qwenStrictAffinity" :user-id="authStore.user?.id" @base-url="setQwenBaseUrl" />
       <div v-if="editingAccount.credentials?.oauth_initial_selected_models != null" data-testid="initial-model-scope-snapshot" class="rounded-lg bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
@@ -3921,6 +3923,7 @@ import ProxySelector from '@/components/common/ProxySelector.vue'
 import ProxyAdBanner from '@/components/common/ProxyAdBanner.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
+import GatewayModelSettings from '@/components/account/GatewayModelSettings.vue'
 import AccountGroupModelLimits from '@/components/account/AccountGroupModelLimits.vue'
 import AccountAutoBPSSection from '@/components/account/AccountAutoBPSSection.vue'
 import {
@@ -5254,6 +5257,12 @@ const loadModelRestrictionFromMapping = (rawMapping?: Record<string, unknown>) =
 const buildModelRestrictionMapping = () =>
   buildModelMappingObject('combined', allowedModels.value, modelMappings.value)
 
+const gatewaySyncCredentials = computed(() => editingAccount.value?.type === 'gateway' ? {
+  platform: 'gateway', type: 'gateway', upstream_kind: gatewayKind.value,
+  account_id: editingAccount.value.id, base_url: editBaseUrl.value.trim(), api_key: editApiKey.value.trim(),
+  proxy_id: authStore.isObserver ? undefined : form.proxy_id ?? undefined
+} : undefined)
+
 const applyOpenAIModelMappingCredentials = (credentials: Record<string, unknown>) => {
   if (editingAccount.value?.type === 'oauth' && !isSparkShadow.value) {
     credentials.model_mapping_mode = openaiModelAliases.value ? 'aliases' : 'whitelist'
@@ -5776,6 +5785,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   } else if (newAccount.type === 'gateway') {
     gatewayKind.value = newAccount.credentials?.upstream_kind === 'new_api' ? 'new_api' : 'sub2api'
     editBaseUrl.value = String(newAccount.credentials?.base_url || '')
+    loadModelRestrictionFromMapping(newAccount.credentials?.model_mapping as Record<string, unknown> | undefined)
   } else if (newAccount.type === 'upstream' && newAccount.credentials) {
     const credentials = newAccount.credentials as Record<string, unknown>
     editBaseUrl.value = (credentials.base_url as string) || ''
@@ -6755,6 +6765,7 @@ const handleSubmit = async () => {
       updatePayload.credentials = {
         upstream_kind: gatewayKind.value,
         base_url: editBaseUrl.value.trim(),
+        model_mapping: buildModelRestrictionMapping() ?? {},
         ...(editApiKey.value.trim() ? { api_key: editApiKey.value.trim() } : {})
       }
       if (gatewayKind.value === 'sub2api') updatePayload.upstream_billing_probe_enabled = upstreamBillingAutoProbeEnabled.value

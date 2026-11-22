@@ -685,6 +685,8 @@ export async function syncUpstreamModels(
 export interface SyncUpstreamPreviewParams {
   platform: string
   type: string
+  upstream_kind?: 'sub2api' | 'new_api'
+  account_id?: number
   base_url?: string
   api_key: string
   proxy_id?: number

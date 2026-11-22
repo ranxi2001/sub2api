@@ -105,6 +105,20 @@ function findModelRow(wrapper: ReturnType<typeof mountSelector>, modelId: string
 }
 
 describe('ModelWhitelistSelector', () => {
+  it.each(['new_api', 'sub2api'] as const)('fetches %s gateway preview into an editable whitelist and preserves live aliases', async (kind) => {
+    syncUpstreamModelsPreview.mockResolvedValue({ models: ['live', 'new'], discovery_source: 'upstream' })
+    const credentials = { platform: 'gateway', type: 'gateway', upstream_kind: kind,
+      account_id: 46, api_key: '', base_url: 'https://draft.example', proxy_id: 7 }
+    const wrapper = mountSelector({ platform: 'gateway', modelValue: ['old'],
+      modelMappings: [{ from: 'public', to: 'live' }], syncCredentials: credentials })
+    await syncButton(wrapper).trigger('click')
+    await flushPromises()
+    expect(syncUpstreamModelsPreview).toHaveBeenCalledWith(credentials)
+    expect(syncUpstreamModels).not.toHaveBeenCalled()
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([['live', 'new']])
+    expect(wrapper.emitted('update:modelMappings')?.at(-1)).toEqual([[{ from: 'public', to: 'live' }]])
+  })
+
   beforeEach(() => {
     copyToClipboard.mockClear()
     showError.mockReset()
@@ -119,7 +133,7 @@ describe('ModelWhitelistSelector', () => {
     resetPlatformCatalog()
   })
 
-  it.each(['anthropic', 'openai', 'gemini', 'antigravity', 'grok', 'kimi', 'zhipu', 'deepseek', 'minimax', 'opencode_go', 'command_code', 'cline', 'mistral'])(
+  it.each(['gateway', 'anthropic', 'openai', 'gemini', 'antigravity', 'grok', 'kimi', 'zhipu', 'deepseek', 'minimax', 'opencode_go', 'command_code', 'cline', 'mistral'])(
     'supports upstream sync for %s saved accounts and creation previews',
     (platform) => {
       const wrappers = [

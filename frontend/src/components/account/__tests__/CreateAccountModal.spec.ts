@@ -2176,21 +2176,30 @@ describe('mature provider import entry', () => {
   })
 })
 
-it('creates a cross-platform gateway with the selected provider and one calling key', async () => {
+it.each(['new_api', 'sub2api'])('creates a %s gateway with editable account models and one calling key', async (kind) => {
   const wrapper = mountModal()
   await wrapper.get('[data-testid="platform-button-gateway"]').trigger('click')
   await wrapper.get('[data-tour="account-form-name"]').setValue('fixture gateway')
   const fields = wrapper.get('[data-testid="gateway-account-fields"]')
-  await fields.get('select').setValue('new_api')
+  await fields.get('select').setValue(kind)
   await fields.get('input[type="url"]').setValue('https://relay.example.com')
   await fields.get('input[type="password"]').setValue('fixture-only')
+  const selector = wrapper.getComponent(ModelWhitelistSelectorStub)
+  expect(selector.props('syncCredentials')).toMatchObject({
+    platform: 'gateway', type: 'gateway', upstream_kind: kind,
+    base_url: 'https://relay.example.com', api_key: 'fixture-only'
+  })
+  selector.vm.$emit('update:modelValue', ['live'])
+  selector.vm.$emit('update:modelMappings', [{ from: 'public', to: 'live' }])
+  await flushPromises()
   await wrapper.get('#create-account-form').trigger('submit.prevent')
   await flushPromises()
   expect(createAccountMock).toHaveBeenCalledWith(expect.objectContaining({
     platform: 'gateway',
     type: 'gateway',
     credentials: expect.objectContaining({
-      upstream_kind: 'new_api', base_url: 'https://relay.example.com', api_key: 'fixture-only'
+      upstream_kind: kind, base_url: 'https://relay.example.com', api_key: 'fixture-only',
+      model_mapping: { live: 'live', public: 'live' }
     })
   }))
 })

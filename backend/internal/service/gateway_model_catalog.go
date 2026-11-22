@@ -77,6 +77,11 @@ func (catalog gatewayModelCatalog) directModels(target string) []string {
 		for name := range account.GetModelMapping() {
 			models = append(models, name)
 		}
+		// Concrete group entries also seed wildcard account mappings. The same
+		// admission below remains authoritative for both group and account policy.
+		if group.ModelAllowlist.Enabled {
+			models = append(models, group.ModelAllowlist.Models...)
+		}
 		if len(models) == 0 {
 			models = append(models, group.ModelAllowlist.Models...)
 			if !IsMultiProtocolAPIKeyProvider(target) {

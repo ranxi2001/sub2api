@@ -10,6 +10,7 @@ on:
       - 'backend/internal/handler/admin/account*'
       - 'backend/internal/handler/dto/account_mapper_redact_test.go'
       - 'backend/internal/repository/account_repo.go'
+      - 'backend/internal/repository/account_repo_upstream_model_sync*'
       - 'backend/internal/repository/group_repo.go'
       - 'backend/internal/repository/gateway_account*'
       - 'backend/internal/repository/gateway_request_admission*'
@@ -84,7 +85,7 @@ jobs:
         run: |
           set -euo pipefail
           go test -race -tags=unit ./internal/service ./internal/handler ./internal/handler/admin ./internal/handler/dto ./internal/repository \
-            -run '^Test(GatewayIdentity|GatewayUsage|GatewayManagement|GatewayProtocol|GatewayDataImport|AccountGatewayDTO|NewAPIGateway|NewAPICostRequest|NewAPICostScale|UsagePlatformSnapshots|ProcurementSnapshot|ObserverProcurementSnapshot)' \
+            -run '^Test(GatewayIdentity|GatewayUsage|GatewayManagement|GatewayProtocol|GatewayUpstreamModels|AccountHandlerGatewayModels|GatewayDataImport|AccountGatewayDTO|NewAPIGateway|NewAPICostRequest|NewAPICostScale|UsagePlatformSnapshots|ProcurementSnapshot|ObserverProcurementSnapshot)' \
             -count=1 -v -timeout=10m 2>&1 | tee ../evidence/unit-race.log
           if grep -Eq -- 'no tests to run|--- SKIP:' ../evidence/unit-race.log; then
             exit 1
@@ -94,6 +95,9 @@ jobs:
           grep -F -- '--- PASS: TestUsagePlatformSnapshotsSelectedAccount' ../evidence/unit-race.log
           grep -F -- '--- PASS: TestGatewayManagementCreateValidatesBeforeWritesAndBindsExplicitGroups' ../evidence/unit-race.log
           grep -F -- '--- PASS: TestGatewayManagementForwardingRemainsClosed' ../evidence/unit-race.log
+          grep -F -- '--- PASS: TestGatewayUpstreamModelsDiscoveryAndApply' ../evidence/unit-race.log
+          grep -F -- '--- PASS: TestAccountHandlerGatewayModelsDraftAndSavedConnection' ../evidence/unit-race.log
+          grep -F -- '--- PASS: TestGatewayProtocolCatalogSavedModelsAndGroupPrecedence' ../evidence/unit-race.log
           grep -F -- '--- PASS: TestGatewayProtocolForwardUsesNativeBuildersAndSharedIdentity' ../evidence/unit-race.log
           grep -F -- '--- PASS: TestGatewayProtocolOpenAIAuthoritativeAdmission' ../evidence/unit-race.log
           grep -F -- '--- PASS: TestGatewayProtocolOpenAIRejectsFinalAuthorityChanges' ../evidence/unit-race.log
@@ -148,6 +152,16 @@ jobs:
           grep -F -- '--- PASS: TestProcurementSnapshotDurableReplayDoesNotRepriceOrRecharge' ../evidence/procurement-cost.log
           grep -F -- '--- PASS: TestProcurementSnapshotProfitUsesMixedRequestTargetsAndUnknowns' ../evidence/procurement-cost.log
           grep -F -- '--- PASS: TestProcurementSnapshotMigrationLeavesHistoryAndChargesUntouched' ../evidence/procurement-cost.log
+      - name: Gateway account-only model persistence
+        working-directory: backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -race -tags=integration ./internal/repository \
+            -run '^Test(GatewayUpstreamModelsPersistOnlyAccountMapping|ApplyUpstreamModelsPreservesCredentialsAndInvalidatesScheduler)$' \
+            -count=1 -v -timeout=10m 2>&1 | tee ../evidence/gateway-model-persistence.log
+          if grep -Eq -- 'no tests to run|--- SKIP:' ../evidence/gateway-model-persistence.log; then exit 1; fi
+          grep -F -- '--- PASS: TestGatewayUpstreamModelsPersistOnlyAccountMapping' ../evidence/gateway-model-persistence.log
       - uses: actions/upload-artifact@v7
         if: always()
         with:

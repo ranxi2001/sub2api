@@ -108,6 +108,8 @@ func TestGatewayManagementCreateValidatesBeforeWritesAndBindsExplicitGroups(t *t
 
 func TestGatewayManagementUpdatePreservesKeyAndRejectsIdentityConversion(t *testing.T) {
 	a := gatewayManagementFixture()
+	a.Credentials["model_mapping"] = map[string]any{"public": "upstream"}
+	a.Credentials["unknown_option"] = map[string]any{"keep": true}
 	repo := &gatewayManagementAtomicRepo{accountRepoStubForBulkUpdate: &accountRepoStubForBulkUpdate{getByIDAccounts: map[int64]*Account{959: a}}}
 	svc := &adminServiceImpl{accountRepo: repo}
 	updated, err := svc.UpdateAccount(context.Background(), 959, &UpdateAccountInput{
@@ -116,6 +118,14 @@ func TestGatewayManagementUpdatePreservesKeyAndRejectsIdentityConversion(t *test
 	require.Equal(t, 1, repo.transactions)
 	require.Equal(t, "synthetic-key", updated.Credentials["api_key"])
 	require.Equal(t, "new_api", updated.Credentials["upstream_kind"])
+	require.Equal(t, map[string]any{"public": "upstream"}, updated.Credentials["model_mapping"])
+	require.Equal(t, map[string]any{"keep": true}, updated.Credentials["unknown_option"])
+	_, err = svc.UpdateAccount(context.Background(), 959, &UpdateAccountInput{Credentials: map[string]any{"api_key": "rotated-synthetic-key"}})
+	require.NoError(t, err)
+	_, err = svc.UpdateAccount(context.Background(), 959, &UpdateAccountInput{GroupIDs: &[]int64{}})
+	require.NoError(t, err)
+	require.Equal(t, map[string]any{"public": "upstream"}, a.Credentials["model_mapping"])
+	require.Equal(t, map[string]any{"keep": true}, a.Credentials["unknown_option"])
 	for _, input := range []*UpdateAccountInput{{Platform: PlatformOpenAI}, {Type: AccountTypeAPIKey}, {Credentials: map[string]any{"upstream_kind": "unknown"}}} {
 		repo.updatedAccounts = nil
 		_, err := svc.UpdateAccount(context.Background(), 959, input)
