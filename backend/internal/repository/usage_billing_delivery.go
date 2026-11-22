@@ -126,8 +126,12 @@ func (r *usageBillingRepository) settleStagedUsageBilling(ctx context.Context, k
 	if errors.Is(err, errStagedBillingOwnerBusy) {
 		if release, ok := r.admission.trySQL(r.db.Stats().MaxOpenConnections); ok {
 			defer release()
-			_, err = r.db.ExecContext(ctx, `UPDATE usage_billing_events SET next_attempt_at=NOW()+INTERVAL '1 second'
-                WHERE request_id=$1 AND api_key_id=$2 AND state IN ('pending','applied') AND next_attempt_at<=NOW()`, key.RequestID, key.APIKeyID)
+			_, err = r.db.ExecContext(ctx, `WITH due AS (
+				SELECT request_id,api_key_id FROM usage_billing_events
+				WHERE request_id=$1 AND api_key_id=$2 AND state IN ('pending','applied') AND next_attempt_at<=NOW()
+				FOR UPDATE SKIP LOCKED
+			) UPDATE usage_billing_events e SET next_attempt_at=NOW()+INTERVAL '1 second'
+			FROM due WHERE e.request_id=due.request_id AND e.api_key_id=due.api_key_id`, key.RequestID, key.APIKeyID)
 			return nil, err
 		}
 		return nil, nil

@@ -253,3 +253,25 @@ func TestQuotaSaveUsesBillingLockOrder(t *testing.T) {
 	require.NoError(t, tx.Commit())
 	require.NoError(t, <-done)
 }
+
+func TestRecoverySkipsLockedBusyWalletReceipt(t *testing.T) {
+	repo, cmd, usage, _ := durableBillingFixture(t)
+	ctx := context.Background()
+	require.NoError(t, repo.StageUsageBilling(ctx, &cmd, &usage))
+	tx, err := repo.db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback() }()
+	var state string
+	require.NoError(t, tx.QueryRowContext(ctx, `SELECT state FROM usage_billing_events WHERE request_id=$1 AND api_key_id=$2 FOR UPDATE`, cmd.RequestID, cmd.APIKeyID).Scan(&state))
+	// A live lane owns this wallet; the event lock above models its in-flight
+	// transaction. Recovery must skip the lock, not consume its cycle waiting.
+	repo.stagedLanes.owners = map[string][]*stagedBillingRequest{strconv.FormatInt(cmd.UserID, 10): nil}
+	cycle, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+	out, err := repo.RecoverStagedUsageBilling(cycle, service.UsageBillingEventKey{RequestID: cmd.RequestID, APIKeyID: cmd.APIKeyID})
+	require.NoError(t, err)
+	require.Nil(t, out)
+	require.NoError(t, cycle.Err())
+	require.NoError(t, tx.QueryRowContext(ctx, `SELECT state FROM usage_billing_events WHERE request_id=$1 AND api_key_id=$2`, cmd.RequestID, cmd.APIKeyID).Scan(&state))
+	require.Equal(t, "pending", state)
+}
