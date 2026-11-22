@@ -113,6 +113,9 @@ func (l *stagedBillingLanes) execute(owner string, repo stagedBillingExecutor, b
 		keys[i] = req.key
 	}
 	out, err := repo.applyStagedUsageBillingBatch(active[0].ctx, owner, keys)
+	if err == nil && len(out) != len(active) {
+		err = errUsageBillingLaneBatchOutcomeMismatch
+	}
 	// Do not fall back to N independent transactions on SQL failure. Pending
 	// events remain recoverable; the recovery worker can isolate a poison event.
 	for i, req := range active {

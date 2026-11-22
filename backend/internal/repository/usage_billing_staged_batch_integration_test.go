@@ -95,15 +95,19 @@ func TestStagedBillingBatchFailureRollsBackAllEffects(t *testing.T) {
 	_, err = repo.applyStagedUsageBillingBatch(ctx, strconv.FormatInt(cmd.UserID, 10), keys)
 	require.ErrorContains(t, err, "injected batch failure")
 	var balance string
-	var logs, settled, claims int
+	var logs, settled, claims, attempts int
+	var retry time.Time
 	require.NoError(t, repo.db.QueryRowContext(ctx, `SELECT balance::text FROM users WHERE id=$1`, cmd.UserID).Scan(&balance))
 	require.Equal(t, "100.00000000", balance)
 	require.NoError(t, repo.db.QueryRowContext(ctx, `SELECT count(*) FROM usage_logs WHERE user_id=$1`, cmd.UserID).Scan(&logs))
 	require.NoError(t, repo.db.QueryRowContext(ctx, `SELECT count(*) FROM usage_billing_events WHERE api_key_id=$1 AND state<>'pending'`, cmd.APIKeyID).Scan(&settled))
+	require.NoError(t, repo.db.QueryRowContext(ctx, `SELECT min(next_attempt_at),max(attempts) FROM usage_billing_events WHERE api_key_id=$1`, cmd.APIKeyID).Scan(&retry, &attempts))
 	require.NoError(t, repo.db.QueryRowContext(ctx, `SELECT count(*) FROM usage_billing_dedup WHERE api_key_id=$1`, cmd.APIKeyID).Scan(&claims))
 	require.Zero(t, logs)
 	require.Zero(t, settled)
 	require.Zero(t, claims)
+	require.Equal(t, 1, attempts)
+	require.True(t, retry.After(time.Now().Add(29*time.Second)))
 	cleanup()
 	// Repeated keys inside a batch are only settled and notified once.
 	keys = append(keys, keys[0])

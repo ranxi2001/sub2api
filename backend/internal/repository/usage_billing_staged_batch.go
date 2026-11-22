@@ -30,6 +30,22 @@ func (r *usageBillingRepository) applyStagedUsageBillingBatch(ctx context.Contex
 		return nil, err
 	}
 	defer release()
+	defer func() {
+		if err == nil {
+			return
+		}
+		// Back off a failed batch in one bounded write. The state predicate
+		// protects a commit whose response was lost and whose receipt is durable.
+		retry, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+		defer cancel()
+		ids, apiKeys := stagedKeyArrays(keys)
+		_, _ = r.db.ExecContext(retry, `UPDATE usage_billing_events e SET
+			attempts=e.attempts+1,next_attempt_at=NOW()+INTERVAL '30 seconds',
+			failure_code='apply_failed'
+			FROM unnest($1::text[],$2::bigint[]) k(request_id,api_key_id)
+			WHERE e.request_id=k.request_id AND e.api_key_id=k.api_key_id AND e.state='pending'`,
+			pq.Array(ids), pq.Array(apiKeys))
+	}()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
