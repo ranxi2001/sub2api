@@ -12,6 +12,7 @@ on:
       - 'backend/internal/service/openai_sse_quota_type_test.go'
       - 'backend/internal/service/openai_ws_forwarder_ingress.go'
       - 'backend/internal/service/openai_gateway_passthrough.go'
+      - 'backend/internal/service/openai_account_runtime_block_fastpath.go'
       - 'backend/go.mod'
       - 'backend/go.sum'
   workflow_dispatch:
@@ -41,6 +42,7 @@ jobs:
     env:
       CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       BASELINE_SHA: 991cd30e2910d5eeb6ab55f6b7fc93e9a494e1a6
+      F1_UNSAFE_SHA: 282af88f3fbf767b0235fec62ca5596bdc3d8449
       ISSUE917_TEST_POSTGRES_DSN: 'postgres://fixture:fixture@127.0.0.1:15432/issue917_fixture?sslmode=disable'
     steps:
       - uses: actions/checkout@v6
@@ -79,6 +81,35 @@ jobs:
             test "$(git -C "$red" hash-object "$path")" = "$blob"
             test "$(git hash-object "$path")" = "$blob"
             printf '%s %s\n' "$blob" "$path" >> "$evidence/oracle-blobs.txt"
+          done
+      - name: Record F1 identity and restore only the unsafe normalized-quota classifier
+        id: prepare_f1
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/pr1012-evidence"
+          red="$RUNNER_TEMP/pr1012-f1-red"
+          printf 'candidate=%s\nunsafe=%s\n' "$CANDIDATE_SHA" "$F1_UNSAFE_SHA" > "$evidence/f1-identity.txt"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test -z "$(git status --porcelain)"
+          git worktree add --detach "$red" "$CANDIDATE_SHA"
+          test "$(git -C "$red" rev-parse HEAD)" = "$CANDIDATE_SHA"
+          git -C "$red" rev-parse HEAD HEAD^{tree} >> "$evidence/f1-identity.txt"
+          path=backend/internal/service/openai_gateway_passthrough.go
+          git show "$F1_UNSAFE_SHA:$path" > "$red/$path"
+          blob="$(git rev-parse "$F1_UNSAFE_SHA:$path")"
+          test "$(git -C "$red" hash-object "$path")" = "$blob"
+          printf '%s %s\n' "$blob" "$path" > "$evidence/f1-unsafe-blob.txt"
+          printf '%s %s\n' "$(git rev-parse "$CANDIDATE_SHA:$path")" "$path" > "$evidence/f1-candidate-blob.txt"
+          test "$(git -C "$red" diff --name-only)" = "$path"
+          test -z "$(git -C "$red" ls-files --others --exclude-standard)"
+          git -C "$red" diff -- "$path" > "$evidence/f1-red-production.diff"
+          oracles=(backend/internal/handler/openai_ws_retry_deadline_test.go backend/internal/handler/openai_retry_owner_test.go backend/internal/service/openai_sse_quota_type_test.go backend/internal/service/openai_retry_deadline_test_support.go .github/scripts/pr1012-oracle.py .github/workflows/pr1012-retry-quota-oracle.yml)
+          for path in "${oracles[@]}"; do
+            blob="$(git rev-parse "$CANDIDATE_SHA:$path")"
+            test "$(git -C "$red" hash-object "$path")" = "$blob"
+            test "$(git hash-object "$path")" = "$blob"
+            printf '%s %s\n' "$blob" "$path" >> "$evidence/f1-oracle-blobs.txt"
           done
       - uses: actions/setup-go@v6
         with:
@@ -123,6 +154,19 @@ jobs:
           printf '%s\n' "$status" > "$evidence/red-b3.exitcode"
           cat "$evidence/red-b3.jsonl"
           python3 .github/scripts/pr1012-oracle.py red-b3 "$evidence/red-b3.exitcode" "$evidence/red-b3.jsonl" 2>&1 | tee "$evidence/red-b3-verdict.txt"
+      - name: RED F1 requires semantic502 in all 24 normalized explicit-code reader leaves
+        if: ${{ !cancelled() && steps.prerequisites.outcome == 'success' && steps.prepare_f1.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/pr1012-evidence"
+          set +e
+          (cd "$RUNNER_TEMP/pr1012-f1-red/backend" && go test -p=2 -race -tags=unit,retrydeadline ./internal/service -run '^TestSSEQuotaNormalizedExplicitCodeReaders$' -count=1 -json -timeout=3m) > "$evidence/red-f1.jsonl" 2>&1
+          status=$?
+          set -e
+          printf '%s\n' "$status" > "$evidence/red-f1.exitcode"
+          cat "$evidence/red-f1.jsonl"
+          python3 .github/scripts/pr1012-oracle.py red-f1 "$evidence/red-f1.exitcode" "$evidence/red-f1.jsonl" 2>&1 | tee "$evidence/red-f1-verdict.txt"
       - name: GREEN all retry stages, initial drain, quota, strict owner, output and Issue917 policy controls
         if: ${{ !cancelled() && steps.prerequisites.outcome == 'success' }}
         shell: bash
@@ -132,7 +176,7 @@ jobs:
           test -z "$(git status --porcelain)"
           evidence="$RUNNER_TEMP/pr1012-evidence"
           set +e
-          (cd backend && go test -p=2 -race -tags=unit,retrydeadline,issue917pg ./internal/service ./internal/handler -run '^Test(OpenAIWSRetryDeadlineAtGenerationWrite|SSETypeOnlyQuotaReaders|SSEQuotaBareErrorCanComplete|SSEQuotaClassificationRetainsExplicitCodeAndIntegrity|SSEQuotaTerminalDoesNotGrantHTTPRejectionProof|SSEQuotaWithoutResetUsesBoundedAccountFailover|StrictSameAccountRetryRequiresCurrentBinding|SameAccountRetrySchedulerCannotEscape|StrictSessionAffinityLosingFirstTurnReleasesSlot|OAuthRetryOwnerBusyAfterSlotRelease|OAuthNormalEOFBeforeOutputPreservesAccount|OAuthNormalEOFAfterOutputCannotReplay|OpenAIGatewayService_ProxyResponsesWebSocketFromClient_ClientDisconnectStillDrainsUpstream|OpenAIResponseFlush_BareErrorFollowedByCompletedUsesCompletedTerminal|OpenAIStreamingPassthroughBareErrorTerminatesBeforeDone|OpenAIStreamingPassthroughBareErrorDrainsAuthoritativeFailedUsage|Issue917ResponsesCooldown)$' -count=1 -json -timeout=12m) > "$evidence/green.jsonl" 2>&1
+          (cd backend && go test -p=2 -race -tags=unit,retrydeadline,issue917pg ./internal/service ./internal/handler -run '^Test(OpenAIWSRetryDeadlineAtGenerationWrite|SSETypeOnlyQuotaReaders|SSEQuotaNormalizedExplicitCodeReaders|SSEQuotaBareErrorCanComplete|SSEQuotaClassificationRetainsExplicitCodeAndIntegrity|SSEQuotaTerminalDoesNotGrantHTTPRejectionProof|SSEQuotaWithoutResetUsesBoundedAccountFailover|StrictSameAccountRetryRequiresCurrentBinding|SameAccountRetrySchedulerCannotEscape|StrictSessionAffinityLosingFirstTurnReleasesSlot|OAuthRetryOwnerBusyAfterSlotRelease|OAuthNormalEOFBeforeOutputPreservesAccount|OAuthNormalEOFAfterOutputCannotReplay|OpenAIGatewayService_ProxyResponsesWebSocketFromClient_ClientDisconnectStillDrainsUpstream|OpenAIResponseFlush_BareErrorFollowedByCompletedUsesCompletedTerminal|OpenAIStreamingPassthroughBareErrorTerminatesBeforeDone|OpenAIStreamingPassthroughBareErrorDrainsAuthoritativeFailedUsage|Issue917ResponsesCooldown)$' -count=1 -json -timeout=12m) > "$evidence/green.jsonl" 2>&1
           status=$?
           set -e
           printf '%s\n' "$status" > "$evidence/green.exitcode"

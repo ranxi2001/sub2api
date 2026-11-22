@@ -1609,8 +1609,10 @@ func openAIStreamFailedEventSemanticStatus(payload []byte, message string) int {
 	// Bare errors can precede a successful terminal. Only a terminal refusal
 	// with unambiguous quota evidence grants the quota failover behavior.
 	case gjson.GetBytes(payload, "type").String() == "response.failed" &&
-		isOpenAIQuotaExhaustedResponse(payload) &&
-		(code == "" || code == "usage_limit_reached" || code == "insufficient_quota" || code == "quota_exceeded"):
+		openAIEncryptedJSONUnambiguous(payload) &&
+		(code == "usage_limit_reached" || code == "insufficient_quota" || code == "quota_exceeded" ||
+			(code == "" && isOpenAIQuotaExhaustedResponse(payload))):
+		// Explicit codes retain their historical lowercase/trim normalization.
 		// An unrelated explicit code retains its existing semantic status and
 		// configured cooldown policy, even under a broad quota error type.
 		return http.StatusTooManyRequests

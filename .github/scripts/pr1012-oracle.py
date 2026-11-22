@@ -12,6 +12,7 @@ from pathlib import Path
 PKG = "github.com/Wei-Shaw/sub2api/internal/"
 WS = "TestOpenAIWSRetryDeadlineAtGenerationWrite"
 READERS = "TestSSETypeOnlyQuotaReaders"
+NORMALIZED = "TestSSEQuotaNormalizedExplicitCodeReaders"
 QUOTAS = ("insufficient_quota", "quota_exceeded", "usage_limit_reached")
 BOOLS = ("false", "true")
 STAGES = ("backoff", "user_slot", "account_slot", "handshake", "inflight", "output", "canceled")
@@ -26,9 +27,19 @@ def quota_leaves():
     }
 
 
+def normalized_quota_leaves():
+    return {
+        f"{NORMALIZED}/{kind}/{quota}/{variant}/passthrough={passthrough}/pool502=true"
+        for kind, quota, variant, passthrough in itertools.product(
+            ("oauth", "apikey"), QUOTAS, ("uppercase", "padded"), BOOLS
+        )
+    }
+
+
 def green_tests():
-    service = quota_leaves() | {
+    service = quota_leaves() | normalized_quota_leaves() | {
         READERS,
+        NORMALIZED,
         "TestSSEQuotaBareErrorCanComplete",
         "TestSSEQuotaClassificationRetainsExplicitCodeAndIntegrity",
         "TestSSEQuotaTerminalDoesNotGrantHTTPRejectionProof",
@@ -102,13 +113,17 @@ def verify(mode, status_path, log_path):
             assert counts[(package, None, "fail")] == 0, f"package failed: {package}"
     else:
         assert status == 1, f"RED must be a test failure, got {status}"
-        assert mode in ("red-b1", "red-b3"), mode
+        assert mode in ("red-b1", "red-b3", "red-f1"), mode
         package = PKG + ("handler" if mode == "red-b1" else "service")
         names = {WS + "/handshake"} if mode == "red-b1" else quota_leaves()
+        if mode == "red-f1":
+            names = normalized_quota_leaves()
         expected = {(package, name) for name in names}
         terminal = "fail"
         # Slash-containing names passed to one t.Run do not create parent tests.
         expected_failures = expected | {(package, WS if mode == "red-b1" else READERS)}
+        if mode == "red-f1":
+            expected_failures = expected | {(package, NORMALIZED)}
         assert failed == expected_failures, f"missing or unexpected RED assertions: {failed ^ expected_failures}"
         assert counts[(package, None, "fail")] == 1, "missing package failure"
         assert counts[(package, None, "pass")] == 0, "unexpected package PASS"
@@ -119,6 +134,11 @@ def verify(mode, status_path, log_path):
                 assert "retry deadline observation: stage=handshake generations=2" in observed, key
                 assert "retry deadline: no generation may start after D" in observed, key
                 wanted, actual = 1, 2
+            elif mode == "red-f1":
+                assert "SSE normalized quota observation:" in observed, key
+                assert "semantic_status=502" in observed, key
+                assert "terminal normalized explicit quota must preserve semantic 429" in observed, key
+                wanted, actual = 429, 502
             else:
                 assert "semantic_status=502" in observed, key
                 assert "terminal type-only quota must preserve semantic 429" in observed, key

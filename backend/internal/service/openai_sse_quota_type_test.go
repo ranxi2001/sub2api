@@ -60,6 +60,51 @@ func TestSSETypeOnlyQuotaReaders(t *testing.T) {
 	}
 }
 
+func TestSSEQuotaNormalizedExplicitCodeReaders(t *testing.T) {
+	for _, kind := range []string{AccountTypeOAuth, AccountTypeAPIKey} {
+		for _, quota := range []string{"insufficient_quota", "quota_exceeded", "usage_limit_reached"} {
+			for _, variant := range []string{"uppercase", "padded"} {
+				for _, passthrough := range []bool{false, true} {
+					t.Run(fmt.Sprintf("%s/%s/%s/passthrough=%t/pool502=true", kind, quota, variant, passthrough), func(t *testing.T) {
+						c, rec := newOpenAIUpstreamErrorTestContext(t)
+						cfg := &config.Config{}
+						repo := &oauth429RateLimitRepo{}
+						rateLimits := NewRateLimitService(repo, nil, cfg, nil, nil)
+						svc := &OpenAIGatewayService{cfg: cfg, rateLimitService: rateLimits}
+						rateLimits.SetAccountRuntimeBlocker(svc)
+						account := &Account{ID: 42, Platform: PlatformOpenAI, Type: kind, Credentials: map[string]any{
+							"pool_mode": true, "pool_mode_retry_status_codes": []any{float64(http.StatusBadGateway)},
+							"pool_mode_retry_count": float64(2),
+						}}
+						code := strings.ToUpper(quota)
+						if variant == "padded" {
+							code = " " + quota + " "
+						}
+						payload := fmt.Sprintf(`{"type":"response.failed","response":{"error":{"type":"server_error","code":%q,"message":"Quota exhausted"}}}`, code)
+						resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: " + payload + "\n\n"))}
+						var err error
+						if passthrough {
+							_, err = svc.handleStreamingResponsePassthrough(c.Request.Context(), resp, c, account, time.Now(), "gpt-5.1", "gpt-5.1")
+						} else {
+							_, err = svc.handleStreamingResponse(c.Request.Context(), resp, c, account, time.Now(), "gpt-5.1", "gpt-5.1")
+						}
+						var failure *UpstreamFailoverError
+						require.ErrorAs(t, err, &failure)
+						t.Logf("SSE normalized quota observation: code=%q semantic_status=%d", code, failure.StatusCode)
+						require.Equal(t, http.StatusTooManyRequests, failure.StatusCode, "terminal normalized explicit quota must preserve semantic 429")
+						require.False(t, failure.RetryableOnSameAccount, "explicit pool502 retry must not resend the exhausted owner")
+						require.True(t, failure.SameAccountRetryDeadline.IsZero())
+						require.False(t, failure.QuotaRejectedBeforeExecution, "HTTP200 SSE is not HTTP429 pre-execution rejection proof")
+						require.Empty(t, rec.Body.String(), "the pre-output terminal is still eligible for bounded account failover")
+						_, retryStarted := svc.openaiOAuth429RetryStartedAt.Load(account.ID)
+						require.False(t, retryStarted)
+					})
+				}
+			}
+		}
+	}
+}
+
 func TestSSEQuotaBareErrorCanComplete(t *testing.T) {
 	for _, quota := range []string{"insufficient_quota", "quota_exceeded", "usage_limit_reached"} {
 		t.Run(quota, func(t *testing.T) {
@@ -87,6 +132,8 @@ func TestSSEQuotaClassificationRetainsExplicitCodeAndIntegrity(t *testing.T) {
 	for _, payload := range []string{
 		`{"type":"response.failed","response":{"error":{"type":"insufficient_quota","code":"credit_balance_exhausted"}}}`,
 		`{"type":"response.failed","response":{"error":{"type":"insufficient_quota","type":"server_error"}}}`,
+		`{"type":"response.failed","response":{"error":{"type":"server_error","code":"INSUFFICIENT_QUOTA","code":"server_error"}}}`,
+		`{"type":"response.failed","response":{"error":{"type":"server_error","code":" QUOTA_EXCEEDED "}}`,
 	} {
 		require.Equal(t, http.StatusBadGateway, openAIStreamFailedEventSemanticStatus([]byte(payload), "Quota exhausted"))
 	}

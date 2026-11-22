@@ -87,6 +87,14 @@ func classifyOpenAIOAuth429(headers http.Header, responseBody []byte) (openAIOAu
 	if isOpenAIQuotaExhaustedResponse(responseBody) {
 		return openAIOAuth429QuotaExhausted, nil
 	}
+	// SSE semantic status normalizes explicit codes. Keep that terminal quota
+	// evidence for OAuth retry policy without rewriting the body used by rules.
+	if gjson.GetBytes(responseBody, "type").String() == "response.failed" && openAIEncryptedJSONUnambiguous(responseBody) {
+		switch openAIStreamFailedEventErrorCode(responseBody) {
+		case "usage_limit_reached", "insufficient_quota", "quota_exceeded":
+			return openAIOAuth429QuotaExhausted, nil
+		}
+	}
 	return openAIOAuth429Transient, nil
 }
 
