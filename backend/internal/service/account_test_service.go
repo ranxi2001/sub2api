@@ -392,7 +392,13 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 		if testErr == nil {
 			testErr = c.Request.Context().Err()
 		}
+		gatewayProbe := IsGatewayAccountTest(c.Request.Context())
 		stopKeepalive()
+		// Keepalive restores the caller's uncancelled context for legacy health
+		// recovery. Preserve only the trusted diagnostic classification on it.
+		if gatewayProbe {
+			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), gatewayAccountTestKey{}, true))
+		}
 		s.finishAccountConnectionTiming(c, collector, testErr)
 	}()
 	started := requesttiming.AccountTestStarted(start)

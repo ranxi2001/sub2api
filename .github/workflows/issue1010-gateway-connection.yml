@@ -89,10 +89,10 @@ jobs:
         run: |
           set -euo pipefail
           go test -race -tags=unit ./internal/integration/accountconnectiontiming \
-            -run '^Test(GatewayAccountConnection(UpstreamFailureAndEOF|AdmissionNoEgress|ExplicitCompositeRoute|CancellationReleasesReader)|AccountConnectionTiming)' -count=1 -v -timeout=10m \
+            -run '^Test(GatewayAccountConnection(UpstreamFailureAndEOF|AdmissionNoEgress|ExplicitCompositeRoute|CancellationReleasesReader|NonSchedulableDiagnostic|SuccessSkipsRecoveryAfterKeepaliveCleanup|AdminMultiGroupSelection)|AccountConnectionTiming)' -count=1 -v -timeout=10m \
             2>&1 | tee ../evidence/lifecycle.log
           if grep -Eq -- 'no tests to run|--- SKIP:' ../evidence/lifecycle.log; then exit 1; fi
-          for name in TestGatewayAccountConnectionUpstreamFailureAndEOF TestGatewayAccountConnectionAdmissionNoEgress TestGatewayAccountConnectionCancellationReleasesReader; do
+          for name in TestGatewayAccountConnectionUpstreamFailureAndEOF TestGatewayAccountConnectionAdmissionNoEgress TestGatewayAccountConnectionCancellationReleasesReader TestGatewayAccountConnectionNonSchedulableDiagnostic TestGatewayAccountConnectionSuccessSkipsRecoveryAfterKeepaliveCleanup TestGatewayAccountConnectionAdminMultiGroupSelection; do
             grep -F -- "--- PASS: $name" ../evidence/lifecycle.log
           done
       - uses: actions/upload-artifact@v7
