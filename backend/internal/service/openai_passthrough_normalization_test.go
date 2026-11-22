@@ -1,6 +1,7 @@
 package service
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -306,11 +307,14 @@ func TestNormalizeOpenAIPassthroughOAuthBody_CompactRemovesUnsupportedUser(t *te
 }
 
 func TestNormalizeOpenAIPassthroughOAuthBody_StringInputWrappedAsArray(t *testing.T) {
-	body := []byte(`{"model":"gpt-5.4","input":"hello world"}`)
+	const original = `{"model":"gpt-5.4","input":"hello world"}`
+	body := []byte(original)
 
 	normalized, changed, err := normalizeOpenAIPassthroughOAuthBody(body, false)
 	require.NoError(t, err)
 	require.True(t, changed)
+	require.Equal(t, original, string(body))
+	clear(body) // The rewritten request must survive reuse of the original buffer.
 
 	input := gjson.GetBytes(normalized, "input")
 	require.True(t, input.IsArray(), "string input should be converted to array")
@@ -334,11 +338,14 @@ func TestNormalizeOpenAIPassthroughOAuthBody_EmptyStringInputWrappedAsEmptyArray
 }
 
 func TestNormalizeOpenAIPassthroughOAuthBody_ObjectInputWrappedAsArray(t *testing.T) {
-	body := []byte(`{"model":"gpt-5.4","input":{"type":"message","role":"user","content":"hi"}}`)
+	const original = `{"model":"gpt-5.4","input":{"type":"message","role":"user","content":"hi"}}`
+	body := []byte(original)
 
 	normalized, changed, err := normalizeOpenAIPassthroughOAuthBody(body, false)
 	require.NoError(t, err)
 	require.True(t, changed)
+	require.Equal(t, original, string(body))
+	clear(body)
 
 	input := gjson.GetBytes(normalized, "input")
 	require.True(t, input.IsArray(), "object input should be wrapped in array")
@@ -357,6 +364,25 @@ func TestNormalizeOpenAIPassthroughOAuthBody_ArrayInputUnchanged(t *testing.T) {
 	require.True(t, input.IsArray())
 	require.Len(t, input.Array(), 1)
 	require.Equal(t, "message", input.Array()[0].Get("type").String())
+}
+
+func BenchmarkNormalizeOpenAIPassthroughOAuthArrayInput(b *testing.B) {
+	for _, tc := range []struct {
+		name string
+		size int
+	}{{"4KiB", 4 << 10}, {"1MiB", 1 << 20}} {
+		b.Run(tc.name, func(b *testing.B) {
+			body := []byte(`{"model":"gpt-5.5","store":false,"stream":true,"input":[{"role":"user","content":"` +
+				strings.Repeat("x", tc.size) + `"}]}`)
+			b.SetBytes(int64(len(body)))
+			b.ReportAllocs()
+			for b.Loop() {
+				if _, changed, err := normalizeOpenAIPassthroughOAuthBody(body, false); changed || err != nil {
+					b.Fatalf("changed=%v err=%v", changed, err)
+				}
+			}
+		})
+	}
 }
 
 func TestDetectOpenAIPassthroughInstructionsRejectReason(t *testing.T) {
