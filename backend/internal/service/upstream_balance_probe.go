@@ -19,6 +19,7 @@ const (
 	upstreamBalanceProbePath = "/v1/usage"
 	// /v1/usage also returns per-model and per-day statistics next to the
 	// balance, so it is allowed a larger body than the billing endpoint.
+	upstreamBalanceProbeTimeout          = 30 * time.Second
 	upstreamBalanceProbeMaxBodyBytes     = 256 * 1024
 	upstreamBalanceProbeMaxWindows       = 8
 	upstreamBalanceProbeMaxPlanNameRunes = 64
@@ -77,17 +78,15 @@ type upstreamUsageBalanceRateLimit struct {
 	ResetAt *string  `json:"reset_at"`
 }
 
-// upstreamBalanceProbeAllowed decides whether the balance request follows the
-// rate request of the same probe. It only follows a rate request that reached
-// the upstream: a transport failure would just repeat, 401 means the key is
-// rejected (and a Sub2API upstream counts every rejected key against the
-// caller's IP), and 429 asks the caller to back off. Official provider APIs
-// never serve Sub2API's usage endpoint; OpenAI accounts without a custom base
-// URL still probe api.openai.com for the rate but must not send the key to a
-// second official path.
+// A slow rate endpoint can time out while the separate key usage endpoint
+// still answers. Other transport failures skip the second GET, as do key
+// rejections and rate limits. Official APIs do not serve Sub2API key usage.
 func upstreamBalanceProbeAllowed(baseURL string, rate upstreamBillingProbeHTTPResult) bool {
+	if rate.statusCode == 0 && !rate.timedOut {
+		return false
+	}
 	switch rate.statusCode {
-	case 0, http.StatusUnauthorized, http.StatusTooManyRequests:
+	case http.StatusUnauthorized, http.StatusTooManyRequests:
 		return false
 	}
 	return !upstreamBillingProbeTargetIsOfficialAPI(baseURL)

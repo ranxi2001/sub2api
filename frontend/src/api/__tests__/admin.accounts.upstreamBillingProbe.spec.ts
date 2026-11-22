@@ -71,7 +71,7 @@ describe('admin account upstream billing probe API', () => {
     await expect(probeUpstreamBillingBatch([7])).resolves.toEqual([result])
 
     expect(put).toHaveBeenCalledWith('/admin/accounts/7/upstream-billing-probe', { enabled: true })
-    expect(post).toHaveBeenNthCalledWith(1, '/admin/accounts/7/upstream-billing-probe')
-    expect(post).toHaveBeenNthCalledWith(2, '/admin/accounts/upstream-billing-probe/batch', { account_ids: [7] })
+    expect(post).toHaveBeenNthCalledWith(1, '/admin/accounts/7/upstream-billing-probe', undefined, { timeout: 45_000 })
+    expect(post).toHaveBeenNthCalledWith(2, '/admin/accounts/upstream-billing-probe/batch', { account_ids: [7] }, { timeout: 225_000 })
   })
 })

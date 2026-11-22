@@ -50,7 +50,8 @@ const (
 	upstreamBillingProbeUnsupportedDelayFactor = 8
 	upstreamBillingProbeAccountRateScale       = 10000.0
 	upstreamBillingProbeLeaderLockKey          = "upstream:billing:probe:leader"
-	upstreamBillingProbeLeaderLockTTL          = 2 * time.Minute
+	// A full batch can run five waves of sequential rate and balance GETs.
+	upstreamBillingProbeLeaderLockTTL = 4 * time.Minute
 )
 
 // UpstreamBillingProbeMaxBatchSize limits one manual batch and one runner cycle.
@@ -683,12 +684,12 @@ func (s *UpstreamBillingProbeService) probeLoadedAccount(ctx context.Context, ac
 	}
 	target := upstreamBillingProbeTarget{apiKey: apiKey, proxyURL: proxyURL}
 	rateResult := s.fetchUpstreamProbeBody(ctx, account, target,
-		buildOpenAIEndpointURL(normalizedBaseURL, "/v1/sub2api/billing"), upstreamBillingProbeMaxBodyBytes)
+		buildOpenAIEndpointURL(normalizedBaseURL, "/v1/sub2api/billing"), upstreamBillingProbeMaxBodyBytes, upstreamBillingProbeRequestTimeout)
 	previousRate := account.BillingRateMultiplier()
 	snapshot, syncRate := upstreamBillingRateSnapshotFromResult(account, intervalMinutes, now, rateResult, previousRate)
-	if upstreamBalanceProbeAllowed(normalizedBaseURL, rateResult) {
+	if ctx.Err() == nil && upstreamBalanceProbeAllowed(normalizedBaseURL, rateResult) {
 		balanceResult := s.fetchUpstreamProbeBody(ctx, account, target,
-			upstreamBalanceProbeURL(normalizedBaseURL, now), upstreamBalanceProbeMaxBodyBytes)
+			upstreamBalanceProbeURL(normalizedBaseURL, now), upstreamBalanceProbeMaxBodyBytes, upstreamBalanceProbeTimeout)
 		snapshot.Balance = upstreamBalanceSnapshotFromResult(balanceResult, snapshot.Balance, intervalMinutes, now)
 		// Sub2API upstreams that predate /v1/sub2api/billing still answer
 		// /v1/usage. The stretched unsupported delay is for upstreams that return
@@ -729,6 +730,7 @@ type upstreamBillingProbeHTTPResult struct {
 	header     http.Header
 	body       []byte
 	failure    string
+	timedOut   bool
 }
 
 func (s *UpstreamBillingProbeService) fetchUpstreamProbeBody(
@@ -737,8 +739,9 @@ func (s *UpstreamBillingProbeService) fetchUpstreamProbeBody(
 	target upstreamBillingProbeTarget,
 	requestURL string,
 	maxBodyBytes int,
+	timeout time.Duration,
 ) upstreamBillingProbeHTTPResult {
-	probeCtx, cancel := context.WithTimeout(ctx, upstreamBillingProbeRequestTimeout)
+	probeCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(probeCtx, http.MethodGet, requestURL, bytes.NewReader(nil))
 	if err != nil {
@@ -760,7 +763,7 @@ func (s *UpstreamBillingProbeService) fetchUpstreamProbeBody(
 	}
 	resp, err := s.accountTestService.httpUpstream.DoWithTLS(req, target.proxyURL, account.ID, account.Concurrency, tlsProfile)
 	if err != nil {
-		return upstreamBillingProbeHTTPResult{failure: "request_failed"}
+		return upstreamBillingProbeHTTPResult{failure: "request_failed", timedOut: errors.Is(err, context.DeadlineExceeded)}
 	}
 	if resp == nil || resp.Body == nil {
 		return upstreamBillingProbeHTTPResult{failure: "empty_response"}
