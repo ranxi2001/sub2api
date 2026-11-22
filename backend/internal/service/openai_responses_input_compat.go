@@ -34,60 +34,62 @@ func sanitizeOpenAIResponsesOrphanToolOutputs(reqBody map[string]any, input []an
 		return false
 	}
 
-	toolCallIDs := make(map[string]struct{}, len(input))
-	referenceIDs := make(map[string]struct{}, len(input))
+	// In a paired history, only one of each two items provides a context ID.
+	contextIDs := make(map[string]struct{}, len(input)/2)
 	for _, rawItem := range input {
 		item, ok := rawItem.(map[string]any)
 		if !ok {
 			continue
 		}
-		itemType := strings.TrimSpace(firstNonEmptyString(item["type"]))
+		itemType := firstNonEmptyString(item["type"])
 		if itemType == "item_reference" {
-			if id := strings.TrimSpace(firstNonEmptyString(item["id"])); id != "" {
-				referenceIDs[id] = struct{}{}
+			if id := firstNonEmptyString(item["id"]); id != "" {
+				contextIDs[id] = struct{}{}
 			}
 			continue
 		}
 		if !isCodexToolCallContextItemType(itemType) {
 			continue
 		}
-		if id := strings.TrimSpace(firstNonEmptyString(item["call_id"], item["id"])); id != "" {
-			toolCallIDs[id] = struct{}{}
+		if id := firstNonEmptyString(item["call_id"], item["id"]); id != "" {
+			contextIDs[id] = struct{}{}
 		}
 	}
 
-	modified := false
-	normalized := make([]any, 0, len(input))
-	for _, rawItem := range input {
+	var normalized []any
+	keepFrom := 0
+	for i, rawItem := range input {
 		item, ok := rawItem.(map[string]any)
-		if !ok || !isCodexToolCallOutputItemType(strings.TrimSpace(firstNonEmptyString(item["type"]))) {
-			normalized = append(normalized, rawItem)
+		if !ok {
+			continue
+		}
+		itemType := firstNonEmptyString(item["type"])
+		if !isCodexToolCallOutputItemType(itemType) {
 			continue
 		}
 
-		callID := strings.TrimSpace(firstNonEmptyString(item["call_id"]))
+		callID := firstNonEmptyString(item["call_id"])
 		// Codex sends externally supplied inputs (such as task delegation) as
 		// named function outputs without a preceding function call. Preserve
 		// their native type, namespace and output instead of silently dropping
 		// the request that started the turn.
-		if callID == "" && strings.TrimSpace(firstNonEmptyString(item["type"])) == "function_call_output" &&
-			strings.TrimSpace(firstNonEmptyString(item["name"])) != "" {
-			normalized = append(normalized, rawItem)
+		if callID == "" && itemType == "function_call_output" && firstNonEmptyString(item["name"]) != "" {
 			continue
 		}
-		_, hasToolCall := toolCallIDs[callID]
-		_, hasReference := referenceIDs[callID]
-		if callID != "" && (hasToolCall || hasReference) {
-			normalized = append(normalized, rawItem)
+		if _, matched := contextIDs[callID]; matched {
 			continue
 		}
 
-		modified = true
+		if normalized == nil {
+			normalized = make([]any, 0, len(input)-1)
+		}
+		normalized = append(normalized, input[keepFrom:i]...)
+		keepFrom = i + 1
 	}
-	if !modified {
+	if normalized == nil {
 		return false
 	}
-	reqBody["input"] = normalized
+	reqBody["input"] = append(normalized, input[keepFrom:]...)
 	return true
 }
 
