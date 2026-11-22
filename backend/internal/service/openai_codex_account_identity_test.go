@@ -31,6 +31,7 @@ func TestCodexRequestBodyIdentityNamespaceIsStablePerOAuthAccount(t *testing.T) 
 	account11 := &Account{ID: 11, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"chatgpt_account_id": "chatgpt-account-11"}}
 	account19 := &Account{ID: 19, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"chatgpt_account_id": "chatgpt-account-19"}}
 
+	original := bytes.Clone(body)
 	first, changed, err := applyCodexAccountIdentityClientMetadataRaw(body, account11, 77, "")
 	require.NoError(t, err)
 	require.True(t, changed)
@@ -61,6 +62,35 @@ func TestCodexRequestBodyIdentityNamespaceIsStablePerOAuthAccount(t *testing.T) 
 	require.NoError(t, json.Unmarshal([]byte(gjson.GetBytes(second, "client_metadata.x-codex-turn-metadata").String()), &embeddedSecond))
 	for _, field := range []string{"installation_id", "session_id", "thread_id", "turn_id", "window_id"} {
 		require.NotEqual(t, embeddedFirst[field], embeddedSecond[field], field)
+	}
+	require.Equal(t, original, body)
+	saved := bytes.Clone(first)
+	clear(body)
+	require.Equal(t, saved, first, "rewritten body must survive reuse of the input")
+}
+
+func BenchmarkCodexAccountIdentityMetadataHistory(b *testing.B) {
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"chatgpt_account_id": "fixture-account"}}
+	for _, tc := range []struct {
+		name   string
+		size   int
+		fields string
+	}{
+		{"4KiB", 4 << 10, ""},
+		{"1MiB", 1 << 20, ""},
+		{"1MiBPromptCacheKey", 1 << 20, `,"prompt_cache_key":"fixture-session"`},
+	} {
+		body := []byte(`{"input":[{"role":"user","content":"` + strings.Repeat("x", tc.size) + `"}]` + tc.fields + `}`)
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(len(body)))
+			for b.Loop() {
+				_, changed, err := applyCodexAccountIdentityClientMetadataRaw(body, account, 77)
+				if err != nil || changed != (tc.fields != "") {
+					b.Fatalf("changed=%t, err=%v", changed, err)
+				}
+			}
+		})
 	}
 }
 

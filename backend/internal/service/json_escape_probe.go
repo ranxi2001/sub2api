@@ -18,28 +18,41 @@ import "bytes"
 // Escapes are consumed pairwise, so an escaped backslash followed by a literal
 // u (Windows paths, regexes, code samples) is plain text, not an escape.
 func JSONMayEscapePlainASCII(body []byte) bool {
-	for i := 0; ; {
-		j := bytes.IndexByte(body[i:], '\\')
-		if j < 0 {
-			return false
-		}
-		next := i + j + 1
-		if next >= len(body) {
+	gap := bytes.IndexByte(body, '\\')
+	for gap >= 0 {
+		body = body[gap+1:]
+		if len(body) == 0 {
 			return true
 		}
-		if body[next] != 'u' {
-			i = next + 1
-			continue
+		width := 1
+		if body[0] == 'u' {
+			if len(body) < 5 {
+				return true
+			}
+			r, ok := parseJSONHex4(body[1:5])
+			if !ok || jsonEscapeHidesPlainASCII(r) {
+				return true
+			}
+			width = 5
 		}
-		if next+5 > len(body) {
-			return true
-		}
-		r, ok := parseJSONHex4(body[next+1 : next+5])
-		if !ok || jsonEscapeHidesPlainASCII(r) {
-			return true
-		}
-		i = next + 5
+		body = body[width:]
+		gap = nextJSONBackslash(body, gap)
 	}
+	return false
+}
+
+// Escapes in quoted code and tool output often cluster. After a nearby hit,
+// check the next few bytes inline before searching the rest of the body.
+func nextJSONBackslash(body []byte, previousGap int) int {
+	const nearby = 16
+	if previousGap < nearby && len(body) >= nearby {
+		for i, c := range body[:nearby] {
+			if c == '\\' {
+				return i
+			}
+		}
+	}
+	return bytes.IndexByte(body, '\\')
 }
 
 func parseJSONHex4(b []byte) (rune, bool) {

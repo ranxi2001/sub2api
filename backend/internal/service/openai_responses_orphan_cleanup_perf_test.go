@@ -120,3 +120,44 @@ func BenchmarkOAuthResponsesCompatibilityMessageHistory(b *testing.B) {
 		}
 	}
 }
+
+func TestOrphanCleanupSmallPairedHistoryAllocations(t *testing.T) {
+	input := []any{
+		map[string]any{"type": "function_call_output", "call_id": "paired"},
+		map[string]any{"type": "item_reference", "id": "paired"},
+	}
+	body := map[string]any{"input": input}
+	allocs := testing.AllocsPerRun(100, func() {
+		if sanitizeOpenAIResponsesOrphanToolOutputs(body, input, false) {
+			t.Fatal("removed a paired output")
+		}
+	})
+	if allocs > 0 {
+		t.Fatalf("unchanged two-item history allocated %.0f times per call", allocs)
+	}
+}
+
+func BenchmarkSanitizeOrphanToolOutputs(b *testing.B) {
+	for _, pairs := range []int{1, 1024} {
+		input := make([]any, 0, 2*pairs+1)
+		for i := 0; i < pairs; i++ {
+			id := fmt.Sprint(i)
+			input = append(input, map[string]any{"type": "function_call", "call_id": id},
+				map[string]any{"type": "function_call_output", "call_id": id})
+		}
+		for _, orphan := range []bool{false, true} {
+			if orphan {
+				input = append(input, map[string]any{"type": "function_call_output", "call_id": "missing"})
+			}
+			b.Run(fmt.Sprintf("pairs=%d/orphan=%t", pairs, orphan), func(b *testing.B) {
+				body := map[string]any{"input": input}
+				b.ReportAllocs()
+				for b.Loop() {
+					if sanitizeOpenAIResponsesOrphanToolOutputs(body, input, false) != orphan {
+						b.Fatal("unexpected change to tool history")
+					}
+				}
+			})
+		}
+	}
+}

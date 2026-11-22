@@ -118,6 +118,17 @@ func prepareGatewayProtocolAccount(ctx context.Context, selected *Account, reade
 }
 
 func gatewayProtocolAccountFromSnapshot(ctx context.Context, selected, current *Account, liveGroup *Group, family domain.PlatformGateway, model string) (*Account, error) {
+	return gatewayProtocolAccountFromSnapshotPolicy(ctx, selected, current, liveGroup, family, model, true)
+}
+
+// Diagnostics retain identity and model policy without requiring forwarding
+// eligibility. A paused or cooling account must remain available for diagnosis;
+// no scheduling flag or health state on the account is changed to admit it.
+func gatewayDiagnosticAccountFromSnapshot(ctx context.Context, selected, current *Account, liveGroup *Group, family domain.PlatformGateway, model string) (*Account, error) {
+	return gatewayProtocolAccountFromSnapshotPolicy(ctx, selected, current, liveGroup, family, model, false)
+}
+
+func gatewayProtocolAccountFromSnapshotPolicy(ctx context.Context, selected, current *Account, liveGroup *Group, family domain.PlatformGateway, model string, enforceScheduling bool) (*Account, error) {
 	group, _ := ctx.Value(ctxkey.Group).(*Group)
 	if selected == nil || group == nil || model == "" {
 		return nil, ErrGatewayProtocolsPending
@@ -225,7 +236,7 @@ func gatewayProtocolAccountFromSnapshot(ctx context.Context, selected, current *
 		delete(view.Extra, key)
 	}
 	view.modelMappingCacheReady = false
-	if !view.IsSchedulableForModelWithContext(ctx, selectionModel) || !view.IsSchedulableForModelWithContext(ctx, model) {
+	if enforceScheduling && (!view.IsSchedulableForModelWithContext(ctx, selectionModel) || !view.IsSchedulableForModelWithContext(ctx, model)) {
 		return nil, ErrGatewayProtocolsPending
 	}
 	if family == domain.PlatformGatewayAnthropic {

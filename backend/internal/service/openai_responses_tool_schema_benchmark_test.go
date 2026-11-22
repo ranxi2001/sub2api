@@ -127,3 +127,21 @@ func BenchmarkSanitizeOpenAIResponsesToolSchemasForPlatformClean1MiB(b *testing.
 		_, _, _ = sanitizeOpenAIResponsesToolSchemasForPlatform(body, PlatformOpenAI)
 	}
 }
+
+func BenchmarkOpenAIResponsesToolSchemasEscapedHistory(b *testing.B) {
+	for _, tc := range []struct{ name, line string }{
+		{"code", `func example() string { return \"example\" }\n`},
+		{"code_with_numbers", `if a[0] == 10 { log(\"ok\") }\n`},
+		{"unicode_escapes", `\u6d4b\u8bd5\u6570\u636e\n`},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			history := strings.Repeat(tc.line, (1<<20)/len(tc.line))
+			body := []byte(`{"tools":[{"type":"function","name":"sample","parameters":{"type":"object"}}],"input":"` + history + `"}`)
+			b.SetBytes(int64(len(body)))
+			b.ReportAllocs()
+			for b.Loop() {
+				_, _, _ = sanitizeOpenAIResponsesToolSchemasForPlatform(body, PlatformOpenAI)
+			}
+		})
+	}
+}

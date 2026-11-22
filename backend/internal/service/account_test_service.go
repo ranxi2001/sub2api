@@ -76,6 +76,8 @@ type TestEvent struct {
 type AccountTestOptions struct {
 	ImageDataURL string
 	AudioDataURL string
+	GroupID      int64
+	Platform     string
 }
 
 func firstAccountTestOptions(opts []AccountTestOptions) AccountTestOptions {
@@ -390,7 +392,13 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 		if testErr == nil {
 			testErr = c.Request.Context().Err()
 		}
+		gatewayProbe := IsGatewayAccountTest(c.Request.Context())
 		stopKeepalive()
+		// Keepalive restores the caller's uncancelled context for legacy health
+		// recovery. Preserve only the trusted diagnostic classification on it.
+		if gatewayProbe {
+			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), gatewayAccountTestKey{}, true))
+		}
 		s.finishAccountConnectionTiming(c, collector, testErr)
 	}()
 	started := requesttiming.AccountTestStarted(start)
@@ -410,7 +418,7 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 	}
 	bindAccountTestPlatform(c, account)
 	if account.gatewayProtocolsPending() {
-		return s.sendErrorAndEnd(c, ErrGatewayProtocolsPending.Error())
+		return s.testGatewayAccountConnection(c, account, modelID, prompt, mode, testOpts)
 	}
 	recordQualityBatchRoute(c, account, modelID, account.Platform+":"+account.GetAPIProtocol())
 	if expected, ok := ctx.Value(modelTraceContextKey{}).(modelTraceEnvironment); ok {
@@ -739,7 +747,7 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 		errMsg := fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body))
 
 		// 403 表示账号被上游封禁，标记为 error 状态
-		if resp.StatusCode == http.StatusForbidden && !isOAuth429Execution(ctx) {
+		if resp.StatusCode == http.StatusForbidden && !isOAuth429Execution(ctx) && !IsGatewayAccountTest(ctx) {
 			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
 		}
 
@@ -1191,7 +1199,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 			}
 		}
 		// 401 Unauthorized: 标记账号为永久错误
-		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil && !IsAstraSourceAcquisition(ctx) && !aiRecoveryProbe {
+		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil && !IsAstraSourceAcquisition(ctx) && !aiRecoveryProbe && !IsGatewayAccountTest(ctx) {
 			errMsg := fmt.Sprintf("Authentication failed (401): %s", string(body))
 			if !isOAuth429Execution(ctx) {
 				_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
@@ -2529,7 +2537,7 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 		if resp.StatusCode == http.StatusTooManyRequests {
 			s.reconcileOpenAI429State(ctx, account, resp.Header, body)
 		}
-		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil {
+		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil && !IsGatewayAccountTest(ctx) {
 			errMsg := fmt.Sprintf("Chat Completions authentication failed (401): %s", string(body))
 			if !isOAuth429Execution(ctx) {
 				_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
