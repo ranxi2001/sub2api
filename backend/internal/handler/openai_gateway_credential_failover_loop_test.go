@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -319,6 +320,7 @@ type grokCredentialHandlerUpstream struct {
 	failAccountID int64
 	rateLimitIDs  map[int64]bool
 	failureStatus map[int64]int
+	failureBody   map[int64]string
 	cancelRequest context.CancelFunc
 }
 
@@ -334,6 +336,7 @@ func (u *grokCredentialHandlerUpstream) Do(req *http.Request, _ string, accountI
 	failAccountID := u.failAccountID
 	rateLimited := u.rateLimitIDs[accountID]
 	failureStatus := u.failureStatus[accountID]
+	failureBody := u.failureBody[accountID]
 	cancelRequest := u.cancelRequest
 	u.mu.Unlock()
 	if rateLimited {
@@ -347,10 +350,13 @@ func (u *grokCredentialHandlerUpstream) Do(req *http.Request, _ string, accountI
 		}, nil
 	}
 	if failureStatus > 0 {
+		if failureBody == "" {
+			failureBody = `{"error":{"message":"upstream unavailable"}}`
+		}
 		return &http.Response{
 			StatusCode: failureStatus,
 			Header:     http.Header{"Content-Type": []string{"application/json"}},
-			Body:       io.NopCloser(bytes.NewBufferString(`{"error":{"message":"upstream unavailable"}}`)),
+			Body:       io.NopCloser(bytes.NewBufferString(failureBody)),
 		}, nil
 	}
 	if accountID == failAccountID {
@@ -364,6 +370,13 @@ func (u *grokCredentialHandlerUpstream) Do(req *http.Request, _ string, accountI
 		}, nil
 	}
 	if bytes.Contains(requestBody, []byte(`"stream":true`)) {
+		if strings.Contains(req.URL.Path, "/chat/completions") {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+				Body:       io.NopCloser(strings.NewReader("data: {\"id\":\"chatcmpl_healthy\",\"object\":\"chat.completion.chunk\",\"model\":\"grok-4.5\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\ndata: {\"id\":\"chatcmpl_healthy\",\"object\":\"chat.completion.chunk\",\"model\":\"grok-4.5\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")),
+			}, nil
+		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
@@ -740,6 +753,59 @@ func TestGrokOAuthCredentialFailoverAcrossHTTPHandlers(t *testing.T) {
 			require.Equal(t, []int64{801, 802}, repo.errorIDs())
 			require.Empty(t, upstream.accountHits())
 		})
+	}
+}
+
+func TestGrokUnknown403ChatHasOneBackup(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, stream := range []bool{false, true} {
+		for _, scenario := range []string{"backup_success", "backup_failure", "content_rejection", "explicit_cooldown", "pause_enabled"} {
+			t.Run(fmt.Sprintf("%s/stream=%t", scenario, stream), func(t *testing.T) {
+				_, repo, upstream, router, cleanup := newGrokCredentialFailoverHandler(t, "all_429")
+				defer cleanup()
+				upstream.rateLimitIDs = nil
+				upstream.failureStatus = map[int64]int{801: http.StatusForbidden}
+				upstream.failureBody = map[int64]string{801: `{"code":"permission-denied","error":"Access to the chat endpoint is denied"}`}
+				for i := range repo.accounts {
+					repo.accounts[i].Extra["grok_skip_forbidden_pause"] = scenario != "pause_enabled"
+				}
+				if scenario == "backup_failure" {
+					upstream.failureStatus[802] = http.StatusBadGateway
+				}
+				if scenario == "content_rejection" {
+					upstream.failureBody[801] = `{"error":{"code":"content_policy","message":"request rejected"}}`
+				}
+				if scenario == "explicit_cooldown" {
+					repo.accounts[0].Credentials["temp_unschedulable_enabled"] = true
+					repo.accounts[0].Credentials["temp_unschedulable_rules"] = []any{map[string]any{
+						"error_code": 403, "keywords": []any{"chat endpoint"}, "duration_minutes": 7,
+					}}
+				}
+				recorder := httptest.NewRecorder()
+				body := fmt.Sprintf(`{"model":"grok","messages":[{"role":"user","content":"hello"}],"stop":["END"],"stream":%t}`, stream)
+				req := httptest.NewRequest(http.MethodPost, "/openai/v1/chat/completions", strings.NewReader(body))
+				req.Header.Set("Content-Type", "application/json")
+				router.ServeHTTP(recorder, req)
+				if scenario == "content_rejection" {
+					require.Equal(t, []int64{801}, upstream.accountHits())
+				} else {
+					require.Equal(t, []int64{801, 802}, upstream.accountHits(), "a failed backup must never visit C")
+				}
+				if scenario == "backup_success" || scenario == "explicit_cooldown" || scenario == "pause_enabled" {
+					require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+					require.Contains(t, recorder.Body.String(), "ok")
+				}
+				if scenario == "explicit_cooldown" || scenario == "pause_enabled" {
+					require.Contains(t, repo.setTempIDs, int64(801))
+				} else if scenario == "backup_failure" {
+					require.Equal(t, []int64{802}, repo.setTempIDs, "only the backup returning 502 receives a cooldown")
+					require.Empty(t, repo.errorIDs())
+				} else {
+					require.Empty(t, repo.setTempIDs, "request-level refusals must not cool an account")
+					require.Empty(t, repo.errorIDs())
+				}
+			})
+		}
 	}
 }
 

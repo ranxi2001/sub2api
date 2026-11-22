@@ -1399,6 +1399,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					if failoverErr.RetryableOnSameAccount {
 						retryLimit := effectiveSameAccountRetryLimit(failoverErr, account)
 						if sameAccountRetryAllowed(failoverErr, sameAccountRetryCount[account.ID], retryLimit) {
+							c.Request = c.Request.WithContext(service.WithOpenAISameAccountRetry(c.Request.Context(), account.ID, failoverErr))
 							sameAccountRetryCount[account.ID]++
 							retryDelay := sameAccountRetryDelayFor(failoverErr, sameAccountRetryCount[account.ID])
 							reqLog.Warn("openai.pool_mode_same_account_retry",
@@ -1416,10 +1417,11 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 							continue
 						}
 					}
-					if failoverErr.RequestScopedTransient && failoverErr.Scope == service.GatewayFailureScopeRequest {
+					if failoverErr.SameAccountRetryOnly() {
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
 						return
 					}
+					c.Request = c.Request.WithContext(service.WithOpenAISameAccountRetry(c.Request.Context(), 0, nil))
 					h.gatewayService.RecordOpenAIAccountSwitch()
 					failedAccountIDs[account.ID] = struct{}{}
 					lastFailoverErr = failoverErr
@@ -2042,6 +2044,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 					if failoverErr.RetryableOnSameAccount {
 						retryLimit := effectiveSameAccountRetryLimit(failoverErr, account)
 						if sameAccountRetryAllowed(failoverErr, sameAccountRetryCount[account.ID], retryLimit) {
+							c.Request = c.Request.WithContext(service.WithOpenAISameAccountRetry(c.Request.Context(), account.ID, failoverErr))
 							sameAccountRetryCount[account.ID]++
 							retryDelay := sameAccountRetryDelayFor(failoverErr, sameAccountRetryCount[account.ID])
 							reqLog.Warn("openai_messages.pool_mode_same_account_retry",
@@ -2059,10 +2062,11 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 							continue
 						}
 					}
-					if failoverErr.RequestScopedTransient && failoverErr.Scope == service.GatewayFailureScopeRequest {
+					if failoverErr.SameAccountRetryOnly() {
 						h.handleAnthropicFailoverExhausted(c, failoverErr, streamStarted)
 						return
 					}
+					c.Request = c.Request.WithContext(service.WithOpenAISameAccountRetry(c.Request.Context(), 0, nil))
 					h.gatewayService.RecordOpenAIAccountSwitch()
 					failedAccountIDs[account.ID] = struct{}{}
 					lastFailoverErr = failoverErr
@@ -2876,6 +2880,13 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 	ctx = service.ContextWithSelectionPriorityRequest(ctx, selection)
 	c.Request = c.Request.WithContext(service.ContextWithSelectionPriorityRequest(c.Request.Context(), selection))
 	checkLatency := func(release func()) bool {
+		if !service.OpenAISameAccountRetryAdmissible(ctx, selection.Account.ID) {
+			if release != nil {
+				release()
+			}
+			writeError(http.StatusServiceUnavailable, "api_error", "", "Same-account retry is no longer available")
+			return false
+		}
 		if denied := h.gatewayService.CheckPriorityLatencySelection(ctx, selection); denied != nil {
 			if release != nil {
 				release()
@@ -3461,6 +3472,8 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		if !sameAccountRetryAllowed(failoverErr, sameAccountRetryCount[account.ID], retryLimit) {
 			return false
 		}
+		ctx = service.WithOpenAISameAccountRetry(ctx, account.ID, failoverErr)
+		c.Request = c.Request.WithContext(ctx)
 		sameAccountRetryCount[account.ID]++
 		retryDelay := sameAccountRetryDelayFor(failoverErr, sameAccountRetryCount[account.ID])
 		reqLog.Warn("openai.websocket.same_account_retry",
@@ -3473,7 +3486,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		case <-ctx.Done():
 			return false
 		case <-time.After(retryDelay):
-			return service.OpenAIWSIngressCanFailover(ctx, c)
+			return service.OpenAISameAccountRetryAdmissible(ctx, account.ID) && service.OpenAIWSIngressCanFailover(ctx, c)
 		}
 	}
 	handleWSFailover := func(account *service.Account, failoverErr *service.UpstreamFailoverError) bool {
@@ -3498,10 +3511,12 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		if ctx.Err() != nil {
 			return false
 		}
-		if failoverErr.RequestScopedTransient && failoverErr.Scope == service.GatewayFailureScopeRequest {
+		if failoverErr.SameAccountRetryOnly() {
 			closeOpenAIWSFailoverExhausted(c, wsConn, failoverErr)
 			return false
 		}
+		ctx = service.WithOpenAISameAccountRetry(ctx, 0, nil)
+		c.Request = c.Request.WithContext(ctx)
 		h.gatewayService.RecordOpenAIAccountSwitch()
 		failedAccountIDs[account.ID] = struct{}{}
 		lastFailoverErr = failoverErr
@@ -4385,6 +4400,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 						currentAccountRelease = accountRelease
 					}
 					wsFirstMessage = wsAttemptMessage
+					if !service.OpenAISameAccountRetryAdmissible(ctx, account.ID) {
+						releaseTurnSlots()
+						closeOpenAIWSFailoverExhausted(c, wsConn, failoverErr)
+						return
+					}
 					continue
 				}
 				if handleWSFailover(account, failoverErr) {

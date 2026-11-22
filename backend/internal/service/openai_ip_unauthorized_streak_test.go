@@ -205,6 +205,7 @@ func TestOpenAIIPUnauthorizedGatewayEarlyReturnsBreakStreak(t *testing.T) {
 		{"ordinary_400_control", 400, "{\"error\":{\"message\":\"Invalid parameter\"}}"},
 		{"context_window_400", 400, "{\"error\":{\"code\":\"context_length_exceeded\",\"message\":\"maximum context length exceeded\"}}"},
 		{"capacity_shed_503", 503, "{\"error\":{\"code\":\"server_is_overloaded\",\"message\":\"The server is overloaded\"}}"},
+		{"wrapped_concurrency_401", 401, `{"error":{"type":"authentication_error","message":"authentication failed (status=503): Too many concurrent requests"}}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &ipUnauthorizedAccountRepo{}
@@ -223,6 +224,18 @@ func TestOpenAIIPUnauthorizedGatewayEarlyReturnsBreakStreak(t *testing.T) {
 			require.False(t, gateway.isOpenAIAccountRuntimeBlocked(account))
 		})
 	}
+}
+
+func TestOpenAIIPUnauthorizedGatewayRevokedTokenStillDisables(t *testing.T) {
+	repo := &ipUnauthorizedAccountRepo{}
+	rateLimits := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	gateway := &OpenAIGatewayService{rateLimitService: rateLimits}
+	rateLimits.SetAccountRuntimeBlocker(gateway)
+	account := &Account{ID: 10, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"refresh_token": "fixture-refresh"}}
+	body := []byte(`{"error":{"code":"token_revoked","message":"Token revoked"}}`)
+	require.True(t, gateway.handleOpenAIAccountUpstreamError(context.Background(), account, 401, nil, body))
+	require.Equal(t, 1, repo.setErrorCalls)
+	require.True(t, gateway.isOpenAIAccountRuntimeBlocked(account))
 }
 
 func TestOpenAIIPUnauthorizedOtherAccountTypesUnchanged(t *testing.T) {

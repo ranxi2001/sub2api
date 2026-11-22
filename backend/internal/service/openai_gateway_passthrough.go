@@ -895,6 +895,9 @@ func stripOpenAILegacyResponsesBeta(headers http.Header) {
 }
 
 func shouldFailoverOpenAIPassthroughResponse(account *Account, statusCode int, responseBody []byte) bool {
+	if isOpenAIUpstreamSessionBlocked(responseBody) {
+		return false
+	}
 	if isSIWCEligibilityRejection(account, statusCode, responseBody) {
 		return false
 	}
@@ -1603,6 +1606,11 @@ func openAIStreamFailedEventSemanticStatus(payload []byte, message string) int {
 		}
 	}
 	switch {
+	// Bare errors can precede a successful terminal. Only a terminal refusal
+	// with a recognized provider code grants the new quota failover behavior.
+	case gjson.GetBytes(payload, "type").String() == "response.failed" &&
+		(code == "usage_limit_reached" || code == "insufficient_quota" || code == "quota_exceeded"):
+		return http.StatusTooManyRequests
 	case strings.Contains(combined, "rate_limit"):
 		return http.StatusTooManyRequests
 	case strings.Contains(errType, "invalid_request"):
@@ -2054,7 +2062,8 @@ func (s *OpenAIGatewayService) newOpenAIStreamFailoverErrorWithModel(
 	// A nil frame with this message is generated locally on a pre-output disconnect.
 	// Generic provider SSE errors also map to 502; that alone does not identify a disconnect.
 	if !shouldDisable && usesOpenAIOAuthRetryAffinity(account) && failoverErr.Scope == "" &&
-		((len(payload) == 0 && strings.HasPrefix(message, "OpenAI stream disconnected before completion")) ||
+		((len(payload) == 0 && (strings.HasPrefix(message, "OpenAI stream disconnected before completion") ||
+			message == "OpenAI stream ended before a terminal event")) ||
 			(statusCode == http.StatusServiceUnavailable && failoverErr.RequestScopedTransient)) {
 		failoverErr.preserveOpenAIOAuthBinding()
 	}

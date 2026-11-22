@@ -533,6 +533,10 @@ func (s *OpenAIGatewayService) newOpenAIAccountFailoverErrorWithClassificationHe
 		upstreamMsg,
 		retryableOnSameAccount || oauth429Retry,
 	)
+	if statusCode == http.StatusTooManyRequests && isOpenAIQuotaExhaustedResponse(responseBody) {
+		// Exhausted quota cannot recover within a pool-mode retry budget either.
+		failoverErr.RetryableOnSameAccount = false
+	}
 	if shouldDisable && account != nil && account.Platform == PlatformOpenAI && failoverErr.RequestScopedTransient {
 		// A configured model cooldown takes precedence over capacity-shed replay.
 		failoverErr.RetryableOnSameAccount = false
@@ -642,15 +646,27 @@ func openAIUpstreamErrorBodyReadLimitForConfig(cfg *config.Config) int64 {
 }
 
 func (s *OpenAIGatewayService) readUpstreamErrorBody(resp *http.Response) []byte {
+	body, _ := s.readUpstreamErrorBodyWithIntegrity(resp)
+	return body
+}
+
+// A syntactically complete prefix is not proof of a complete HTTP rejection.
+// Keep bounded diagnostics, but grant replay proof only after an error-free EOF.
+func (s *OpenAIGatewayService) readUpstreamErrorBodyWithIntegrity(resp *http.Response) ([]byte, bool) {
 	if resp == nil || resp.Body == nil {
-		return nil
+		return nil, false
 	}
 	cfg := (*config.Config)(nil)
 	if s != nil {
 		cfg = s.cfg
 	}
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, openAIUpstreamErrorBodyReadLimitForConfig(cfg)))
-	return body
+	limit := openAIUpstreamErrorBodyReadLimitForConfig(cfg)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	complete := err == nil && int64(len(body)) <= limit
+	if int64(len(body)) > limit {
+		body = body[:limit]
+	}
+	return body, complete
 }
 
 // opsUpstreamErrorDetail returns the trimmed upstream error body for an ops

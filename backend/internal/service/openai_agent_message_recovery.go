@@ -734,16 +734,7 @@ func openAIAgentQuotaFailoverAllowed(ctx context.Context, status int, body []byt
 		request.omittedHistory || request.omitted400History || status != http.StatusTooManyRequests {
 		return false
 	}
-	if !openAIEncryptedJSONUnambiguous(body) {
-		return false
-	}
-	for _, path := range []string{"error.type", "error.code", "response.error.type", "response.error.code"} {
-		switch gjson.GetBytes(body, path).String() {
-		case "usage_limit_reached", "insufficient_quota", "quota_exceeded":
-			return true
-		}
-	}
-	return false
+	return isOpenAIQuotaExhaustedResponse(body)
 }
 
 func OpenAIAgentRecoveryNoReplay(ctx context.Context) bool {
