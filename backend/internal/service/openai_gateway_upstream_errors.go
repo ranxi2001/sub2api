@@ -502,7 +502,7 @@ func (s *OpenAIGatewayService) newOpenAIHTTPAccountFailoverError(
 		failoverErr.Reason = OpenAIUpstreamCapacityCode
 		failoverErr.ClientStatusCode = http.StatusServiceUnavailable
 		failoverErr.ClientMessage = openAICapacityShedClientMessage(upstreamMsg, responseBody)
-	} else if !isOpenAIOAuthTransientServerStatus(statusCode) && !(statusCode == 529 && failoverErr.RequestScopedTransient) {
+	} else if !isOpenAIOAuthTransientServerStatus(statusCode) && (statusCode != 529 || !failoverErr.RequestScopedTransient) {
 		return failoverErr
 	}
 	failoverErr.preserveOpenAIOAuthBinding()
