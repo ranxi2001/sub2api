@@ -1230,7 +1230,7 @@ func (r *durableUsageBillingLanes) RecoverStagedUsageBilling(ctx context.Context
 	}); ok {
 		return worker.RecoverStagedUsageBilling(ctx, key)
 	}
-	return r.DurableUsageBillingRepository.ApplyStagedUsageBilling(ctx, key)
+	return r.ApplyStagedUsageBilling(ctx, key)
 }
 
 // Preserve retry rotation so a failed cache invalidation cannot starve later receipts.
