@@ -3486,7 +3486,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		case <-ctx.Done():
 			return false
 		case <-time.After(retryDelay):
-			return service.OpenAIWSIngressCanFailover(ctx, c)
+			return service.OpenAISameAccountRetryAdmissible(ctx, account.ID) && service.OpenAIWSIngressCanFailover(ctx, c)
 		}
 	}
 	handleWSFailover := func(account *service.Account, failoverErr *service.UpstreamFailoverError) bool {
@@ -4400,6 +4400,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 						currentAccountRelease = accountRelease
 					}
 					wsFirstMessage = wsAttemptMessage
+					if !service.OpenAISameAccountRetryAdmissible(ctx, account.ID) {
+						releaseTurnSlots()
+						closeOpenAIWSFailoverExhausted(c, wsConn, failoverErr)
+						return
+					}
 					continue
 				}
 				if handleWSFailover(account, failoverErr) {

@@ -1606,7 +1606,10 @@ func openAIStreamFailedEventSemanticStatus(payload []byte, message string) int {
 		}
 	}
 	switch {
-	case isOpenAIQuotaExhaustedResponse(payload):
+	// Bare errors can precede a successful terminal. Only a terminal refusal
+	// with a recognized provider code grants the new quota failover behavior.
+	case gjson.GetBytes(payload, "type").String() == "response.failed" &&
+		(code == "usage_limit_reached" || code == "insufficient_quota" || code == "quota_exceeded"):
 		return http.StatusTooManyRequests
 	case strings.Contains(combined, "rate_limit"):
 		return http.StatusTooManyRequests

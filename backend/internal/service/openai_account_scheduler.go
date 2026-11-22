@@ -593,12 +593,20 @@ func (s *defaultOpenAIAccountScheduler) Select(
 		// Retry affinity is an owner constraint, independent of weighted sticky,
 		// priority rebalancing and capacity escape. Reuse all normal admission
 		// checks and the bounded owner WaitPlan; never fall through to the pool.
-		req.StickyAccountID = retry.accountID
-		req.StickyWeighted = false
-		req.PreserveStickyBinding = true
-		req.DisableStickyEscape = true
-		req.StrictSessionAffinity = true
-		selection, _, err = s.selectBySessionHash(ctx, req)
+		if req.StrictSessionAffinity {
+			snapshot := openAIStickyBindingSnapshotFromContext(ctx, req.GroupID, req.SessionHash)
+			if snapshot == nil || !snapshot.known || snapshot.accountID != retry.accountID || req.StickyAccountID != retry.accountID {
+				return nil, decision, strictSessionUnavailable("retry owner no longer holds the session")
+			}
+			selection, decision, err = s.selectStrictSessionAccount(ctx, req)
+		} else {
+			req.StickyAccountID = retry.accountID
+			req.StickyWeighted = false
+			req.PreserveStickyBinding = true
+			req.DisableStickyEscape = true
+			req.StrictSessionAffinity = true
+			selection, _, err = s.selectBySessionHash(ctx, req)
+		}
 		if err != nil {
 			return nil, decision, err
 		}

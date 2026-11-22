@@ -206,10 +206,9 @@ func TestOAuthRetryOwnerBusyAfterSlotRelease(t *testing.T) {
 				released := append([]int64(nil), slots.released...)
 				slots.mu.Unlock()
 				require.Equal(t, acquired, released, "every actual attempt releases its slot")
-				require.NotEmpty(t, bindings.owners)
-				for _, owner := range bindings.owners {
-					require.Equal(t, int64(1), owner)
-				}
+				session := h.gatewayService.GenerateSessionHash(c, []byte(body))
+				require.NotEmpty(t, session)
+				require.Equal(t, int64(1), bindings.owners["openai:"+session], "the session binding must still belong to A")
 			})
 		}
 	}

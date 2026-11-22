@@ -797,6 +797,9 @@ func TestGrokUnknown403ChatHasOneBackup(t *testing.T) {
 				}
 				if scenario == "explicit_cooldown" || scenario == "pause_enabled" {
 					require.Contains(t, repo.setTempIDs, int64(801))
+				} else if scenario == "backup_failure" {
+					require.Equal(t, []int64{802}, repo.setTempIDs, "only the backup returning 502 receives a cooldown")
+					require.Empty(t, repo.errorIDs())
 				} else {
 					require.Empty(t, repo.setTempIDs, "request-level refusals must not cool an account")
 					require.Empty(t, repo.errorIDs())

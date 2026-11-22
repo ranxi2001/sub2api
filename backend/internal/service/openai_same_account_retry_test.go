@@ -10,6 +10,25 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestStrictSameAccountRetryRequiresCurrentBinding(t *testing.T) {
+	for _, owner := range []int64{947101, 947102, 0} {
+		t.Run(fmt.Sprint(owner), func(t *testing.T) {
+			f := newStrictSessionFixture()
+			f.cache.sessionBindings["openai:rebind-session"] = owner
+			ctx := WithOpenAISameAccountRetry(context.Background(), 947101, &UpstreamFailoverError{RetryableOnSameAccount: true})
+			selected, _, err := f.scheduler.Select(ctx, f.request)
+			if owner == 947101 {
+				require.NoError(t, err)
+				require.Equal(t, owner, selected.Account.ID)
+			} else {
+				require.Error(t, err)
+				require.Nil(t, selected)
+			}
+			require.Equal(t, owner, f.cache.sessionBindings["openai:rebind-session"])
+		})
+	}
+}
+
 func TestSameAccountRetrySchedulerCannotEscape(t *testing.T) {
 	for _, advanced := range []string{"false", "true"} {
 		for _, weighted := range []string{"false", "true"} {
@@ -48,10 +67,10 @@ func TestSameAccountRetrySchedulerCannotEscape(t *testing.T) {
 						cancel()
 					}
 					svc := &OpenAIGatewayService{
-						accountRepo:        schedulerTestOpenAIAccountRepo{accounts: accounts},
-						cache:              cache,
-						cfg:                cfg,
-						rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService(advanced, weighted),
+						accountRepo:      schedulerTestOpenAIAccountRepo{accounts: accounts},
+						cache:            cache,
+						cfg:              cfg,
+						rateLimitService: newOpenAIAdvancedSchedulerRateLimitService(advanced, weighted),
 						concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{
 							acquireResults: acquires, acquiredIDs: &acquired,
 						}),
