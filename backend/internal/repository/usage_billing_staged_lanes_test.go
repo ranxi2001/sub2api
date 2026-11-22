@@ -15,12 +15,14 @@ import (
 )
 
 type stagedLaneProbe struct {
-	started  chan struct{}
-	proceed  chan struct{}
-	mu       sync.Mutex
-	singles  int
-	batches  []int
-	batchErr error
+	started      chan struct{}
+	proceed      chan struct{}
+	mu           sync.Mutex
+	singles      int
+	batches      []int
+	batchErr     error
+	batchStarted chan context.Context
+	batchRelease chan struct{}
 }
 
 func (p *stagedLaneProbe) applyStagedUsageBillingOne(ctx context.Context, key service.UsageBillingEventKey, owner string) (*service.UsageBillingRecovery, error) {
@@ -35,6 +37,10 @@ func (p *stagedLaneProbe) applyStagedUsageBillingBatch(ctx context.Context, owne
 	p.mu.Lock()
 	p.batches = append(p.batches, len(keys))
 	p.mu.Unlock()
+	if p.batchStarted != nil {
+		p.batchStarted <- ctx
+		<-p.batchRelease
+	}
 	out := make([]*service.UsageBillingRecovery, len(keys))
 	for i := range out {
 		out[i] = &service.UsageBillingRecovery{Settled: true}
@@ -52,7 +58,7 @@ func TestStagedLaneCombinesConcurrentOwnerAndDoesNotFanOutFailure(t *testing.T) 
 			}
 			results := make(chan error, 33)
 			go func() {
-				_, e := lanes.apply(context.Background(), "1", service.UsageBillingEventKey{RequestID: "first"}, probe)
+				_, e := lanes.apply(context.Background(), "1", service.UsageBillingEventKey{RequestID: "first"}, probe, false)
 				results <- e
 			}()
 			select {
@@ -62,7 +68,7 @@ func TestStagedLaneCombinesConcurrentOwnerAndDoesNotFanOutFailure(t *testing.T) 
 			}
 			for i := range 32 {
 				go func() {
-					_, e := lanes.apply(context.Background(), "1", service.UsageBillingEventKey{RequestID: fmt.Sprint(i)}, probe)
+					_, e := lanes.apply(context.Background(), "1", service.UsageBillingEventKey{RequestID: fmt.Sprint(i)}, probe, false)
 					results <- e
 				}()
 			}
@@ -110,4 +116,57 @@ func TestBillingSQLPhasesShareSettlementBudget(t *testing.T) {
 	release, ok := gate.trySQL(8)
 	require.True(t, ok)
 	release()
+}
+
+func TestStagedLaneCancellationAndRecoveryIsolation(t *testing.T) {
+	var lanes stagedBillingLanes
+	probe := &stagedLaneProbe{started: make(chan struct{}), proceed: make(chan struct{}), batchStarted: make(chan context.Context, 1), batchRelease: make(chan struct{})}
+	submit := func(ctx context.Context, id string) <-chan error {
+		result := make(chan error, 1)
+		go func() {
+			_, err := lanes.apply(ctx, "1", service.UsageBillingEventKey{RequestID: id}, probe, false)
+			result <- err
+		}()
+		return result
+	}
+	first := submit(context.Background(), "first")
+	<-probe.started
+	waitQueue := func(n int) {
+		require.Eventually(t, func() bool { lanes.mu.Lock(); defer lanes.mu.Unlock(); return len(lanes.owners["1"]) == n }, time.Second, time.Millisecond)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	queued := submit(ctx, "canceled")
+	waitQueue(1)
+	cancel()
+	select {
+	case err := <-queued:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("queued cancellation waited for settlement")
+	}
+	_, err := lanes.apply(context.Background(), "1", service.UsageBillingEventKey{}, probe, true)
+	require.ErrorIs(t, err, errStagedBillingOwnerBusy)
+	other := &stagedLaneProbe{started: make(chan struct{}), proceed: make(chan struct{})}
+	close(other.proceed)
+	_, err = lanes.apply(context.Background(), "2", service.UsageBillingEventKey{}, other, true)
+	require.NoError(t, err)
+	ctx, cancel = context.WithCancel(context.Background())
+	defer cancel()
+	batchHead := submit(ctx, "head")
+	waitQueue(1)
+	tail := submit(context.Background(), "tail")
+	waitQueue(2)
+	close(probe.proceed)
+	shared := <-probe.batchStarted
+	cancel()
+	require.NoError(t, shared.Err())
+	select {
+	case <-batchHead:
+		t.Fatal("started transaction was abandoned")
+	default:
+	}
+	close(probe.batchRelease)
+	for _, result := range []<-chan error{first, batchHead, tail} {
+		require.NoError(t, <-result)
+	}
 }

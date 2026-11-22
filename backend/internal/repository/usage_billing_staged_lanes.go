@@ -3,7 +3,9 @@ package repository
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
@@ -12,6 +14,8 @@ var errStagedBillingBatchOutcomeMismatch = errors.New("durable billing batch out
 
 const stagedBillingBatchSize = 128
 const stagedBillingMaxPending = 4096
+
+var errStagedBillingOwnerBusy = errors.New("durable billing owner is already settling")
 
 var errStagedBillingQueueFull = errors.New("durable billing owner queue full; event remains pending")
 
@@ -39,13 +43,17 @@ type stagedBillingLanes struct {
 	owners map[string][]*stagedBillingRequest
 }
 
-func (l *stagedBillingLanes) apply(ctx context.Context, owner string, key service.UsageBillingEventKey, repo stagedBillingExecutor) (*service.UsageBillingRecovery, error) {
+func (l *stagedBillingLanes) apply(ctx context.Context, owner string, key service.UsageBillingEventKey, repo stagedBillingExecutor, recovery bool) (*service.UsageBillingRecovery, error) {
 	req := &stagedBillingRequest{ctx: ctx, key: key, done: make(chan stagedBillingOutcome, 1)}
 	l.mu.Lock()
 	if l.owners == nil {
 		l.owners = make(map[string][]*stagedBillingRequest)
 	}
 	queue, running := l.owners[owner]
+	if recovery && running {
+		l.mu.Unlock()
+		return nil, errStagedBillingOwnerBusy
+	}
 	if len(queue) >= stagedBillingMaxPending {
 		l.mu.Unlock()
 		return nil, errStagedBillingQueueFull
@@ -55,8 +63,20 @@ func (l *stagedBillingLanes) apply(ctx context.Context, owner string, key servic
 	if !running {
 		go l.drain(owner, repo)
 	}
-	// A transaction may have started. Always join it; a caller cancellation
-	// cannot prove rollback and must not launch an independent monetary replay.
+	select {
+	case out := <-req.done:
+		return out.recovery, out.err
+	case <-ctx.Done():
+		l.mu.Lock()
+		queue := l.owners[owner]
+		if i := slices.Index(queue, req); i >= 0 {
+			l.owners[owner] = slices.Delete(queue, i, i+1)
+			l.mu.Unlock()
+			return nil, ctx.Err()
+		}
+		l.mu.Unlock()
+	}
+	// The worker already took ownership. Join the transaction before returning.
 	out := <-req.done
 	return out.recovery, out.err
 }
@@ -114,7 +134,9 @@ func (l *stagedBillingLanes) execute(owner string, repo stagedBillingExecutor, b
 	for i, req := range active {
 		keys[i] = req.key
 	}
-	out, err := repo.applyStagedUsageBillingBatch(active[0].ctx, owner, keys)
+	batchCtx, cancel := context.WithTimeout(context.WithoutCancel(active[0].ctx), 15*time.Second)
+	defer cancel()
+	out, err := repo.applyStagedUsageBillingBatch(batchCtx, owner, keys)
 	if err == nil && len(out) != len(active) {
 		err = errStagedBillingBatchOutcomeMismatch
 	}

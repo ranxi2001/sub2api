@@ -58,7 +58,6 @@ func (r *usageBillingRepository) applyStagedUsageBillingBatch(ctx context.Contex
 	var pending []*stagedBillingRow
 	var cmds []*service.UsageBillingCommand
 	seen := make(map[service.UsageBillingEventKey]bool)
-	newlyApplied := make(map[service.UsageBillingEventKey]bool)
 	for _, key := range keys {
 		row := rows[key]
 		if row.state == "pending" && !seen[key] {
@@ -85,7 +84,6 @@ func (r *usageBillingRepository) applyStagedUsageBillingBatch(ctx context.Contex
 			if applied[i] {
 				outcomes[i].Result = &service.UsageBillingApplyResult{Applied: true}
 				fresh = append(fresh, row.key)
-				newlyApplied[row.key] = true
 			}
 		}
 		if len(fresh) > 0 {
@@ -170,10 +168,9 @@ func (r *usageBillingRepository) applyStagedUsageBillingBatch(ctx context.Contex
 			}
 			recovery.Settled = state != "legacy" && recovery.Result.Applied
 			recovery.NeedsCache = state == "applied"
-			// Events already complete before this transaction are still replays.
-			if !newlyApplied[key] {
-				recovery.Result.Applied = false
-			}
+			// A concurrent settler may own this receipt. Only a confirmed
+			// local commit can emit first-application notifications.
+			recovery.Result.Applied = false
 			confirmed[key] = true
 		}
 		checkErr = errors.Join(checkErr, stored.Err(), stored.Close())
@@ -278,6 +275,14 @@ func (r *usageBillingRepository) applyStagedBatchEffects(ctx context.Context, tx
 	}
 	if err := applyUsageBillingBatchAccountQuotas(ctx, tx, cmds, applied, outcomes); err != nil {
 		return err
+	}
+	for i, c := range cmds {
+		if applied[i] && c.PlatformQuotaCost > 0 && c.PlatformQuotaPlatform != "" {
+			if _, err := tx.ExecContext(ctx, lockActivePlatformQuotasSQL, user); err != nil {
+				return err
+			}
+			break
+		}
 	}
 	for i, c := range cmds {
 		if applied[i] && c.PlatformQuotaCost > 0 && c.PlatformQuotaPlatform != "" {

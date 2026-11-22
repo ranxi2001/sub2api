@@ -224,3 +224,32 @@ func TestStagedBillingPublicPathBatchesArrivalsBehindOwner(t *testing.T) {
 	require.NoError(t, repo.db.QueryRowContext(ctx, `SELECT balance::text FROM users WHERE id=$1`, cmd.UserID).Scan(&balance))
 	require.Equal(t, "99.10000000", balance)
 }
+
+func TestQuotaSaveUsesBillingLockOrder(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	repo, cmd, _, client := durableBillingFixture(t)
+	quota := NewUserPlatformQuotaRepository(client)
+	limit := 10.0
+	a := UserPlatformQuotaRecord{UserID: cmd.UserID, Platform: "openai", DailyLimitUSD: &limit}
+	b := UserPlatformQuotaRecord{UserID: cmd.UserID, Platform: "anthropic", DailyLimitUSD: &limit}
+	require.NoError(t, quota.UpsertForUser(ctx, cmd.UserID, []UserPlatformQuotaRecord{a, b}))
+	tx, err := repo.db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback() }()
+	// Hold the first quota lock as a settler. An administrator retaining A and
+	// deleting B must wait here before taking B, regardless of statement order.
+	var pid int
+	require.NoError(t, tx.QueryRowContext(ctx, `SELECT pg_backend_pid() FROM user_platform_quotas WHERE user_id=$1 ORDER BY id LIMIT 1 FOR UPDATE`, cmd.UserID).Scan(&pid))
+	done := make(chan error, 1)
+	go func() { done <- quota.UpsertForUser(ctx, cmd.UserID, []UserPlatformQuotaRecord{a}) }()
+	require.Eventually(t, func() bool {
+		var waiting bool
+		err := repo.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid)))`, pid).Scan(&waiting)
+		return err == nil && waiting
+	}, 3*time.Second, 10*time.Millisecond)
+	_, err = tx.ExecContext(ctx, lockActivePlatformQuotasSQL, cmd.UserID)
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit())
+	require.NoError(t, <-done)
+}
