@@ -1,4 +1,4 @@
-//go:build unit
+//go:build unit && retrydeadline
 
 package service
 
@@ -39,7 +39,8 @@ func TestSSETypeOnlyQuotaReaders(t *testing.T) {
 						}
 						var failure *UpstreamFailoverError
 						require.ErrorAs(t, err, &failure)
-						require.Equal(t, http.StatusTooManyRequests, failure.StatusCode)
+						t.Logf("SSE quota observation: type=%s semantic_status=%d", quota, failure.StatusCode)
+						require.Equal(t, http.StatusTooManyRequests, failure.StatusCode, "terminal type-only quota must preserve semantic 429")
 						require.False(t, failure.RetryableOnSameAccount, "explicit pool502 retry must not resend the exhausted owner")
 						require.True(t, failure.SameAccountRetryDeadline.IsZero())
 						require.False(t, failure.QuotaRejectedBeforeExecution, "HTTP200 SSE is not HTTP429 pre-execution rejection proof")

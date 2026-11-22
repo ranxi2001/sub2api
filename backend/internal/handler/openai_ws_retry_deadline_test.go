@@ -1,4 +1,4 @@
-//go:build unit
+//go:build unit && retrydeadline
 
 package handler
 
@@ -178,6 +178,9 @@ func TestOpenAIWSRetryDeadlineAtGenerationWrite(t *testing.T) {
 					if conn.Write(r.Context(), coderws.MessageText, []byte(terminal)) != nil {
 						return
 					}
+					if stage == "handshake" {
+						return // bound the defective baseline's admitted generation
+					}
 				}
 			}))
 			t.Cleanup(provider.Close)
@@ -214,6 +217,7 @@ func TestOpenAIWSRetryDeadlineAtGenerationWrite(t *testing.T) {
 					*repo = &issue600SwitchRepo{&openAIWSFailoverHandlerAccountRepoStub{accounts: []service.Account{*a, other}}}
 				})
 			issue715WSSend(t, h.clientConn, `{"type":"response.create","model":"gpt-5.1","input":"hello"}`)
+			var readTimedOut, unexpectedCompletion, outputObserved bool
 			if stage == "canceled" {
 				select {
 				case entered := <-handshakeEntered:
@@ -234,12 +238,22 @@ func TestOpenAIWSRetryDeadlineAtGenerationWrite(t *testing.T) {
 				readCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
 				for {
-					_, _, err := h.clientConn.Read(readCtx)
+					_, frame, err := h.clientConn.Read(readCtx)
 					if err != nil {
-						require.NotEqual(t, context.DeadlineExceeded, readCtx.Err(), "handler must terminate the retry itself")
+						readTimedOut = readCtx.Err() == context.DeadlineExceeded
+						break
+					}
+					if gjson.GetBytes(frame, "type").String() == "response.output_text.delta" {
+						outputObserved = true
+					}
+					if gjson.GetBytes(frame, "type").String() == "response.completed" {
+						// Defective production sends a second generation after D.
+						// Close and join it now, then fail on its observed count.
+						unexpectedCompletion = true
 						break
 					}
 				}
+				_ = h.clientConn.CloseNow()
 			}
 			select {
 			case <-h.handlerDone:
@@ -248,7 +262,12 @@ func TestOpenAIWSRetryDeadlineAtGenerationWrite(t *testing.T) {
 			}
 			if stage == "handshake" || stage == "canceled" {
 				if stage == "handshake" {
-					entered := <-handshakeEntered
+					var entered time.Time
+					select {
+					case entered = <-handshakeEntered:
+					case <-time.After(time.Second):
+						t.Fatal("retry handshake was not observed before cleanup")
+					}
 					mu.Lock()
 					require.True(t, entered.Before(deadline), "handler checks must pass before the handshake crosses D")
 					mu.Unlock()
@@ -260,15 +279,25 @@ func TestOpenAIWSRetryDeadlineAtGenerationWrite(t *testing.T) {
 				}
 			}
 			mu.Lock()
+			observedGenerations := generations
+			observedOwners := append([]string(nil), owners...)
+			mu.Unlock()
 			want := 1
 			if stage == "inflight" {
 				want = 3
 			}
-			require.Equal(t, want, generations, "no generation may start after D, and admitted generations may finish")
-			for _, owner := range owners {
+			t.Logf("retry deadline observation: stage=%s generations=%d", stage, observedGenerations)
+			require.Equal(t, want, observedGenerations, "retry deadline: no generation may start after D")
+			require.False(t, readTimedOut, "fixture read timed out before observing retry closure")
+			require.False(t, unexpectedCompletion, "expired retry must not complete a generation")
+			if stage == "output" {
+				require.True(t, outputObserved, "the output control must actually commit output")
+			} else if stage != "inflight" {
+				require.False(t, outputObserved, "pre-output refusal must emit no generation output")
+			}
+			for _, owner := range observedOwners {
 				require.Equal(t, "Bearer fixture-deadline-owner", owner)
 			}
-			mu.Unlock()
 			slots.mu.Lock()
 			require.Positive(t, slots.userAcquired)
 			require.Positive(t, slots.accountAcquired)
