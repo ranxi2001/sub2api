@@ -226,6 +226,18 @@ func TestOpenAIIPUnauthorizedGatewayEarlyReturnsBreakStreak(t *testing.T) {
 	}
 }
 
+func TestOpenAIIPUnauthorizedGatewayRevokedTokenStillDisables(t *testing.T) {
+	repo := &ipUnauthorizedAccountRepo{}
+	rateLimits := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	gateway := &OpenAIGatewayService{rateLimitService: rateLimits}
+	rateLimits.SetAccountRuntimeBlocker(gateway)
+	account := &Account{ID: 10, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"refresh_token": "fixture-refresh"}}
+	body := []byte(`{"error":{"code":"token_revoked","message":"Token revoked"}}`)
+	require.True(t, gateway.handleOpenAIAccountUpstreamError(context.Background(), account, 401, nil, body))
+	require.Equal(t, 1, repo.setErrorCalls)
+	require.True(t, gateway.isOpenAIAccountRuntimeBlocked(account))
+}
+
 func TestOpenAIIPUnauthorizedOtherAccountTypesUnchanged(t *testing.T) {
 	for _, tc := range []struct {
 		name, platform, accountType string

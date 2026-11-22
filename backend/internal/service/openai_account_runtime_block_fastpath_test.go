@@ -22,6 +22,25 @@ type oauth429RateLimitRepo struct {
 	lastModelRateLimitedUntil time.Time
 }
 
+func TestExplicitQuotaWithoutResetCoolsInsteadOfRetrying(t *testing.T) {
+	for _, code := range []string{"insufficient_quota", "quota_exceeded", "usage_limit_reached"} {
+		t.Run(code, func(t *testing.T) {
+			repo := &oauth429RateLimitRepo{}
+			rateLimits := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+			svc := &OpenAIGatewayService{rateLimitService: rateLimits}
+			rateLimits.SetAccountRuntimeBlocker(svc)
+			account := &Account{ID: 42, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+			body := []byte(`{"error":{"type":"` + code + `"}}`)
+			svc.handleOpenAIAccountUpstreamError(context.Background(), account, 429, nil, body)
+			require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
+			require.Equal(t, 1, repo.setRateLimitedCalls)
+			require.False(t, svc.ShouldRetryOpenAIOAuth429(account, nil, body))
+			_, started := svc.openaiOAuth429RetryStartedAt.Load(account.ID)
+			require.False(t, started)
+		})
+	}
+}
+
 func (r *oauth429RateLimitRepo) SetRateLimited(_ context.Context, _ int64, until time.Time) error {
 	r.setRateLimitedCalls++
 	r.lastRateLimitedUntil = until

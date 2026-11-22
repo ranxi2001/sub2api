@@ -95,6 +95,26 @@ func TestUpstreamSessionBlockedIsTerminalAndPreservesClientGuidance(t *testing.T
 	}
 }
 
+func TestOAuthPassthroughSessionBlockedNeverEntersAffinityRetry(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, rec := newOpenAIUpstreamErrorTestContext(t)
+	upstream := &httpUpstreamRecorder{resp: newOpenAIUpstreamErrorResponse(http.StatusBadGateway, upstreamSessionBlockedBody)}
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	account := &Account{
+		ID: 551, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true,
+		Credentials: map[string]any{"access_token": "fixture-access", "chatgpt_account_id": "fixture-account"},
+		Extra:       map[string]any{"openai_passthrough": true},
+	}
+	require.False(t, shouldFailoverOpenAIPassthroughResponse(account, 502, []byte(upstreamSessionBlockedBody)))
+	_, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"gpt-5.1","input":"synthetic","stream":false}`))
+	require.Error(t, err)
+	var failover *UpstreamFailoverError
+	require.False(t, errors.As(err, &failover))
+	require.Equal(t, http.StatusBadGateway, rec.Code)
+	require.True(t, IsResponseCommitted(c))
+	require.Len(t, upstream.requests, 1)
+}
+
 func TestUpstreamSessionBlockedRequiresExactErrorCode(t *testing.T) {
 	for _, body := range []string{
 		`{"error":{"code":"cyber_policy","message":"blocked"}}`,
