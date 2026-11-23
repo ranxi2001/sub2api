@@ -234,14 +234,20 @@ async function refresh() {
 async function loadAccounts(background = false) {
   if (!auth.user || (background && thresholdLoading.value)) return
   const current=++accountsVersion;thresholdLoading.value=true
-  try{const [a, g] = await Promise.all([getAccountOpsThresholdAccounts(), getAccountOpsThresholdGroups()]);if(alive&&current===accountsVersion){thresholdAccounts.value=a;accountGroups.value=g;thresholdReady.value=true;thresholdError.value=''}}
+  const reads = [getAccountOpsThresholdAccounts(), getAccountOpsThresholdGroups()] as const
+  try{const [a, g] = await Promise.all(reads);if(alive&&current===accountsVersion){thresholdAccounts.value=a;accountGroups.value=g;thresholdReady.value=true;thresholdError.value=''}}
   catch (error) {
     if (alive && current === accountsVersion) {
       thresholdError.value = message(error)
       if (!background) app.showError(thresholdError.value)
     }
   }
-  finally{if(alive&&current===accountsVersion)thresholdLoading.value=false}
+  finally {
+    // Report the first failure immediately, but keep the poll occupied until
+    // both reads finish: Promise.all does not cancel its remaining request.
+    await Promise.allSettled(reads)
+    if (alive && current === accountsVersion) thresholdLoading.value = false
+  }
 }
 function selectTab(tab:'records'|'settings'){activeTab.value=tab;if(tab==='settings'&&!thresholdReady.value&&!thresholdLoading.value)void loadAccounts()}
 function tabKey(event:KeyboardEvent,tab:'records'|'settings'){if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const next=event.key==='Home'?'settings':event.key==='End'?'records':tab==='records'?'settings':'records';selectTab(next);document.getElementById(`ops-tab-${next}`)?.focus()}
