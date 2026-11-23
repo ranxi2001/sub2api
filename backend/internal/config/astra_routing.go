@@ -26,12 +26,20 @@ func (c *Config) AstraRouting(ctx context.Context) AstraRoutingSettings {
 	if c == nil {
 		return AstraRoutingSettings{}
 	}
+	settings := AstraRoutingSettings{CookiePool: c.Gateway.CodexGatewayPin, WSSession: c.Gateway.CodexWSAnchor}
 	if loader := c.astraRoutingLoader.Load(); loader != nil {
-		return loader.load(ctx)
+		settings = loader.load(ctx)
 	}
-	return AstraRoutingSettings{CookiePool: c.Gateway.CodexGatewayPin, WSSession: c.Gateway.CodexWSAnchor}
+	if RPMTrialBuild {
+		settings.CookiePool = CodexGatewayPinConfig{}
+		settings.WSSession = CodexWSAnchorConfig{}
+	}
+	return settings
 }
 func (s AstraRoutingSettings) Validate() error {
+	if RPMTrialBuild && (s.CookiePool.Enabled || s.WSSession.Enabled) {
+		return fmt.Errorf("shared routing is unavailable in the RPM trial build")
+	}
 	switch s.SchedulingMode {
 	case "", "account", "model", "groups":
 	default:

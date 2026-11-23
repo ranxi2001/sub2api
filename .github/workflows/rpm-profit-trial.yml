@@ -1,0 +1,65 @@
+name: RPM trial build
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/rpm-profit-trial.yml'
+      - 'backend/internal/config/rpm_trial*.go'
+      - 'backend/internal/config/astra_routing.go'
+      - 'backend/internal/repository/http_upstream.go'
+permissions:
+  contents: read
+jobs:
+  trial:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Verify source and embed frontend
+        run: |
+          set -euo pipefail
+          pnpm --dir frontend install --frozen-lockfile
+          pnpm --dir frontend run build
+      - name: Build RPM executable and manifest
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          mkdir -p ../trial
+          revision="$(git rev-parse HEAD)"
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -tags "embed rpm_trial" -ldflags "-s -w -X main.Commit=$revision -X main.Date=$(date -u +%FT%TZ) -X main.BuildType=trial" -o ../trial/sub2api ./cmd/server
+          cd ../trial
+          ./sub2api --version 2>&1 | tee VERSION.txt
+          version=$(cat ../backend/cmd/server/VERSION)
+          grep -F "Sub2API $version (commit: $revision," VERSION.txt
+          go version -m sub2api | grep -F rpm_trial
+          sha256sum sub2api > SHA256SUMS
+          git rev-parse HEAD > SOURCE_COMMIT
+          git rev-parse 'HEAD^{tree}' > SOURCE_TREE
+      - name: Verify compiled routing restrictions
+        working-directory: backend
+        run: go test -tags=rpm_trial ./internal/config -run '^TestRPMTrialRouting$' -count=1
+      - name: Verify account profit rollup and historical 1x records
+        working-directory: backend
+        run: go test -tags="integration rpm_trial" ./internal/repository -run '^TestProfitOperationsAccountUsageRollup$' -count=1
+      - uses: actions/upload-artifact@v7
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          name: rpm-finance-linux-amd64
+          path: trial/
+          retention-days: 1
+          if-no-files-found: error

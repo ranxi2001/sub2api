@@ -221,7 +221,7 @@ func newHTTPUpstream(cfg *config.Config, provider OpenAIResponseHeaderTimeoutPro
 	if cfg != nil {
 		s.upstreamRoutes, s.upstreamRoutesErr = upstreamroute.New(cfg.Gateway.UpstreamRouting)
 	}
-	if cfg != nil && (cfg.HasAstraRoutingLoader() || cfg.Gateway.CodexGatewayPin.Enabled) {
+	if !config.RPMTrialBuild && cfg != nil && (cfg.HasAstraRoutingLoader() || cfg.Gateway.CodexGatewayPin.Enabled) {
 		return &astraRoutingUpstream{delegate: s, cfg: cfg}
 	}
 	return s
