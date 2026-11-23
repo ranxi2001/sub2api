@@ -6,8 +6,10 @@ on:
       - 'frontend/src/components/admin/operations/AccountOps*'
       - 'frontend/src/components/admin/operations/__tests__/AccountOps*'
       - 'frontend/src/views/admin/AccountOpsView.vue'
+      - 'frontend/src/views/admin/__tests__/AccountOpsView.spec.ts'
       - 'frontend/src/i18n/locales/*/accountOps.ts'
       - '.github/scripts/account-alert-data-ux.mjs'
+      - '.github/scripts/account-threshold-poll-evidence.mjs'
       - '.github/workflows/account-alert-data-ux.yml'
   workflow_dispatch:
 permissions:
@@ -42,6 +44,12 @@ jobs:
           EVIDENCE_DIR: ${{ runner.temp }}/account-alert-ui
           SUB2API_PLAYWRIGHT_MODULE: ${{ runner.temp }}/alert-browser/node_modules/playwright/index.mjs
         run: node .github/scripts/account-alert-data-ux.mjs
+      - name: Threshold poll original production RED and candidate GREEN
+        env:
+          EVIDENCE_DIR: ${{ runner.temp }}/account-alert-ui
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          SUB2API_PLAYWRIGHT_MODULE: ${{ runner.temp }}/alert-browser/node_modules/playwright/index.mjs
+        run: node .github/scripts/account-threshold-poll-evidence.mjs
       - uses: actions/upload-artifact@v7
         if: always()
         with:
