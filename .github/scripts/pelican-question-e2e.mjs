@@ -208,7 +208,7 @@ async function browser() {
         if (!new URL(url).pathname.startsWith('/admin/')) return
         const response = await page.waitForResponse(response =>
           response.frame() === page.mainFrame() && response.request().method() === 'GET' &&
-          response.url() === origin + '/api/v1/auth/me')
+          new URL(response.url()).origin === origin && new URL(response.url()).pathname === '/api/v1/auth/me')
         assert.equal(response.status(), 200, 'restored session must load the current user')
         assert.equal(await response.finished(), null, 'auth bootstrap must finish before the next navigation')
       },
