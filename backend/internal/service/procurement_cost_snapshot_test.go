@@ -134,3 +134,20 @@ func TestProfitOperationsCapturesImagePriceAndSavedMultiplier(t *testing.T) {
 	require.Equal(t, .005, usage.ProcurementCostSnapshot.ImagePrices["1K"])
 	require.Equal(t, .08, *usage.ProcurementCostSnapshot.CostMultiplier)
 }
+
+func TestProfitOperationsTokenBasisSnapshot(t *testing.T) {
+	account := &Account{Type: AccountTypeAPIKey, Extra: map[string]any{AccountCostMultiplierExtraKey: 0.35}}
+	for _, basis := range []string{TokenProcurementAccount, TokenProcurementStandard} {
+		if basis == TokenProcurementStandard {
+			account.Extra[TokenProcurementBasisKey] = basis
+		}
+		require.NoError(t, ValidateAccountCostMultiplierExtra(account.Extra))
+		log := &UsageLog{TotalCost: 100, ActualCost: 50}
+		captureGatewayProcurementCost(log, account)
+		require.Equal(t, basis, log.ProcurementCostSnapshot.TokenBasis)
+		require.Equal(t, 0.35, *log.ProcurementCostSnapshot.CostMultiplier)
+	}
+	for _, invalid := range []any{"unknown", 1, map[string]any{}} {
+		require.Error(t, ValidateAccountCostMultiplierExtra(map[string]any{TokenProcurementBasisKey: invalid}))
+	}
+}

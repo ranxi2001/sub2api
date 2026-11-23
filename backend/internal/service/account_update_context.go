@@ -26,8 +26,8 @@ type accountExtraUpdateFieldsKey struct{}
 // Capture request intent before a service fills omitted extra from its snapshot.
 // Each request replaces inherited intent, including requests with nil extra.
 func withAccountExtraUpdateFields(ctx context.Context, extra map[string]any) context.Context {
-	provided := make(map[string]bool, 4)
-	for _, key := range []string{AccountCostMultiplierExtraKey, AccountCostAutoSyncExtraKey, ImagePurchasePricesKey, AccountProbePenaltyExtraKey} {
+	provided := make(map[string]bool, 5)
+	for _, key := range []string{AccountCostMultiplierExtraKey, AccountCostAutoSyncExtraKey, TokenProcurementBasisKey, ImagePurchasePricesKey, AccountProbePenaltyExtraKey} {
 		_, provided[key] = extra[key]
 	}
 	return context.WithValue(ctx, accountExtraUpdateFieldsKey{}, provided)

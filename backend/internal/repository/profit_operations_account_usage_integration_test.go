@@ -64,6 +64,33 @@ func TestProfitOperationsAccountUsageRollup(t *testing.T) {
 	filter.From = from.Add(time.Minute)
 	check(2, 22, 4, 18)
 	filter.From = from
+	// The two older rows cost 2 (non-unit account debit) and 50 × .25.
+	// Capture both bases in new snapshots; keep the old snapshot's own rate.
+	_, err = integrationDB.Exec(`UPDATE accounts SET extra='{"cost_multiplier":0.25,"token_procurement_basis":"standard_charge"}' WHERE id=$1`, f.account)
+	require.NoError(t, err)
+	check(2, 22, 14.5, 7.5)
+	_, err = integrationDB.Exec(`INSERT INTO usage_logs(user_id,api_key_id,account_id,request_id,model,total_cost,actual_cost,account_stats_cost,account_rate_multiplier,billing_mode,procurement_cost_snapshot,created_at)
+ SELECT $1,$2,$3,'token-basis-'||v.label,'fixture',100,50,15,1,v.mode,v.snap::jsonb,$4
+ FROM (VALUES
+ ('old','token','{"version":2,"basis":"account_usage","cost_multiplier":0.35}'),
+ ('fixed','token','{"version":2,"basis":"account_usage","token_basis":"standard_charge","cost_multiplier":0.35}'),
+ ('stats','token','{"version":2,"basis":"account_usage","token_basis":"account_stats","cost_multiplier":0.35}'),
+ ('per-call','per_request','{"version":2,"basis":"account_usage","cost_multiplier":0.35}')) v(label,mode,snap)`, f.user, f.key, f.account, from.Add(time.Minute))
+	require.NoError(t, err)
+	check(6, 222, 95, 127) // 14.50 + 35 + 35 + 5.25 + 5.25
+	// Simulate a slice written by a pre-migration worker. Whole and partial
+	// windows must agree, including mixed bases within one model and group.
+	_, err = integrationDB.Exec("UPDATE account_usage_financial_rollups SET token_basis_projected=NULL, standard_token_amount=NULL WHERE bucket=$1 AND account_id=$2", from, f.account)
+	require.NoError(t, err)
+	check(6, 222, 95, 127)
+	filter.From = from.Add(time.Minute)
+	check(6, 222, 95, 127)
+	filter.From = from
+	_, err = integrationDB.Exec(`UPDATE accounts SET extra='{"cost_multiplier":0.25}' WHERE id=$1`, f.account)
+	require.NoError(t, err)
+	check(6, 222, 54.75, 167.25) // Current basis changes only the two historical estimates.
+	_, err = integrationDB.Exec(`DELETE FROM usage_logs WHERE account_id=$1 AND request_id LIKE 'token-basis-%'`, f.account)
+	require.NoError(t, err)
 	_, err = integrationDB.Exec("UPDATE accounts SET extra='{}' WHERE id=$1", f.account)
 	require.NoError(t, err)
 	check(2, 22, 2, 8) // Unpriced income is excluded from the margin.

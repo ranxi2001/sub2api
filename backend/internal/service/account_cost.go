@@ -9,6 +9,11 @@ import (
 
 const AccountCostMultiplierExtraKey = "cost_multiplier"
 const AccountCostAutoSyncExtraKey = "cost_multiplier_auto_sync"
+
+// TokenProcurementBasisKey selects the verified price book for unit-rate token usage.
+const TokenProcurementBasisKey = "token_procurement_basis"
+const TokenProcurementStandard = "standard_charge"
+const TokenProcurementAccount = "account_stats"
 const ImagePurchasePricesKey = "image_purchase_prices"
 const DefaultAccountCostMultiplier = 0.1
 
@@ -67,6 +72,12 @@ func ValidateAccountCostMultiplierExtra(extra map[string]any) error {
 	if raw := extra[AccountCostAutoSyncExtraKey]; raw != nil {
 		if _, ok := raw.(bool); !ok {
 			return infraerrors.BadRequest("INVALID_COST_MULTIPLIER_AUTO_SYNC", "cost_multiplier_auto_sync must be a boolean")
+		}
+	}
+	if raw := extra[TokenProcurementBasisKey]; raw != nil {
+		basis, ok := raw.(string)
+		if !ok || (basis != TokenProcurementAccount && basis != TokenProcurementStandard) {
+			return infraerrors.BadRequest("INVALID_TOKEN_PROCUREMENT_BASIS", "token_procurement_basis must be account_stats or standard_charge")
 		}
 	}
 	if raw := extra[ImagePurchasePricesKey]; raw != nil {
