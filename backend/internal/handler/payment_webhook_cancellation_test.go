@@ -51,7 +51,7 @@ func TestPaymentWebhookCancellationCreditsOnceAfterVerification(t *testing.T) {
 	for _, scenario := range []string{"disconnect", "invalid_signature", "upstream_rejected", "amount_mismatch"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx := context.Background()
-			db, err := sql.Open("sqlite", "file:webhook_cancellation_"+scenario+"?mode=memory&cache=shared")
+			db, err := sql.Open("sqlite", "file:webhook_cancellation_"+scenario+"?mode=memory&cache=shared&_pragma=foreign_keys(1)")
 			require.NoError(t, err)
 			t.Cleanup(func() { _ = db.Close() })
 			client := enttest.NewClient(t, enttest.WithOptions(dbent.Driver(entsql.OpenDB(dialect.SQLite, db))))
