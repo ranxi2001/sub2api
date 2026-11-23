@@ -36,6 +36,16 @@
       <GatewayModelSettings v-if="editingAccount.type === 'gateway'" v-model:models="allowedModels" v-model:mappings="modelMappings"
         :sync-credentials="gatewaySyncCredentials" />
       <QwenPlatformNotice v-if="editingAccount?.platform === 'qwen'" :user-id="authStore.user?.id" />
+      <div v-if="supportsDomesticRouteProbe" class="rounded-lg border border-gray-200 p-3 dark:border-dark-600">
+        <div class="flex items-center gap-2">
+          <label class="flex items-center gap-2 text-sm">
+            <input v-model="domesticRouteAutoSchedule" type="checkbox" data-testid="domestic-route-auto-schedule" />
+            {{ t('admin.accounts.domesticRouteAutoSchedule') }}
+          </label>
+          <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.domesticRouteAutoSchedule" :user-id="authStore.user?.id" />
+        </div>
+        <p class="input-hint">{{ t('admin.accounts.domesticRouteAutoScheduleHint') }}</p>
+      </div>
       <QwenCacheSettings v-if="editingAccount.platform === 'qwen' && editingAccount.type === 'apikey'" v-model:session-cache="qwenSessionCache" v-model:strict-affinity="qwenStrictAffinity" :user-id="authStore.user?.id" @base-url="setQwenBaseUrl" />
       <div v-if="editingAccount.credentials?.oauth_initial_selected_models != null" data-testid="initial-model-scope-snapshot" class="rounded-lg bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
         <div class="flex items-start gap-2"><p>{{ t('autoConfig.selection.accountHint') }}</p><NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.oauthInitialModelSelection" :user-id="authStore.user?.id" /></div>
@@ -4024,6 +4034,11 @@ const props = defineProps<Props>()
 // Keep the persisted prop intact while all platform-specific form sections use
 // the same draft. Cancel/reopen restores the source account.
 const editingAccount = shallowRef<Account | null>(props.account)
+const domesticRouteAutoSchedule = ref(false)
+const supportsDomesticRouteProbe = computed(() => {
+  const a = editingAccount.value
+  return a?.type === 'apikey' && (a.platform === 'qwen' || isCNProviderPlatform(a.platform))
+})
 const platformChanged = computed(() => editingAccount.value?.platform !== props.account?.platform)
 const platformOptions = computed(() => {
   const source = props.account
@@ -5343,6 +5358,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   mixedScheduling.value = false
   allowOverages.value = false
 	const extra = newAccount.extra as Record<string, unknown> | undefined
+	domesticRouteAutoSchedule.value = extra?.domestic_route_auto_schedule === true
 	mixedScheduling.value = extra?.mixed_scheduling === true
 	allowOverages.value = extra?.allow_overages === true
 	upstreamRequestIdHeader.value = readUpstreamRequestIdHeader(extra)
@@ -7539,6 +7555,11 @@ const handleSubmit = async () => {
       }
     }
     delete costExtra.new_api_apply_usd_rate
+    if (supportsDomesticRouteProbe.value && domesticRouteAutoSchedule.value) {
+      costExtra.domestic_route_auto_schedule = true
+    } else {
+      delete costExtra.domestic_route_auto_schedule
+    }
     updatePayload.extra = costExtra
 
     const canContinue = await ensureAntigravityMixedChannelConfirmed(async () => {

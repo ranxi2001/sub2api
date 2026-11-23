@@ -1,5 +1,7 @@
 export default {
     accounts: {
+      domesticRouteAutoSchedule: '国模线路测试自动调度',
+      domesticRouteAutoScheduleHint: '每小时沿此账号的出口发送一次短流式请求，可能消耗上游额度。首字低于 3 秒开启调度，达到 3 秒、超时或上游失败时关闭。暂停调度期间继续复测。',
       platformSwitch: {
         hint: '可切换到兼容当前凭证类型的平台。API Key 和自定义地址保留，请确认目标平台支持该上游。',
         resetHint: '切换后将重置模型映射、平台专属设置及不兼容分组。请检查目标平台配置，保存后再同步模型或刷新用量。',
