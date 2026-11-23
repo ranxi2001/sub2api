@@ -11,6 +11,7 @@ type ProcurementCostSnapshot struct {
 	Provider       string             `json:"provider"`
 	TargetPlatform string             `json:"target_platform"`
 	Basis          string             `json:"basis"`
+	TokenBasis     string             `json:"token_basis,omitempty"`
 	ImagePrices    map[string]float64 `json:"image_prices,omitempty"`
 	CostMultiplier *float64           `json:"cost_multiplier,omitempty"`
 }
@@ -21,6 +22,11 @@ func captureGatewayProcurementCost(log *UsageLog, account *Account) {
 	}
 	if !account.IsGateway() {
 		snapshot := &ProcurementCostSnapshot{Version: 2, Basis: "account_usage", AccountType: account.Type, TargetPlatform: log.Platform}
+		// Older v2 snapshots only recorded the rate. Freeze both operands for new usage.
+		snapshot.TokenBasis = TokenProcurementAccount
+		if account.Extra[TokenProcurementBasisKey] == TokenProcurementStandard {
+			snapshot.TokenBasis = TokenProcurementStandard
+		}
 		if rate, ok := accountCostMultiplierNumber(account.Extra[AccountCostMultiplierExtraKey]); ok {
 			snapshot.CostMultiplier = &rate
 		}
