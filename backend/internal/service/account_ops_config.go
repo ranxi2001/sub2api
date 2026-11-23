@@ -16,6 +16,8 @@ import (
 	"unicode/utf8"
 )
 
+const maxAccountOpsGroups = 200
+
 // ErrAccountOpsConfigValidation identifies static, safe input validation failures.
 // Storage and cryptographic errors never wrap this sentinel.
 var ErrAccountOpsConfigValidation = errors.New("invalid notification configuration")
@@ -181,7 +183,7 @@ func validateAccountOpsExtras(c AccountOpsConfig) error {
 	if err := validateAccountOpsChannelName(c.EmailName); err != nil {
 		return err
 	}
-	if len(c.Webhooks) > 5 || len(c.Groups) > 200 || len(c.BalanceThresholds)+len(c.QuotaThresholds) > 1000 {
+	if len(c.Webhooks) > 5 || len(c.Groups) > maxAccountOpsGroups || len(c.BalanceThresholds)+len(c.QuotaThresholds) > 1000 {
 		return errors.New("too many robot destinations or balance rules")
 	}
 	if err := validateAccountOpsGroups(c.Groups); err != nil {

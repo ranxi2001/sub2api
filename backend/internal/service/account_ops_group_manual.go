@@ -183,6 +183,12 @@ func (s *AccountOpsService) reconcileAccountOpsGroups(ctx context.Context, c *Ac
 	for i := range accounts {
 		byID[accounts[i].ID] = &accounts[i]
 	}
+	// Provider discovery can edit existing membership slices in place. Keep
+	// the last saved configuration available if the proposal is over capacity.
+	saved := c
+	proposal := *saved
+	proposal.Groups = cloneAccountOpsGroups(saved.Groups)
+	c = &proposal
 	providerChanged := reconcileAccountOpsProviderGroups(c, accounts)
 	original := cloneAccountOpsGroups(c.Groups)
 	wasInitialized := c.GroupsInitialized
@@ -360,6 +366,9 @@ func (s *AccountOpsService) reconcileAccountOpsGroups(ctx context.Context, c *Ac
 			changed = true
 		}
 	}
+	if len(groups) > maxAccountOpsGroups {
+		return false
+	}
 	c.Groups = groups
 	c.GroupsInitialized = true
 	newUngrouped := make([]int64, 0, len(ungrouped))
@@ -378,6 +387,7 @@ func (s *AccountOpsService) reconcileAccountOpsGroups(ctx context.Context, c *Ac
 	if normalizeAccountOpsGroupRules(c, byID) {
 		changed = true
 	}
+	*saved = proposal
 	return changed
 }
 
