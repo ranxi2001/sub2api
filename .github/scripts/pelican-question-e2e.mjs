@@ -7,7 +7,7 @@ import { readFileSync, writeFileSync, appendFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
 import { bindDetailResponse } from './pelican-detail-identity.mjs'
-import { completeScheduledRounds, createPageNavigation } from './pelican-complete-rounds.mjs'
+import { completeScheduledRounds, createPageNavigation, createBrowserLifecycleMetadata } from './pelican-complete-rounds.mjs'
 
 const evidence = process.env.EVIDENCE_DIR || '/evidence'
 const upstreamOrigin = 'https://fake-upstream:4199'
@@ -177,6 +177,7 @@ async function browser() {
   let browser
   let context
   let page
+  let lifecycle
   let stage = 'browser-startup'
   try {
     browser = await chromium.launch({ headless: true })
@@ -203,7 +204,9 @@ async function browser() {
       }
     })
     page = await context.newPage()
+    lifecycle = createBrowserLifecycleMetadata(page, () => ({ stage, active_gate: state.active_gate }))
     const navigation = createPageNavigation(page, {
+      lifecycle,
       async waitForBootstrap(url) {
         if (!new URL(url).pathname.startsWith('/admin/')) return
         const response = await page.waitForResponse(response =>
@@ -216,7 +219,8 @@ async function browser() {
     page.setDefaultTimeout(20_000)
     page.on('requestfailed', request => {
       const url = new URL(request.url())
-      state.requestFailures.push({ stage, method: request.method(), path: url.pathname, reason: request.failure()?.errorText })
+      state.requestFailures.push({ stage, method: request.method(), path: url.pathname, reason: request.failure()?.errorText,
+        lifecycle: lifecycle.requestMetadata(request) })
     })
     // Console text and exception messages can contain application data. Retain
     // only their types; scenario assertion failures carry safe fixture context.
@@ -974,6 +978,7 @@ async function browser() {
     process.exitCode = 1
   } finally {
     save('scenario-results.json', state)
+    if (lifecycle) save('browser-lifecycle.json', lifecycle.snapshot())
     await context?.close()
     await browser?.close()
     await db.end()

@@ -52,6 +52,10 @@ CI artifact 预期包含应用/harness SHA/tree、显式未完成清单、命名
 
 不导出 auth token、Cookie、完整 HAR、数据库全表、凭据列、原始应用日志或真实用户数据。不把整个运行目录当附件。fixture 密码/key/CA 都是本轮自建假值，不能用到任何其他环境。失败时也留存上述受限产物，`always()` 销毁容器、网络和一次性卷，artifact 保留七天。父协调者首次远程运行前需审查此增量，发布后仍须按原 brief 继续同一 PR 的未完成范围。
 
+`browser-lifecycle.json` 仅补充本次 `/auth/me` 中止调查的元数据，成功或失败都保存，且在关闭浏览器前截取。只接受 `http://app:8080` 的 `/login`、`/admin/accounts`、`/admin/pelican-tests`、`/api/v1/auth/me`，去掉 query/fragment；记录请求编号、相对单调时间、主 frame 标记、允许的 stage/gate、导航 intent 与主文档 commit 编号。同一路径的请求按对象身份区分，`scenario-results.json` 的原有 requestFailures 附带同一请求编号与时间，原失败清单仍完整保留。
+
+采集不读 headers、Cookie、请求/响应正文、stack 或任意错误文本，不启用 HAR/trace，不增加浏览器求值、网络操作、等待或重试。最多保留最近 8192 个允许事件，`dropped_events` 明示截断；缺少 frame 时记录 unknown，不把未关联请求推断成新文档。原零错误和业务断言不变；一次未复发的绿 CI 不能解释原始中止根因。
+
 ## 证据目录权限
 
 浏览器与假上游容器使用 CI runner 的 UID/GID，保持 `cap_drop: ALL` 和只读根文件系统。证据目录由同一 runner 创建，因此无需增加 DAC_OVERRIDE 或放宽目录权限。网络结构投影核对这两个容器的实际用户；浏览器启动失败也写入场景结果。
