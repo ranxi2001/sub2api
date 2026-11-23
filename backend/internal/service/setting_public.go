@@ -619,6 +619,14 @@ func (s *SettingService) IsUserUpstreamResponseModelVisible(ctx context.Context)
 	return vals[SettingKeyUsageShowUpstreamResponseModelToUsers] == "true"
 }
 
+func (s *SettingService) IsUserUsageCacheRateVisible(ctx context.Context) bool {
+	if s == nil || s.settingRepo == nil {
+		return false
+	}
+	vals, err := s.settingRepo.GetMultiple(ctx, []string{SettingKeyUsageShowCacheRate, SettingKeyUsageShowCacheRateToUsers})
+	return err == nil && vals[SettingKeyUsageShowCacheRate] != "false" && vals[SettingKeyUsageShowCacheRateToUsers] == "true"
+}
+
 // PublicSettingsInjectionPayload is the JSON shape embedded into HTML as
 // `window.__APP_CONFIG__` so the frontend can hydrate feature flags & site
 // config before the first XHR finishes.

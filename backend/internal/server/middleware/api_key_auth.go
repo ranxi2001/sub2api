@@ -117,28 +117,17 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		}
 		apiKey, err := lookup(c.Request.Context(), apiKeyString)
 		if err != nil {
-			if errors.Is(err, service.ErrUserNotFound) {
-				AbortWithError(c, 401, "USER_NOT_FOUND", "User associated with API key not found")
-				return
-			}
-			if errors.Is(err, service.ErrAPIKeyNotFound) {
-				if rejectAnonymousCredentialFailure(c, apiKeyService, "unknown", false) {
-					return
-				}
-				MarkIngressRejected(c, IngressRejectInvalidAPIKey)
-				AbortWithError(c, 401, "INVALID_API_KEY", "Invalid API key")
-				return
-			}
-			if errors.Is(err, service.ErrAPIKeyAuthOverloaded) {
-				MarkIngressRejected(c, IngressRejectAPIKeyAuthOverloaded)
-				AbortWithError(c, http.StatusServiceUnavailable, "API_KEY_AUTH_OVERLOADED", "API key authentication is temporarily unavailable")
-				return
-			}
-			if abortIfAPIKeyLookupClientGone(c, err) {
-				return
-			}
-			AbortWithError(c, 500, "INTERNAL_ERROR", "Failed to validate API key")
+			abortAPIKeyLookupError(c, err, apiKeyService)
 			return
+		}
+		// Detailed usage needs current permissions. Resolve the authenticated
+		// identity before any policy check or context write uses the key.
+		if c.Request.Method == http.MethodGet && c.FullPath() == gatewayUsageRecordsPath {
+			apiKey, err = revalidateUsageRecordsKey(c.Request.Context(), apiKeyService, apiKeyString, apiKey)
+			if err != nil {
+				abortAPIKeyLookupError(c, err, nil)
+				return
+			}
 		}
 
 		// apiKey 已加载（含 User/Group）。即便后续因分组停用/Key 停用/用户停用/
@@ -148,43 +137,10 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		// ── 3. 基础鉴权（始终执行） ─────────────────────────────────
 
 		// disabled / 未知状态 → 无条件拦截（expired 和 quota_exhausted 留给计费阶段）
-		if !apiKey.IsActive() &&
-			apiKey.Status != service.StatusAPIKeyExpired &&
-			apiKey.Status != service.StatusAPIKeyQuotaExhausted {
-			if apiKey.Status == service.StatusAPIKeyDisabled && rejectAnonymousCredentialFailure(c, apiKeyService, "disabled", false) {
-				return
-			}
-			MarkIngressRejected(c, IngressRejectAPIKeyDisabled)
-			AbortWithError(c, 401, "API_KEY_DISABLED", "API key is disabled")
+		if apiKey.Status == service.StatusAPIKeyDisabled && rejectAnonymousCredentialFailure(c, apiKeyService, "disabled", false) {
 			return
 		}
-
-		// 检查 IP 限制（白名单/黑名单）
-		// 注意：错误信息故意模糊，避免暴露具体的 IP 限制机制
-		if len(apiKey.IPWhitelist) > 0 || len(apiKey.IPBlacklist) > 0 {
-			clientIP := ip.GetSecurityClientIP(c, cfg.TrustForwardedIPForAPIKeyACL())
-			allowed, _ := ip.CheckIPRestrictionWithCompiledRules(clientIP, apiKey.CompiledIPWhitelist, apiKey.CompiledIPBlacklist)
-			if !allowed {
-				if clientIP == "" {
-					clientIP = "unknown"
-				}
-				service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonIPRestriction)
-				MarkIngressRejected(c, IngressRejectIPRestricted)
-				AbortWithError(c, 403, "ACCESS_DENIED", fmt.Sprintf("Access denied. Your IP is %s", clientIP))
-				return
-			}
-		}
-
-		// 检查关联的用户
-		if apiKey.User == nil {
-			AbortWithError(c, 401, "USER_NOT_FOUND", "User associated with API key not found")
-			return
-		}
-
-		// 检查用户状态
-		if !apiKey.User.IsActive() {
-			MarkIngressRejected(c, IngressRejectUserInactive)
-			AbortWithError(c, 401, "USER_INACTIVE", "User account is not active")
+		if !validateAPIKeyPrincipal(c, apiKey, cfg) {
 			return
 		}
 		anonymousCredentialSuccess(c)
@@ -224,7 +180,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		// Async image task polling only reads data that already belongs to the
 		// authenticated key and must remain available after the completed
 		// generation consumes the key's remaining balance.
-		skipBilling := c.Request.URL.Path == "/v1/usage" || metadataReadRequest || isAsyncImageTaskRead(c.Request.Method, c.Request.URL.Path)
+		skipBilling := IsGatewayUsagePath(c.Request.URL.Path) || metadataReadRequest || isAsyncImageTaskRead(c.Request.Method, c.Request.URL.Path)
 
 		// ── 4. SimpleMode → early return ─────────────────────────────
 
@@ -356,6 +312,72 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		nextWithAPIKeyAdmissionOwner(c, apiKeyService, apiKeyString, ip.GetSecurityClientIP(c, cfg.TrustForwardedIPForAPIKeyACL()), apiKey, false)
 	}
 	return authenticate
+}
+
+// Only initial authentication classifies unknown credentials for abuse tracking.
+func abortAPIKeyLookupError(c *gin.Context, err error, anonymousGuard *service.APIKeyService) {
+	switch {
+	case errors.Is(err, service.ErrUserNotFound):
+		AbortWithError(c, http.StatusUnauthorized, "USER_NOT_FOUND", "User associated with API key not found")
+	case errors.Is(err, service.ErrAPIKeyNotFound):
+		if anonymousGuard != nil && rejectAnonymousCredentialFailure(c, anonymousGuard, "unknown", false) {
+			return
+		}
+		MarkIngressRejected(c, IngressRejectInvalidAPIKey)
+		AbortWithError(c, http.StatusUnauthorized, "INVALID_API_KEY", "Invalid API key")
+	case errors.Is(err, service.ErrAPIKeyAuthOverloaded):
+		MarkIngressRejected(c, IngressRejectAPIKeyAuthOverloaded)
+		AbortWithError(c, http.StatusServiceUnavailable, "API_KEY_AUTH_OVERLOADED", "API key authentication is temporarily unavailable")
+	default:
+		if !abortIfAPIKeyLookupClientGone(c, err) {
+			AbortWithError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to validate API key")
+		}
+	}
+}
+
+func validateAPIKeyPrincipal(c *gin.Context, apiKey *service.APIKey, cfg *config.Config) bool {
+	if !apiKey.IsActive() && apiKey.Status != service.StatusAPIKeyExpired && apiKey.Status != service.StatusAPIKeyQuotaExhausted {
+		MarkIngressRejected(c, IngressRejectAPIKeyDisabled)
+		AbortWithError(c, http.StatusUnauthorized, "API_KEY_DISABLED", "API key is disabled")
+		return false
+	}
+	if len(apiKey.IPWhitelist) > 0 || len(apiKey.IPBlacklist) > 0 {
+		clientIP := ip.GetSecurityClientIP(c, cfg.TrustForwardedIPForAPIKeyACL())
+		allowed, _ := ip.CheckIPRestrictionWithCompiledRules(clientIP, apiKey.CompiledIPWhitelist, apiKey.CompiledIPBlacklist)
+		if !allowed {
+			if clientIP == "" {
+				clientIP = "unknown"
+			}
+			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonIPRestriction)
+			MarkIngressRejected(c, IngressRejectIPRestricted)
+			AbortWithError(c, http.StatusForbidden, "ACCESS_DENIED", fmt.Sprintf("Access denied. Your IP is %s", clientIP))
+			return false
+		}
+	}
+	if apiKey.User == nil {
+		AbortWithError(c, http.StatusUnauthorized, "USER_NOT_FOUND", "User associated with API key not found")
+		return false
+	}
+	if !apiKey.User.IsActive() {
+		MarkIngressRejected(c, IngressRejectUserInactive)
+		AbortWithError(c, http.StatusUnauthorized, "USER_INACTIVE", "User account is not active")
+		return false
+	}
+	return true
+}
+
+func revalidateUsageRecordsKey(ctx context.Context, keys *service.APIKeyService, credential string, cached *service.APIKey) (*service.APIKey, error) {
+	if cached == nil || cached.ID <= 0 || cached.UserID <= 0 || cached.User == nil || cached.User.ID != cached.UserID {
+		return nil, service.ErrAPIKeyNotFound
+	}
+	fresh, err := keys.GetByKeyUncached(ctx, credential)
+	if err != nil {
+		return nil, err
+	}
+	if fresh == nil || fresh.ID != cached.ID || fresh.UserID != cached.UserID || (fresh.User != nil && fresh.User.ID != cached.UserID) {
+		return nil, service.ErrAPIKeyNotFound
+	}
+	return fresh, nil
 }
 
 func apiKeyHeadersTooLarge(c *gin.Context) bool {

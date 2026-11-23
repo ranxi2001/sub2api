@@ -103,9 +103,15 @@ func CORS(cfg config.CORSConfig) gin.HandlerFunc {
 			if allowCredentials {
 				c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
 			}
-			c.Writer.Header().Set("Access-Control-Allow-Headers", allowHeadersValue)
+			allowedHeaders := allowHeadersValue
+			exposedHeaders := "ETag, Server-Timing, X-Client-Request-ID, X-Sub2api-Usage-Id, X-Request-Id"
+			if c.Request.URL.Path == "/v1/usage/records" {
+				allowedHeaders += ", X-Goog-API-Key"
+				exposedHeaders += ", X-Next-Cursor, X-Has-More, Retry-After"
+			}
+			c.Writer.Header().Set("Access-Control-Allow-Headers", allowedHeaders)
 			c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE, PATCH")
-			c.Writer.Header().Set("Access-Control-Expose-Headers", "ETag, Server-Timing, X-Client-Request-ID")
+			c.Writer.Header().Set("Access-Control-Expose-Headers", exposedHeaders)
 			c.Writer.Header().Set("Access-Control-Max-Age", "86400")
 		}
 		// 处理预检请求

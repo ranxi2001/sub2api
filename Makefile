@@ -104,6 +104,7 @@ FRONTEND_CRITICAL_VITEST := \
 	src/components/common/__tests__/DateRangePicker.midnight.spec.ts \
 	src/components/admin/usage/__tests__/UsageStatsCards.spec.ts \
 	src/components/admin/usage/__tests__/UsageCleanupDialog.spec.ts \
+	src/components/usage/__tests__/UsageApiGuide.spec.ts \
 	src/views/user/__tests__/UsageView.spec.ts \
 	src/components/usage/__tests__/TrafficPanel.spec.ts \
 	src/api/__tests__/traffic.spec.ts \

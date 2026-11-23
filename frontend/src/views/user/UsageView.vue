@@ -1,9 +1,9 @@
 <template>
   <AppLayout>
     <div class="space-y-6">
-      <UsageStatsCards v-if="activeTab !== 'traffic'" :stats="usageStats" :show-account-cost="false" :strike-standard-cost="true" />
+      <UsageStatsCards v-if="showUsageControls" :stats="usageStats" :show-account-cost="false" :strike-standard-cost="true" />
 
-      <div v-if="activeTab !== 'traffic'" class="space-y-4">
+      <div v-if="showUsageControls" class="space-y-4">
         <div class="card p-4">
           <div class="flex flex-wrap items-center gap-4">
             <div class="flex items-center gap-2">
@@ -67,7 +67,7 @@
         </div>
       </div>
 
-      <div v-if="activeTab !== 'traffic'" class="card p-6">
+      <div v-if="showUsageControls" class="card p-6">
         <div class="flex flex-wrap items-end justify-between gap-4">
           <div v-if="activeTab === 'errors'" class="flex flex-1 flex-wrap items-end gap-4">
             <div class="w-full sm:w-auto sm:min-w-[220px]">
@@ -168,7 +168,7 @@
         </div>
       </div>
 
-      <div class="flex gap-2 border-b border-gray-200 dark:border-dark-700">
+      <div ref="tabBar" class="flex scroll-mt-20 flex-wrap gap-2 border-b border-gray-200 dark:border-dark-700">
         <button class="tab" :class="{ 'tab-active': activeTab === 'usage' }" @click="activeTab = 'usage'">
           {{ t('usage.tabs.usage') }}
         </button>
@@ -176,6 +176,10 @@
           {{ t('usage.tabs.errors') }}
         </button>
         <button class="tab" :class="{ 'tab-active': activeTab === 'traffic' }" @click="activeTab = 'traffic'">{{ t('traffic.title') }}</button>
+        <div class="flex items-center gap-1">
+          <button type="button" class="tab" :class="{ 'tab-active': activeTab === 'api' }" @click="activeTab = 'api'">{{ t('usageApi.title') }}</button>
+          <NewFeatureBadge v-if="authStore.isAdmin" :notice-id="NEW_FEATURE_NOTICES.usageRecordsApi" :user-id="authStore.user?.id" />
+        </div>
       </div>
 
       <template v-if="activeTab === 'usage'">
@@ -216,6 +220,7 @@
         @update:pageSize="onErrorPageSize"
         @ipGeoBatchFailed="handleIpGeoBatchFailed"
       />
+      <UsageApiGuide v-if="activeTab === 'api'" />
       <TrafficPanel v-if="activeTab === 'traffic'" :api-key-options="apiKeyOptions" class="card" />
     </div>
     <ExportProgressDialog
@@ -243,6 +248,10 @@ import Select, { type SelectOption } from '@/components/common/Select.vue'
 import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import UsageStatsCards from '@/components/admin/usage/UsageStatsCards.vue'
 import UsageTable from '@/components/admin/usage/UsageTable.vue'
+import UsageApiGuide from '@/components/usage/UsageApiGuide.vue'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
+import { useAuthStore } from '@/stores/auth'
 import TrafficPanel from '@/components/usage/TrafficPanel.vue'
 import ModelDistributionChart from '@/components/charts/ModelDistributionChart.vue'
 import GroupDistributionChart from '@/components/charts/GroupDistributionChart.vue'
@@ -275,6 +284,7 @@ import { COMMON_ERROR_STATUS_CODES } from '@/utils/errorBadges'
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const authStore = useAuthStore()
 
 type DistributionMetric = 'tokens' | 'actual_cost'
 type EndpointSource = 'inbound' | 'upstream' | 'path'
@@ -348,7 +358,7 @@ const applyErrorFilters = () => {
   void loadErrors()
 }
 
-let abortController: AbortController | null = null
+let logsController: AbortController | undefined
 let chartReqSeq = 0
 let statsReqSeq = 0
 let modelStatsReqSeq = 0
@@ -377,7 +387,9 @@ const modelDistributionMetric = ref<DistributionMetric>('tokens')
 const groupDistributionMetric = ref<DistributionMetric>('tokens')
 const endpointDistributionMetric = ref<DistributionMetric>('tokens')
 const endpointDistributionSource = ref<EndpointSource>('inbound')
-const activeTab = ref<'usage' | 'errors' | 'traffic'>('usage')
+const tabBar = ref<HTMLElement | null>(null)
+const activeTab = ref<'usage' | 'errors' | 'traffic' | 'api'>('usage')
+const showUsageControls = computed(() => activeTab.value === 'usage' || activeTab.value === 'errors')
 const errorViewEnabled = computed(() => appStore.cachedPublicSettings?.allow_user_view_error_requests ?? false)
 const includeCacheRate = computed(() => showUsageCacheRate(appStore.cachedPublicSettings, 'user'))
 const includeUpstreamResponseModel = computed(() => showUpstreamResponseModelToUsers(appStore.cachedPublicSettings))
@@ -468,9 +480,9 @@ const buildUsageListParams = (page: number, pageSize: number): UsageQueryParams 
 })
 
 const loadLogs = async () => {
-  abortController?.abort()
+  logsController?.abort()
   const controller = new AbortController()
-  abortController = controller
+  logsController = controller
   loading.value = true
   try {
     const res = await usageAPI.query(buildUsageListParams(pagination.page, pagination.page_size), {
@@ -481,11 +493,16 @@ const loadLogs = async () => {
       pagination.total = res.total
     }
   } catch (error: any) {
-    if (error?.name !== 'AbortError' && error?.code !== 'ERR_CANCELED') {
+    if (!controller.signal.aborted && error?.name !== 'AbortError' && error?.code !== 'ERR_CANCELED') {
+      usageLogs.value = []
+      pagination.total = 0
       appStore.showError(t('usage.failedToLoad'))
     }
   } finally {
-    if (abortController === controller) loading.value = false
+    if (!controller.signal.aborted) {
+      logsController = undefined
+      loading.value = false
+    }
   }
 }
 
@@ -743,6 +760,7 @@ const exportToCSV = async () => {
     window.URL.revokeObjectURL(url)
     appStore.showSuccess(t('usage.exportSuccess'))
   } catch (error) {
+    if (exportAbortController !== controller) return
     if (isExportAbortError(error)) {
       appStore.showInfo(t('usage.exportCancelled'))
     } else {
@@ -862,11 +880,13 @@ const handleColumnClickOutside = (event: MouseEvent) => {
   }
 }
 
-const loadApiKeys = async () => {
-  const firstPage = await keysAPI.list(1, 100)
+let filterController: AbortController | undefined
+
+const loadApiKeys = async (signal: AbortSignal) => {
+  const firstPage = await keysAPI.list(1, 100, undefined, { signal })
   const keys = [...firstPage.items]
-  for (let page = 2; page <= firstPage.pages && keys.length > 0; page++) {
-    const response = await keysAPI.list(page, 100)
+  for (let page = 2; !signal.aborted && page <= firstPage.pages && keys.length > 0; page++) {
+    const response = await keysAPI.list(page, 100, undefined, { signal })
     if (response.items.length === 0) break
     keys.push(...response.items)
   }
@@ -874,16 +894,29 @@ const loadApiKeys = async () => {
 }
 
 const loadFilterOptions = async () => {
+  filterController?.abort()
+  const controller = new AbortController()
+  filterController = controller
   try {
     const [keys, availableGroups] = await Promise.all([
-      loadApiKeys(),
+      loadApiKeys(controller.signal),
       userGroupsAPI.getAvailable(),
     ])
+    if (controller.signal.aborted) return
     apiKeys.value = keys
     groups.value = availableGroups
   } catch (error) {
-    console.error('Failed to load usage filter options:', error)
+    if (!controller.signal.aborted) console.error('Failed to load usage filter options:', error)
   }
+}
+
+let errorController: AbortController | undefined
+const invalidateErrorRows = () => {
+  errorController?.abort()
+  errorController = undefined
+  errorRows.value = []
+  errorTotal.value = 0
+  errorLoading.value = false
 }
 
 const resetErrorRows = () => {
@@ -891,12 +924,14 @@ const resetErrorRows = () => {
   if (activeTab.value === 'errors') {
     void loadErrors()
   } else {
-    errorRows.value = []
-    errorTotal.value = 0
+    invalidateErrorRows()
   }
 }
 
 const loadErrors = async () => {
+  errorController?.abort()
+  const controller = new AbortController()
+  errorController = controller
   errorLoading.value = true
   try {
     const resp = await usageAPI.listMyErrorRequests({
@@ -910,14 +945,21 @@ const loadErrors = async () => {
       status_code: errorFilter.value.status_code ?? undefined,
       sort_by: errorSortBy.value,
       sort_order: errorSortOrder.value,
-    })
+    }, { signal: controller.signal })
+    if (controller.signal.aborted) return
     errorRows.value = resp.items
     errorTotal.value = resp.total
   } catch (error) {
+    if (controller.signal.aborted) return
+    errorRows.value = []
+    errorTotal.value = 0
     console.error('[UsageView] loadErrors failed:', error)
     appStore.showError(t('usage.errors.failedToLoad'))
   } finally {
-    errorLoading.value = false
+    if (!controller.signal.aborted) {
+      errorController = undefined
+      errorLoading.value = false
+    }
   }
 }
 
@@ -941,8 +983,37 @@ const onErrorPageSize = (pageSize: number) => {
 
 const switchToErrors = () => {
   activeTab.value = 'errors'
-  if (errorRows.value.length === 0) void loadErrors()
+  if (errorRows.value.length === 0 && !errorLoading.value) void loadErrors()
 }
+
+let usageRefreshPending = false
+watch(activeTab, (tab, previous) => {
+  if (previous === 'errors' && errorController) invalidateErrorRows()
+  if (tab === 'api') {
+    usageRefreshPending = true
+    if (logsController) {
+      logsController.abort()
+      logsController = undefined
+      usageLogs.value = []
+      pagination.total = 0
+      loading.value = false
+    }
+    filterController?.abort()
+    exportAbortController?.abort()
+    exportAbortController = null
+    statsReqSeq++
+    modelStatsReqSeq++
+    chartReqSeq++
+  } else if (usageRefreshPending && (tab === 'usage' || tab === 'errors')) {
+    usageRefreshPending = false
+    void loadFilterOptions()
+    refreshData()
+  }
+}, { flush: 'sync' })
+
+watch(activeTab, tab => {
+  if (tab === 'api') tabBar.value?.scrollIntoView?.({ block: 'start', behavior: 'instant' })
+}, { flush: 'post' })
 
 onMounted(() => {
   loadSavedColumns()
@@ -953,7 +1024,9 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  abortController?.abort()
+  filterController?.abort()
+  logsController?.abort()
+  errorController?.abort()
   exportAbortController?.abort()
   document.removeEventListener('click', handleColumnClickOutside)
 })

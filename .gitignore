@@ -145,6 +145,7 @@ docs/*
 !docs/stream-timing.md
 !docs/openai-sse-delivery.md
 !docs/user-traffic.md
+!docs/usage-records-api.md
 !docs/typesafe-content-audit.md
 !docs/multi-host-session-owner.md
 !docs/security-penalties.md

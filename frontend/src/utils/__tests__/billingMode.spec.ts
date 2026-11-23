@@ -3,9 +3,11 @@ import {
   BILLING_MODE_IMAGE,
   BILLING_MODE_TOKEN,
   BILLING_MODE_VIDEO,
+  getBillingModeLabel,
   getDisplayBillingMode,
   isImageUsage
 } from '../billingMode'
+import zhAdminResources from '@/i18n/locales/zh/admin/resources'
 
 describe('billingMode helpers', () => {
   it('prefers explicit video mode over image_count', () => {
@@ -23,5 +25,16 @@ describe('billingMode helpers', () => {
     expect(
       getDisplayBillingMode({ image_count: 1, billing_mode: BILLING_MODE_TOKEN })
     ).toBe(BILLING_MODE_TOKEN)
+  })
+
+  it('uses the Chinese labels from the user CSV locale', () => {
+    const t = (key: string) => {
+      const leaf = key.split('.').pop() as keyof typeof zhAdminResources.usage
+      return zhAdminResources.usage[leaf] as string
+    }
+    expect(getBillingModeLabel(BILLING_MODE_TOKEN, t)).toBe('按量')
+    expect(getBillingModeLabel('per_request', t)).toBe('按次')
+    expect(getBillingModeLabel(BILLING_MODE_IMAGE, t)).toBe('按次(图片)')
+    expect(getBillingModeLabel(BILLING_MODE_VIDEO, t)).toBe('按次(视频)')
   })
 })
