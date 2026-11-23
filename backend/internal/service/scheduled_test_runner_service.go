@@ -128,7 +128,8 @@ func (s *ScheduledTestRunnerService) runScheduled() {
 	s.groupTests.Cleanup(ctx, now)
 	// Group tests run beside the account plans rather than after them.
 	var groupRuns sync.WaitGroup
-	groupRuns.Add(2)
+	groupRuns.Add(3)
+	go func() { defer groupRuns.Done(); s.runDomesticRouteProbes(ctx) }()
 	go func() { defer groupRuns.Done(); s.candyMonitor.RunDue(ctx, now) }()
 	go func() {
 		defer groupRuns.Done()

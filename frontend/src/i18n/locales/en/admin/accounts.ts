@@ -1,5 +1,7 @@
 export default {
     accounts: {
+      domesticRouteAutoSchedule: 'Automatic scheduling by domestic model route latency',
+      domesticRouteAutoScheduleHint: 'Sends a short streaming request over this account’s route every hour. Upstream charges may apply. A first text under 3 seconds enables scheduling. A slower response, timeout or upstream failure pauses scheduling. Paused accounts are tested again.',
       platformSwitch: {
         hint: 'Choose a platform compatible with this credential type. The API key and custom URL are retained; verify that the target supports this upstream.',
         resetHint: 'Switching resets model mappings, platform-specific settings and incompatible groups. Review and save the target settings before synchronizing models or refreshing usage.',
