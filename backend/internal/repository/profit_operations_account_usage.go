@@ -31,7 +31,7 @@ func readAccountUsageProfit(ctx context.Context, tx *sql.Tx, f service.UpstreamO
  WHERE bucket>=lo AND bucket<hi AND procurement_source IS NULL AND ($3::bigint=0 OR account_id=$3)
 ), facts AS (
  SELECT account_id,group_id,model,public_model,upstream_model,requests,standard_charge,user_charge,account_charge,procurement_source,procurement_amount,image_quantities
- FROM account_usage_financial_rollups,bounds WHERE bucket>=lo AND bucket<hi AND procurement_source IS NOT NULL AND ($3::bigint=0 OR account_id=$3)
+ FROM account_usage_financial_rollups,bounds WHERE bucket>=lo AND bucket<hi AND procurement_source IS NOT NULL AND NOT EXISTS (SELECT 1 FROM old_buckets b WHERE b.bucket=account_usage_financial_rollups.bucket) AND ($3::bigint=0 OR account_id=$3)
  UNION ALL
  SELECT e.account_id,e.group_id,e.model,e.public_model,e.upstream_model,e.requests,e.standard_charge,e.user_charge,e.account_charge,e.procurement_source,e.procurement_amount,e.image_quantities
  FROM (SELECT $1::timestamptz AS start_at,lo AS end_at FROM bounds UNION ALL

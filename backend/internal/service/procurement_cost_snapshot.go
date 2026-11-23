@@ -4,7 +4,7 @@ import "github.com/Wei-Shaw/sub2api/internal/domain"
 
 // ProcurementCostSnapshot is request-time evidence, independent of the user
 // charge and account debit multiplier. A nil CostMultiplier means unknown, not
-// zero. A nil snapshot denotes history/legacy accounts, not a current estimate.
+// zero. A nil snapshot denotes usage recorded before capture was available.
 type ProcurementCostSnapshot struct {
 	Version        int                `json:"version"`
 	AccountType    string             `json:"account_type"`

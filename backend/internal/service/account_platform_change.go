@@ -29,7 +29,7 @@ func AccountPlatformChanging(ctx context.Context) bool {
 func AccountPlatformPortableExtra(extra map[string]any) map[string]any {
 	out := make(map[string]any)
 	for key, value := range extra {
-		if strings.HasPrefix(key, "quota_") || key == AccountCostMultiplierExtraKey || key == AccountCostAutoSyncExtraKey {
+		if strings.HasPrefix(key, "quota_") || key == AccountCostMultiplierExtraKey || key == AccountCostAutoSyncExtraKey || key == ImagePurchasePricesKey {
 			out[key] = value
 		}
 	}
