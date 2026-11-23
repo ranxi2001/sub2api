@@ -4075,3 +4075,30 @@ it('omits untouched probe settings so stale editors cannot restore old charges',
   await wrapper.get('#edit-account-form').trigger('submit.prevent'); await flushPromises()
   expect(updateAccountMock.mock.calls[0][1].extra).not.toHaveProperty('probe_penalty')
 })
+
+describe('domestic route automatic scheduling', () => {
+  it('defaults off, saves the opt-in and removes it on uncheck', async () => {
+    vi.clearAllMocks()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    const account = { ...buildAccount(), platform: 'deepseek', type: 'apikey', extra: { custom_flag: true } }
+    updateAccountMock.mockResolvedValue(account)
+    const selector = '[data-testid="domestic-route-auto-schedule"]'
+    const modal = mountModal(account)
+    await flushPromises()
+    expect(modal.get<HTMLInputElement>(selector).element.checked).toBe(false)
+    expect(modal.findAllComponents(NewFeatureBadge).some(b => b.props('noticeId') === NEW_FEATURE_NOTICES.domesticRouteAutoSchedule)).toBe(true)
+    await modal.get(selector).setValue(true)
+    await modal.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const saved = updateAccountMock.mock.calls[0][1].extra
+    expect(saved).toMatchObject({ domestic_route_auto_schedule: true, custom_flag: true })
+    modal.unmount()
+    const reopened = mountModal({ ...account, extra: saved })
+    await flushPromises()
+    expect(reopened.get<HTMLInputElement>(selector).element.checked).toBe(true)
+    await reopened.get(selector).setValue(false)
+    await reopened.get('#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[1][1].extra.domestic_route_auto_schedule).toBeUndefined()
+  })
+})

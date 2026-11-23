@@ -52,21 +52,26 @@ func (s *ScheduledTestRunnerService) runDomesticRouteProbes(ctx context.Context)
 			continue
 		}
 		// Preserve independent expiry, quota, cooldown and performance gates.
-		account.Schedulable = true
-		if !account.IsSchedulable() {
+		eligible := *account
+		eligible.Schedulable = true
+		if !eligible.IsSchedulable() {
 			continue
 		}
 		first, measured := s.accountTestSvc.probeDomesticRoute(ctx, account, model)
 		if !measured || ctx.Err() != nil {
 			continue
 		}
-		enable := first >= 0 && first < domesticRouteBudget
+		enable := domesticRouteFast(first)
 		if err := repo.ApplyDomesticRouteProbe(ctx, claim, enable); err != nil {
 			logger.LegacyPrintf("service.domestic_route", "apply account=%d: %v", claim.AccountID, err)
 			continue
 		}
 		logger.LegacyPrintf("service.domestic_route", "account=%d model=%s first_text_ms=%d target_schedulable=%t", claim.AccountID, model, first.Milliseconds(), enable)
 	}
+}
+
+func domesticRouteFast(first time.Duration) bool {
+	return first >= 0 && first < domesticRouteBudget
 }
 
 func domesticRouteModel(a *Account) string {
@@ -155,17 +160,18 @@ func (s *AccountTestService) probeDomesticRoute(ctx context.Context, a *Account,
 	if resp.StatusCode != http.StatusOK || !strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
 		return -time.Millisecond, true
 	}
-	if !domesticRouteVisibleText(resp.Body, protocol) {
+	if !domesticRouteVisibleText(resp.Body, protocol, a, model) {
 		return -time.Millisecond, true
 	}
 	return time.Since(start), true
 }
 
-func domesticRouteVisibleText(body io.Reader, protocol string) bool {
+func domesticRouteVisibleText(body io.Reader, protocol string, a *Account, model string) bool {
 	scanner := bufio.NewScanner(io.LimitReader(body, 1<<20))
 	scanner.Buffer(make([]byte, 4096), 256<<10)
-	for scanner.Scan() {
-		data, ok := strings.CutPrefix(strings.TrimSpace(scanner.Text()), "data:")
+	lines := newDeepSeekChatSSEPrefixScanner(scanner, a, model)
+	for lines.Scan() {
+		data, ok := strings.CutPrefix(strings.TrimSpace(lines.Text()), "data:")
 		if !ok {
 			continue
 		}
