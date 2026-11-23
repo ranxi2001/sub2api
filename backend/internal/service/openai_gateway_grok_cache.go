@@ -191,10 +191,11 @@ func applyGrokResponsesCacheIdentity(body, intentSourceBody []byte, identity str
 }
 
 func hasGrokResponsesToolIntent(body []byte) bool {
-	if gjson.GetBytes(body, "tools").Exists() || gjson.GetBytes(body, "tool_choice").Exists() {
+	raw := openAIWSPayloadStringView(body)
+	if gjson.Get(raw, "tools").Exists() || gjson.Get(raw, "tool_choice").Exists() {
 		return true
 	}
-	input := gjson.GetBytes(body, "input")
+	input := gjson.Get(raw, "input")
 	if !input.IsArray() {
 		return false
 	}
