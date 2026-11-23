@@ -194,7 +194,9 @@ const profitOperationsCohort = `accounts_config AS (
 
 // A captured unknown/unsupported snapshot never falls back to today's account
 // settings. The multiplier already includes New API's request-target x1/x7.
-const profitRequestCostMultiplierSQL = `CASE WHEN u.procurement_cost_snapshot IS NOT NULL THEN
+const profitRequestCostMultiplierSQL = `CASE WHEN u.procurement_cost_snapshot->>'version'='2' AND u.procurement_cost_snapshot->>'basis'='account_usage' THEN
+ CASE WHEN jsonb_typeof(u.procurement_cost_snapshot->'cost_multiplier')='number' THEN (u.procurement_cost_snapshot->>'cost_multiplier')::numeric END
+ WHEN u.procurement_cost_snapshot IS NOT NULL THEN
  CASE WHEN u.procurement_cost_snapshot->>'version'='1'
   AND u.procurement_cost_snapshot->>'basis'='total_cost'
   AND u.procurement_cost_snapshot->>'account_type'='gateway'

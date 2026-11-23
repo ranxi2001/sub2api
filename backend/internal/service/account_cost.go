@@ -9,6 +9,7 @@ import (
 
 const AccountCostMultiplierExtraKey = "cost_multiplier"
 const AccountCostAutoSyncExtraKey = "cost_multiplier_auto_sync"
+const ImagePurchasePricesKey = "image_purchase_prices"
 const DefaultAccountCostMultiplier = 0.1
 
 // CostMultiplier is the saved estimate used for profitability.
@@ -66,6 +67,18 @@ func ValidateAccountCostMultiplierExtra(extra map[string]any) error {
 	if raw := extra[AccountCostAutoSyncExtraKey]; raw != nil {
 		if _, ok := raw.(bool); !ok {
 			return infraerrors.BadRequest("INVALID_COST_MULTIPLIER_AUTO_SYNC", "cost_multiplier_auto_sync must be a boolean")
+		}
+	}
+	if raw := extra[ImagePurchasePricesKey]; raw != nil {
+		prices, ok := raw.(map[string]any)
+		if !ok {
+			return infraerrors.BadRequest("INVALID_IMAGE_PURCHASE_PRICES", "image purchase prices must be a tier-to-price object")
+		}
+		for tier, price := range prices {
+			_, valid := accountCostMultiplierNumber(price)
+			if !valid || (tier != "1K" && tier != "2K" && tier != "4K") {
+				return infraerrors.BadRequest("INVALID_IMAGE_PURCHASE_PRICES", "expected a finite nonnegative price for 1K, 2K or 4K")
+			}
 		}
 	}
 	raw, exists := extra[AccountCostMultiplierExtraKey]

@@ -66,13 +66,15 @@ func TestProcurementSnapshotMixedTargetsThroughUsageWriters(t *testing.T) {
 func TestProcurementSnapshotUnknownAndLegacySemantics(t *testing.T) {
 	a := &Account{Platform: PlatformGateway, Type: AccountTypeGateway, Credentials: map[string]any{GatewayUpstreamKindCredentialKey: "new_api"}}
 	log := &UsageLog{Platform: PlatformOpenAI, TotalCost: 10, ActualCost: 3}
-	captureGatewayProcurementCost(log, a)
+	captureProcurementCost(log, a)
 	require.NotNil(t, log.ProcurementCostSnapshot, "record unknown request-time evidence, never use the gateway's current account cost")
 	require.Nil(t, log.ProcurementCostSnapshot.CostMultiplier)
 	for _, kind := range []string{AccountTypeAPIKey, AccountTypeUpstream, AccountTypeOAuth} {
 		legacy := &UsageLog{Platform: PlatformOpenAI}
-		captureGatewayProcurementCost(legacy, &Account{Type: kind})
-		require.Nil(t, legacy.ProcurementCostSnapshot, "legacy single-platform reporting must retain its existing fallback")
+		captureProcurementCost(legacy, &Account{Type: kind})
+		require.NotNil(t, legacy.ProcurementCostSnapshot)
+		require.Equal(t, 2, legacy.ProcurementCostSnapshot.Version)
+		require.Nil(t, legacy.ProcurementCostSnapshot.CostMultiplier)
 	}
 	require.Equal(t, 10.0, log.TotalCost)
 	require.Equal(t, 3.0, log.ActualCost)
@@ -85,11 +87,11 @@ func TestProcurementSnapshotZeroDisabledConversionAndUnresolvedTarget(t *testing
 	for _, rate := range []float64{0, .1} {
 		a.Extra[UpstreamBillingProbeExtraKey] = newAPISnapshot(a, NewAPIToken{Group: "fixed"}, &newAPIData{wallet: 12, ratios: map[string]float64{"fixed": rate}}, 30, time.Now())
 		log := &UsageLog{Platform: PlatformOpenAI}
-		captureGatewayProcurementCost(log, a)
+		captureProcurementCost(log, a)
 		require.NotNil(t, log.ProcurementCostSnapshot.CostMultiplier)
 		require.Equal(t, rate, *log.ProcurementCostSnapshot.CostMultiplier)
 		log.Platform = PlatformComposite
-		captureGatewayProcurementCost(log, a)
+		captureProcurementCost(log, a)
 		require.Nil(t, log.ProcurementCostSnapshot.CostMultiplier, "composite cannot decide the currency scale")
 	}
 }
@@ -102,7 +104,7 @@ func TestProcurementSnapshotSub2APIDeclaredRate(t *testing.T) {
 		}}}
 	for _, target := range []string{PlatformKimi, PlatformOpenAI} {
 		log := &UsageLog{Platform: target}
-		captureGatewayProcurementCost(log, account)
+		captureProcurementCost(log, account)
 		require.NotNil(t, log.ProcurementCostSnapshot.CostMultiplier)
 		require.Equal(t, .14, *log.ProcurementCostSnapshot.CostMultiplier)
 	}
@@ -112,12 +114,23 @@ func TestProcurementSnapshotSub2APIManualRate(t *testing.T) {
 	account := &Account{Type: AccountTypeGateway, Credentials: map[string]any{GatewayUpstreamKindCredentialKey: "sub2api"},
 		Extra: map[string]any{AccountCostAutoSyncExtraKey: false}}
 	log := &UsageLog{Platform: PlatformOpenAI}
-	captureGatewayProcurementCost(log, account)
+	captureProcurementCost(log, account)
 	require.Nil(t, log.ProcurementCostSnapshot.CostMultiplier)
 	for _, factor := range []float64{0, .25} {
 		account.Extra[AccountCostMultiplierExtraKey] = factor
-		captureGatewayProcurementCost(log, account)
+		captureProcurementCost(log, account)
 		require.NotNil(t, log.ProcurementCostSnapshot.CostMultiplier)
 		require.Equal(t, factor, *log.ProcurementCostSnapshot.CostMultiplier)
 	}
+}
+
+func TestProfitOperationsCapturesImagePriceAndSavedMultiplier(t *testing.T) {
+	prices := map[string]any{"1K": 0.005}
+	account := &Account{Type: AccountTypeAPIKey, Extra: map[string]any{ImagePurchasePricesKey: prices, AccountCostMultiplierExtraKey: 0.08}}
+	usage := &UsageLog{ImageCount: 2}
+	captureProcurementCost(usage, account)
+	prices["1K"] = 5.0
+	account.Extra[AccountCostMultiplierExtraKey] = 1
+	require.Equal(t, .005, usage.ProcurementCostSnapshot.ImagePrices["1K"])
+	require.Equal(t, .08, *usage.ProcurementCostSnapshot.CostMultiplier)
 }

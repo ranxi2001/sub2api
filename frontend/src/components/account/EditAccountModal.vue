@@ -2190,6 +2190,14 @@
             :disabled="isNewAPIUpstream && costMultiplierAutoSync"
           />
           <p class="input-hint">{{ t('admin.accounts.costMultiplierHint') }}</p>
+          <fieldset v-if="editingAccount?.type !== 'gateway'" class="mt-3">
+            <legend class="input-label">{{ t('profitOps.imagePurchasePrices') }}</legend>
+            <div class="grid grid-cols-3 gap-2">
+              <label v-for="tier in purchaseTiers" :key="tier">{{ tier }}
+                <input v-model="imagePurchasePrices[tier]" class="input" type="number" min="0" max="1000000" step="any" />
+              </label>
+            </div>
+          </fieldset>
           <p v-if="isNewAPIUpstream" class="input-hint">{{ t('admin.accounts.upstreamBilling.newAPI.costManagedHint') }}</p>
         </div>
         <div>
@@ -5195,6 +5203,12 @@ const mixedChannelWarningMessageText = computed(() => {
 
 const probePenaltyEnabled = ref(false)
 const probePenaltyMinimum = ref(0.001)
+const purchaseTiers = ['1K', '2K', '4K'] as const
+function readImagePrices(extra: Record<string, unknown> | undefined | null) {
+  const prices = extra?.image_purchase_prices as Record<string, number> | undefined
+  return Object.fromEntries(purchaseTiers.map(tier => [tier, prices?.[tier] ?? '']))
+}
+const imagePurchasePrices = ref(readImagePrices(undefined))
 const costMultiplier = ref(DEFAULT_ACCOUNT_COST_MULTIPLIER)
 const costMultiplierAutoSync = ref(true)
 
@@ -5328,6 +5342,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   const penalty = newAccount.extra?.probe_penalty as { enabled?: boolean; minimum_charge?: number } | undefined
   probePenaltyEnabled.value = penalty?.enabled === true
   probePenaltyMinimum.value = penalty?.minimum_charge ?? 0.001
+  imagePurchasePrices.value = readImagePrices(newAccount.extra)
   costMultiplier.value = readAccountCostMultiplier(newAccount.extra)
   costMultiplierAutoSync.value = newAccount.extra?.cost_multiplier_auto_sync !== false
   form.rate_multiplier = newAccount.rate_multiplier ?? 1
@@ -7529,6 +7544,23 @@ const handleSubmit = async () => {
     }
     const costExtra: Record<string, unknown> = {
       ...((updatePayload.extra as Record<string, unknown>) || editingAccount.value.extra || {})
+    }
+    const originalPrices = readImagePrices(editingAccount.value.extra)
+    if (purchaseTiers.some(tier => String(imagePurchasePrices.value[tier]) !== String(originalPrices[tier]))) {
+      const prices: Record<string, number> = {}
+      for (const tier of purchaseTiers) {
+        const value = imagePurchasePrices.value[tier]
+        if (value === '') continue
+        const price = Number(value)
+        if (!isValidAccountCostMultiplier(price)) {
+          appStore.showError(t('admin.accounts.costMultiplierInvalid'))
+          return
+        }
+        prices[tier] = price
+      }
+      costExtra.image_purchase_prices = prices
+    } else {
+      delete costExtra.image_purchase_prices
     }
     // An unrelated edit must not restore a cost loaded before a probe updated it.
     if (costMultiplier.value !== readAccountCostMultiplier(editingAccount.value.extra)) {

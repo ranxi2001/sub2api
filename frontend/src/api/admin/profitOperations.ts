@@ -17,7 +17,8 @@ export interface ProfitMetrics {
  unknown_standard_requests: number; unknown_income_requests: number; unmetered_zero_records: number; cost_covered_requests: number; unknown_cost_requests: number; unknown_upstream_requests: number
  saved_multiplier_requests: number; default_multiplier_requests: number; saved_stats_base_requests: number; standard_base_fallback_requests: number
  subscription_requests: number; deleted_account_requests: number; samples: number; unknown_samples: number
- cost_source?: 'account_usage' | 'account_procurement' | 'estimate' | 'wallet_today' | 'wallet_window' | 'wallet_unavailable' | 'wallet_not_split' | 'wallet_currency' | 'mixed'
+ unknown_cost_income?: number; current_config_requests?: number
+ cost_source?: 'procurement_coverage' | 'account_usage' | 'account_procurement' | 'estimate' | 'wallet_today' | 'wallet_window' | 'wallet_unavailable' | 'wallet_not_split' | 'wallet_currency' | 'mixed'
  wallet_basis?: 'wallet_today' | 'wallet_window'
  wallet_currency?: string | null
  wallet_observed_at?: string | null

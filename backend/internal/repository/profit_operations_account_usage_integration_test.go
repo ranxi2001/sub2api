@@ -58,7 +58,7 @@ func TestProfitOperationsAccountUsageRollup(t *testing.T) {
  VALUES($1,$2,$3,'one-times','fixture',50,12,8,1,$4)`, f.user, f.key, f.account, from.Add(time.Minute))
 	require.NoError(t, err)
 	check(2, 22, 4, 18) // 4 × 0.5 + 8 × 1 × 0.25
-	_, err = integrationDB.Exec("UPDATE account_usage_financial_rollups SET unit_rate_charge=NULL WHERE bucket=$1 AND account_id=$2", from, f.account)
+	_, err = integrationDB.Exec("UPDATE account_usage_financial_rollups SET procurement_source=NULL WHERE bucket=$1 AND account_id=$2", from, f.account)
 	require.NoError(t, err)
 	check(2, 22, 4, 18)
 	filter.From = from.Add(time.Minute)
@@ -66,7 +66,15 @@ func TestProfitOperationsAccountUsageRollup(t *testing.T) {
 	filter.From = from
 	_, err = integrationDB.Exec("UPDATE accounts SET extra='{}' WHERE id=$1", f.account)
 	require.NoError(t, err)
-	check(2, 22, 10, 12)
+	check(2, 22, 2, 8) // Unpriced income is excluded from the margin.
+	_, err = integrationDB.Exec(`UPDATE accounts SET type='apikey',extra='{"cost_multiplier":0.05,"image_purchase_prices":{"1K":0.005}}' WHERE id=$1`, f.account)
+	require.NoError(t, err)
+	_, err = integrationDB.Exec(`INSERT INTO usage_logs(user_id,api_key_id,account_id,request_id,model,total_cost,actual_cost,account_stats_cost,account_rate_multiplier,image_count,image_size,billing_mode,created_at)
+ VALUES($1,$2,$3,'image-purchase','fixture',2,1,2,1,2,'1K','image',$4)`, f.user, f.key, f.account, from.Add(time.Minute))
+	require.NoError(t, err)
+	check(3, 23, 2.41, 20.59) // 2 + 8 × 0.05 + 2 images × 0.005
+	_, err = integrationDB.Exec(`DELETE FROM usage_logs WHERE account_id=$1 AND request_id='image-purchase'`, f.account)
+	require.NoError(t, err)
 	_, err = integrationDB.Exec("DELETE FROM usage_logs WHERE account_id=$1 AND request_id='one-times'", f.account)
 	require.NoError(t, err)
 	// Late corrections invalidate the published slice. A partial range on
