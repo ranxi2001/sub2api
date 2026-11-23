@@ -1,0 +1,277 @@
+name: PR1012 retry deadline and SSE quota oracle
+
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - '.github/workflows/pr1012-retry-quota-oracle.yml'
+      - '.github/scripts/pr1012-oracle.py'
+      - 'backend/internal/handler/openai_gateway_handler.go'
+      - 'backend/internal/handler/openai_ws_retry_deadline_test.go'
+      - 'backend/internal/handler/openai_retry_owner_test.go'
+      - 'backend/internal/service/openai_retry_deadline_test_support.go'
+      - 'backend/internal/service/openai_sse_quota_type_test.go'
+      - 'backend/internal/service/openai_ws_forwarder_ingress.go'
+      - 'backend/internal/service/openai_gateway_passthrough.go'
+      - 'backend/internal/service/openai_gateway_upstream_errors.go'
+      - 'backend/internal/service/openai_account_runtime_block_fastpath.go'
+      - 'backend/go.mod'
+      - 'backend/go.sum'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr1012-oracle-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  behavior:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: fixture
+          POSTGRES_PASSWORD: fixture
+          POSTGRES_DB: issue917_fixture
+        ports: ['15432:5432']
+        options: >-
+          --health-cmd "pg_isready -U fixture -d issue917_fixture"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      BASELINE_SHA: 991cd30e2910d5eeb6ab55f6b7fc93e9a494e1a6
+      F1_UNSAFE_SHA: 282af88f3fbf767b0235fec62ca5596bdc3d8449
+      F2_UNSAFE_SHA: 5c3dafcbb9520d4792f5520f99408fd577f2838a
+      BACKOFF_UNSAFE_SHA: 282af88f3fbf767b0235fec62ca5596bdc3d8449
+      ISSUE917_TEST_POSTGRES_DSN: 'postgres://fixture:fixture@127.0.0.1:15432/issue917_fixture?sslmode=disable'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Record identity and restore only the two defective production blobs
+        id: prepare
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/pr1012-evidence"
+          red="$RUNNER_TEMP/pr1012-red"
+          mkdir -p "$evidence"
+          printf 'candidate=%s\nbaseline=%s\n' "$CANDIDATE_SHA" "$BASELINE_SHA" > "$evidence/identity.txt"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test -z "$(git status --porcelain)"
+          git rev-parse HEAD HEAD^{tree} > "$evidence/green-identity.txt"
+          git worktree add --detach "$red" "$CANDIDATE_SHA"
+          production=(backend/internal/service/openai_gateway_passthrough.go backend/internal/service/openai_ws_forwarder_ingress.go)
+          for path in "${production[@]}"; do
+            git show "$BASELINE_SHA:$path" > "$red/$path"
+            blob="$(git rev-parse "$BASELINE_SHA:$path")"
+            test "$(git -C "$red" hash-object "$path")" = "$blob"
+            printf '%s %s\n' "$blob" "$path" >> "$evidence/baseline-blobs.txt"
+            printf '%s %s\n' "$(git rev-parse "$CANDIDATE_SHA:$path")" "$path" >> "$evidence/candidate-blobs.txt"
+          done
+          expected="$(printf '%s\n' "${production[@]}" | sort)"
+          test "$(git -C "$red" diff --name-only | sort)" = "$expected"
+          test -z "$(git -C "$red" ls-files --others --exclude-standard)"
+          git -C "$red" diff -- "${production[@]}" > "$evidence/red-production.diff"
+          oracles=(backend/internal/handler/openai_ws_retry_deadline_test.go backend/internal/handler/openai_retry_owner_test.go backend/internal/service/openai_sse_quota_type_test.go backend/internal/service/openai_retry_deadline_test_support.go .github/scripts/pr1012-oracle.py .github/workflows/pr1012-retry-quota-oracle.yml)
+          for path in "${oracles[@]}"; do
+            blob="$(git rev-parse "$CANDIDATE_SHA:$path")"
+            test "$(git -C "$red" hash-object "$path")" = "$blob"
+            test "$(git hash-object "$path")" = "$blob"
+            printf '%s %s\n' "$blob" "$path" >> "$evidence/oracle-blobs.txt"
+          done
+      - name: Record F1 identity and restore only the unsafe normalized-quota classifier
+        id: prepare_f1
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/pr1012-evidence"
+          red="$RUNNER_TEMP/pr1012-f1-red"
+          printf 'candidate=%s\nunsafe=%s\n' "$CANDIDATE_SHA" "$F1_UNSAFE_SHA" > "$evidence/f1-identity.txt"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test -z "$(git status --porcelain)"
+          git worktree add --detach "$red" "$CANDIDATE_SHA"
+          test "$(git -C "$red" rev-parse HEAD)" = "$CANDIDATE_SHA"
+          git -C "$red" rev-parse HEAD HEAD^{tree} >> "$evidence/f1-identity.txt"
+          path=backend/internal/service/openai_gateway_passthrough.go
+          git show "$F1_UNSAFE_SHA:$path" > "$red/$path"
+          blob="$(git rev-parse "$F1_UNSAFE_SHA:$path")"
+          test "$(git -C "$red" hash-object "$path")" = "$blob"
+          printf '%s %s\n' "$blob" "$path" > "$evidence/f1-unsafe-blob.txt"
+          printf '%s %s\n' "$(git rev-parse "$CANDIDATE_SHA:$path")" "$path" > "$evidence/f1-candidate-blob.txt"
+          test "$(git -C "$red" diff --name-only)" = "$path"
+          test -z "$(git -C "$red" ls-files --others --exclude-standard)"
+          git -C "$red" diff -- "$path" > "$evidence/f1-red-production.diff"
+          oracles=(backend/internal/handler/openai_ws_retry_deadline_test.go backend/internal/handler/openai_retry_owner_test.go backend/internal/service/openai_sse_quota_type_test.go backend/internal/service/openai_retry_deadline_test_support.go .github/scripts/pr1012-oracle.py .github/workflows/pr1012-retry-quota-oracle.yml)
+          for path in "${oracles[@]}"; do
+            blob="$(git rev-parse "$CANDIDATE_SHA:$path")"
+            test "$(git -C "$red" hash-object "$path")" = "$blob"
+            test "$(git hash-object "$path")" = "$blob"
+            printf '%s %s\n' "$blob" "$path" >> "$evidence/f1-oracle-blobs.txt"
+          done
+      - name: Isolate the F2 retry veto and the observed backoff fallback defects
+        id: prepare_remaining
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/pr1012-evidence"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test -z "$(git status --porcelain)"
+          for blocker in f2 backoff; do
+            red="$RUNNER_TEMP/pr1012-$blocker-red"
+            if [ "$blocker" = f2 ]; then
+              unsafe="$F2_UNSAFE_SHA"
+              path=backend/internal/service/openai_gateway_upstream_errors.go
+            else
+              unsafe="$BACKOFF_UNSAFE_SHA"
+              path=backend/internal/handler/openai_gateway_handler.go
+            fi
+            printf 'candidate=%s\nunsafe=%s\n' "$CANDIDATE_SHA" "$unsafe" > "$evidence/$blocker-identity.txt"
+            git worktree add --detach "$red" "$CANDIDATE_SHA"
+            test "$(git -C "$red" rev-parse HEAD)" = "$CANDIDATE_SHA"
+            git -C "$red" rev-parse HEAD HEAD^{tree} >> "$evidence/$blocker-identity.txt"
+            git show "$unsafe:$path" > "$red/$path"
+            blob="$(git rev-parse "$unsafe:$path")"
+            test "$(git -C "$red" hash-object "$path")" = "$blob"
+            printf '%s %s\n' "$blob" "$path" > "$evidence/$blocker-unsafe-blob.txt"
+            printf '%s %s\n' "$(git rev-parse "$CANDIDATE_SHA:$path")" "$path" > "$evidence/$blocker-candidate-blob.txt"
+            test "$(git -C "$red" diff --name-only)" = "$path"
+            test -z "$(git -C "$red" ls-files --others --exclude-standard)"
+            git -C "$red" diff -- "$path" > "$evidence/$blocker-red-production.diff"
+            oracles=(backend/internal/handler/openai_ws_retry_deadline_test.go backend/internal/handler/openai_retry_owner_test.go backend/internal/service/openai_sse_quota_type_test.go backend/internal/service/openai_retry_deadline_test_support.go .github/scripts/pr1012-oracle.py .github/workflows/pr1012-retry-quota-oracle.yml)
+            for oracle in "${oracles[@]}"; do
+              blob="$(git rev-parse "$CANDIDATE_SHA:$oracle")"
+              test "$(git -C "$red" hash-object "$oracle")" = "$blob"
+              test "$(git hash-object "$oracle")" = "$blob"
+              printf '%s %s\n' "$blob" "$oracle" >> "$evidence/$blocker-oracle-blobs.txt"
+            done
+          done
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Runner prerequisites
+        id: prerequisites
+        run: |
+          set -euo pipefail
+          go version | tee "$RUNNER_TEMP/pr1012-evidence/go-version.txt"
+          go version | grep -q 'go1.27.4'
+          python3 --version
+          bash .github/scripts/ci-ubuntu-mirrors.sh
+          if ! command -v redis-server >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends redis-server
+          fi
+          redis-server --version
+      - name: RED B1 requires the observed second generation after D
+        if: ${{ !cancelled() && steps.prerequisites.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/pr1012-evidence"
+          set +e
+          (cd "$RUNNER_TEMP/pr1012-red/backend" && go test -p=2 -race -tags=unit,retrydeadline ./internal/handler -run '^TestOpenAIWSRetryDeadlineAtGenerationWrite$/^handshake$' -count=1 -json -timeout=3m) > "$evidence/red-b1.jsonl" 2>&1
+          status=$?
+          set -e
+          printf '%s\n' "$status" > "$evidence/red-b1.exitcode"
+          cat "$evidence/red-b1.jsonl"
+          python3 .github/scripts/pr1012-oracle.py red-b1 "$evidence/red-b1.exitcode" "$evidence/red-b1.jsonl" 2>&1 | tee "$evidence/red-b1-verdict.txt"
+      - name: RED B3 requires semantic502 in all 24 type-only reader leaves
+        if: ${{ !cancelled() && steps.prerequisites.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/pr1012-evidence"
+          set +e
+          (cd "$RUNNER_TEMP/pr1012-red/backend" && go test -p=2 -race -tags=unit,retrydeadline ./internal/service -run '^TestSSETypeOnlyQuotaReaders$' -count=1 -json -timeout=3m) > "$evidence/red-b3.jsonl" 2>&1
+          status=$?
+          set -e
+          printf '%s\n' "$status" > "$evidence/red-b3.exitcode"
+          cat "$evidence/red-b3.jsonl"
+          python3 .github/scripts/pr1012-oracle.py red-b3 "$evidence/red-b3.exitcode" "$evidence/red-b3.jsonl" 2>&1 | tee "$evidence/red-b3-verdict.txt"
+      - name: RED F1 requires semantic502 in all 24 normalized explicit-code reader leaves
+        if: ${{ !cancelled() && steps.prerequisites.outcome == 'success' && steps.prepare_f1.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/pr1012-evidence"
+          set +e
+          (cd "$RUNNER_TEMP/pr1012-f1-red/backend" && go test -p=2 -race -tags=unit,retrydeadline ./internal/service -run '^TestSSEQuotaNormalizedExplicitCodeReaders$' -count=1 -json -timeout=3m) > "$evidence/red-f1.jsonl" 2>&1
+          status=$?
+          set -e
+          printf '%s\n' "$status" > "$evidence/red-f1.exitcode"
+          cat "$evidence/red-f1.jsonl"
+          python3 .github/scripts/pr1012-oracle.py red-f1 "$evidence/red-f1.exitcode" "$evidence/red-f1.jsonl" 2>&1 | tee "$evidence/red-f1-verdict.txt"
+      - name: RED F2 verifies 24 API key retry failures and 24 passing OAuth controls
+        if: ${{ !cancelled() && steps.prerequisites.outcome == 'success' && steps.prepare_remaining.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/pr1012-evidence"
+          set +e
+          (cd "$RUNNER_TEMP/pr1012-f2-red/backend" && go test -p=2 -race -tags=unit,retrydeadline ./internal/service -run '^TestSSEQuotaNormalizedPool429Readers$' -count=1 -json -timeout=3m) > "$evidence/red-f2.jsonl" 2>&1
+          status=$?
+          set -e
+          printf '%s\n' "$status" > "$evidence/red-f2.exitcode"
+          cat "$evidence/red-f2.jsonl"
+          python3 .github/scripts/pr1012-oracle.py red-f2 "$evidence/red-f2.exitcode" "$evidence/red-f2.jsonl" 2>&1 | tee "$evidence/red-f2-verdict.txt"
+      - name: RED backoff requires an observed backup generation after D
+        if: ${{ !cancelled() && steps.prerequisites.outcome == 'success' && steps.prepare_remaining.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/pr1012-evidence"
+          set +e
+          (cd "$RUNNER_TEMP/pr1012-backoff-red/backend" && go test -p=2 -race -tags=unit,retrydeadline ./internal/handler -run '^TestOpenAIWSRetryDeadlineAtGenerationWrite$/^backoff$' -count=1 -json -timeout=3m) > "$evidence/red-backoff.jsonl" 2>&1
+          status=$?
+          set -e
+          printf '%s\n' "$status" > "$evidence/red-backoff.exitcode"
+          cat "$evidence/red-backoff.jsonl"
+          python3 .github/scripts/pr1012-oracle.py red-backoff "$evidence/red-backoff.exitcode" "$evidence/red-backoff.jsonl" 2>&1 | tee "$evidence/red-backoff-verdict.txt"
+      - name: GREEN all retry stages, initial drain, quota, strict owner, output and Issue917 policy controls
+        if: ${{ !cancelled() && steps.prerequisites.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test -z "$(git status --porcelain)"
+          evidence="$RUNNER_TEMP/pr1012-evidence"
+          set +e
+          (cd backend && go test -p=2 -race -tags=unit,retrydeadline,issue917pg ./internal/service ./internal/handler -run '^Test(OpenAIWSRetryDeadlineAtGenerationWrite|SSETypeOnlyQuotaReaders|SSEQuotaNormalizedExplicitCodeReaders|SSEQuotaNormalizedPool429Readers|SSEQuotaNormalizedAfterOutputCannotReplay|SSEQuotaBareErrorCanComplete|SSEQuotaClassificationRetainsExplicitCodeAndIntegrity|SSEQuotaTerminalDoesNotGrantHTTPRejectionProof|SSEQuotaWithoutResetUsesBoundedAccountFailover|StrictSameAccountRetryRequiresCurrentBinding|SameAccountRetrySchedulerCannotEscape|StrictSessionAffinityLosingFirstTurnReleasesSlot|OAuthRetryOwnerBusyAfterSlotRelease|OAuthNormalEOFBeforeOutputPreservesAccount|OAuthNormalEOFAfterOutputCannotReplay|OpenAIGatewayService_ProxyResponsesWebSocketFromClient_ClientDisconnectStillDrainsUpstream|OpenAIResponseFlush_BareErrorFollowedByCompletedUsesCompletedTerminal|OpenAIStreamingPassthroughBareErrorTerminatesBeforeDone|OpenAIStreamingPassthroughBareErrorDrainsAuthoritativeFailedUsage|Issue917ResponsesCooldown)$' -count=1 -json -timeout=12m) > "$evidence/green.jsonl" 2>&1
+          status=$?
+          set -e
+          printf '%s\n' "$status" > "$evidence/green.exitcode"
+          cat "$evidence/green.jsonl"
+          python3 .github/scripts/pr1012-oracle.py green "$evidence/green.exitcode" "$evidence/green.jsonl" 2>&1 | tee "$evidence/green-verdict.txt"
+          test -z "$(git status --porcelain)"
+      - name: Build actual production server without fixture tags
+        if: ${{ !cancelled() && steps.prerequisites.outcome == 'success' }}
+        env:
+          CGO_ENABLED: '0'
+        working-directory: backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test -z "$(git status --porcelain)"
+          set +e
+          go build -trimpath -o "$RUNNER_TEMP/pr1012-server" ./cmd/server > "$RUNNER_TEMP/pr1012-evidence/build.log" 2>&1
+          status=$?
+          set -e
+          printf '%s\n' "$status" > "$RUNNER_TEMP/pr1012-evidence/build.exitcode"
+          cat "$RUNNER_TEMP/pr1012-evidence/build.log"
+          test "$status" -eq 0
+      - name: Upload raw immutable-head evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr1012-oracle-${{ env.CANDIDATE_SHA }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pr1012-evidence
+          if-no-files-found: error
+          retention-days: 14

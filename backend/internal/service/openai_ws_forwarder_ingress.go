@@ -1978,6 +1978,14 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 			return nil, openAIWSAgentRecoveryClose(err)
 		}
+		// Lease acquisition and admission can outlast an actual same-account
+		// retry's window. Ordinary accepted ingress must still drain on disconnect;
+		// admitted generations and later client turns keep their admission.
+		if latencyGenerationStartedTurn == 0 && openAISameAccountRetryFromContext(ctx).accountID > 0 {
+			if !OpenAISameAccountRetryAdmissible(ctx, latest.ID) || !OpenAIWSIngressCanFailover(priorityLatencyCtx, c) {
+				return nil, denyOpenAITurn("same_account_retry_unavailable")
+			}
+		}
 		latencyGenerationStartedTurn = turn
 		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(payload), s.openAIWSWriteTimeout()); err != nil {
 			return nil, wrapOpenAIWSIngressTurnError(
