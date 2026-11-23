@@ -973,11 +973,31 @@ func grokResponsesToolDedupKey(tool gjson.Result) string {
 	return "json:" + normalizeCompatSeedJSON(json.RawMessage(tool.Raw))
 }
 
+// A null object member needs a colon, optional JSON whitespace, then null.
+// Searching for "ull" avoids frequent 'n' bytes in long text. If the first
+// match is unrelated, a later null member must follow another colon. Leave
+// ambiguous matches (including quoted text) to the JSON decoder.
+func grokResponsesMayHaveNullMember(body []byte) bool {
+	const suffix = "ull"
+	i := bytes.Index(body, []byte(suffix))
+	if i < 0 {
+		return false
+	}
+	if i > 0 && body[i-1] == 'n' && bytes.HasSuffix(bytes.TrimRight(body[:i-1], " \t\r\n"), []byte(":")) {
+		return true
+	}
+	_, rest, found := bytes.Cut(body[i+len(suffix):], []byte(":"))
+	return found && bytes.Contains(rest, []byte(suffix))
+}
+
 // sanitizeGrokReasoningNullContent drops explicit JSON nulls from Responses
 // input items. xAI's untagged ModelInput decoder 422s on those fields.
 // Compaction items stay unmodified per the compact contract.
 func sanitizeGrokReasoningNullContent(body []byte) ([]byte, error) {
-	input := gjson.GetBytes(body, "input")
+	if !grokResponsesMayHaveNullMember(body) {
+		return body, nil
+	}
+	input := gjson.Get(openAIWSPayloadStringView(body), "input")
 	if !input.Exists() || (!input.IsArray() && !input.IsObject()) {
 		return body, nil
 	}
