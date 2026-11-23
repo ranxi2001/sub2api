@@ -5,6 +5,7 @@ package repository
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -48,8 +49,24 @@ func accountExtraIntentFixture(t *testing.T) (service.AdminAccountRepository, *s
 	}
 	require.NoError(t, repo.Create(context.Background(), account))
 	t.Cleanup(func() {
-		_, _ = integrationDB.Exec(`DELETE FROM scheduler_outbox WHERE account_id=$1`, account.ID)
-		_, _ = integrationDB.Exec(`DELETE FROM accounts WHERE id=$1`, account.ID)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		// Bulk events have a NULL account_id; this fixture only updates its own
+		// singleton account list. Match that exact payload, not other fixtures.
+		const ownedOutbox = `account_id=$1 OR (event_type='account_bulk_changed'
+ AND account_id IS NULL AND group_id IS NULL
+ AND payload=jsonb_build_object('account_ids',jsonb_build_array($1::bigint)))`
+		for _, query := range []string{
+			"DELETE FROM scheduler_outbox WHERE " + ownedOutbox,
+			"DELETE FROM accounts WHERE id=$1",
+		} {
+			if _, err := integrationDB.ExecContext(ctx, query, account.ID); err != nil {
+				t.Errorf("cleanup account extra intent fixture: %v", err)
+			}
+		}
+		var remaining int
+		require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM scheduler_outbox WHERE "+ownedOutbox, account.ID).Scan(&remaining))
+		require.Zero(t, remaining, "account extra intent fixture must not leak scheduler events")
 	})
 	return repo, account
 }
