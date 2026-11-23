@@ -268,6 +268,42 @@ func TestProxyOpenAIWSHTTPBridgeTurn_NormalizesFastWithoutLosingObservedDefault(
 	require.Equal(t, "default", result.UpstreamResponseServiceTier)
 }
 
+func TestOpenAIWSHTTPBridgeTracksExplicitToolDeclarations(t *testing.T) {
+	const prior = `[{"type":"function","name":"prior"}]`
+	const current = `[{"type":"function","name":"current"}]`
+	const completed = "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_fixture\",\"output\":[]}}\n\n"
+
+	for _, tc := range []struct{ name, fields, want string }{
+		{"omitted", "", prior},
+		{"unrelated keys", `,"TOOLS":[],"metadata":{"tools":[]}`, prior},
+		{"explicit null", `,"tools":null`, "null"},
+		{"explicit empty", `,"tools":[]`, "[]"},
+		{"escaped duplicate", `,"tools":[],"t\u006fols":` + current, current},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+			setOpenAIWSHTTPBridgeToolState(c, openAIWSHTTPBridgeToolState{LoweredTools: []byte(prior)})
+			svc := &OpenAIGatewayService{
+				cfg: &config.Config{},
+				httpUpstream: &httpUpstreamStub{resp: &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": {"text/event-stream"}},
+					Body:       io.NopCloser(strings.NewReader(completed)),
+				}},
+			}
+			account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1}
+			body := []byte(`{"type":"response.create","model":"gpt-5","input":"fixture"` + tc.fields + "}")
+			_, err := svc.proxyOpenAIWSHTTPBridgeTurn(t.Context(), c, account, "fixture", body, len(body),
+				"gpt-5", "", "", "", "", 1, func([]byte) error { return nil })
+			require.NoError(t, err)
+			state, ok := openAIWSHTTPBridgeToolStateFromContext(c)
+			require.True(t, ok)
+			require.JSONEq(t, tc.want, string(state.LoweredTools))
+		})
+	}
+}
+
 func TestProxyOpenAIWSHTTPBridgeTurnAPIKeyAdaptsClientTools(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
