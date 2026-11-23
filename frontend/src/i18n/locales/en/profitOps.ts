@@ -1,6 +1,9 @@
 export default {
   "accountUsageAttribution": "Channels use current account assignments. Reassigning an account moves its subtotal for the selected window to the new channel.",
-  "accountUsageFormula": "For unbound Codex and Qwen Token Plan endpoints, a request with an effective 1× account rate uses its account charge times the current saved purchase multiplier. Other requests use the recorded account charge. Gross profit is user charges less these costs.",
+  "accountUsageFormula": "Matched settlements take precedence. New requests use saved request-time costs. Historical requests can use current procurement settings. Account charges that already include discounts keep that rate. Profit and margin cover priced requests only.",
+  "imagePurchasePrices": "Image purchase price per output image (optional, by size)",
+  "pricedRequests": "Cost covered for {known} / {total} requests",
+  "costEvidence": "Settled cost {settled} · Estimated cost {estimated} · Income with unknown cost {unknown} · {current} requests at current prices",
   "profitCost": "Cost",
   "accountProcurementSource": "Includes account purchase multiplier",
   "accountUsageCost": "Account charge",

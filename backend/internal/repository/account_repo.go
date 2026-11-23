@@ -1116,7 +1116,7 @@ func lockAndMergeAccountProbeExtra(
 	// Resolve omission against the locked row, including a concurrent deletion.
 	// Do this after platform portability so omitted account-wide costs stay fresh;
 	// probe penalties still follow the platform transition's discard contract.
-	for _, key := range []string{service.AccountCostMultiplierExtraKey, service.AccountCostAutoSyncExtraKey, service.AccountProbePenaltyExtraKey} {
+	for _, key := range []string{service.AccountCostMultiplierExtraKey, service.AccountCostAutoSyncExtraKey, service.ImagePurchasePricesKey, service.AccountProbePenaltyExtraKey} {
 		if service.AccountPlatformChanging(ctx) && key == service.AccountProbePenaltyExtraKey {
 			continue
 		}

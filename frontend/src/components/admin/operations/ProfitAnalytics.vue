@@ -36,7 +36,8 @@
           <dl class="grid gap-4 sm:grid-cols-3 lg:grid-cols-6"><div v-for="key in amountKeys" :key="key"><dt class="text-sm text-gray-500">{{ metricLabel(key, snapshot.usage.summary) }}</dt><dd :data-field="key" class="mt-1 break-words text-lg font-semibold tabular-nums">{{ formatMetric(snapshot.usage.summary, key) }}</dd></div></dl>
           <p class="text-sm" data-testid="cost-source">{{ t('profitOps.costSource') }} · {{ sourceLabel(snapshot.usage.summary) }}</p>
           <p v-if="!accountUsage" class="text-xs leading-6 text-gray-500">{{ t('profitOps.subscription') }} {{ snapshot.usage.summary.subscription_requests }} · {{ t('profitOps.deleted') }} {{ snapshot.usage.summary.deleted_account_requests }} · {{ t('profitOps.unknownUpstream') }} {{ snapshot.usage.summary.unknown_upstream_requests }}</p>
-          <p class="text-xs text-gray-500">{{ t('profitOps.unknownIncome') }} {{ snapshot.usage.summary.unknown_income_requests }} · {{ t('profitOps.unknownStandard') }} {{ snapshot.usage.summary.unknown_standard_requests }} · {{ t('profitOps.unmeteredZero') }} {{ snapshot.usage.summary.unmetered_zero_records }}<br />{{ t('profitOps.configUpdated') }} {{ snapshot.usage.summary.oldest_config_updated_at || '—' }} → {{ snapshot.usage.summary.latest_config_updated_at || '—' }}</p>
+          <p v-if="snapshot.usage.summary.cost_source === 'procurement_coverage'" class="text-xs text-gray-500">{{ t('profitOps.costEvidence', { settled: number(snapshot.usage.summary.covered_reconciled_cost), estimated: number(snapshot.usage.summary.covered_estimated_cost), unknown: number(snapshot.usage.summary.unknown_cost_income), current: snapshot.usage.summary.current_config_requests }) }}</p>
+          <p v-else-if="!accountUsage" class="text-xs text-gray-500">{{ t('profitOps.unknownIncome') }} {{ snapshot.usage.summary.unknown_income_requests }} · {{ t('profitOps.unknownStandard') }} {{ snapshot.usage.summary.unknown_standard_requests }} · {{ t('profitOps.unmeteredZero') }} {{ snapshot.usage.summary.unmetered_zero_records }}<br />{{ t('profitOps.configUpdated') }} {{ snapshot.usage.summary.oldest_config_updated_at || '—' }} → {{ snapshot.usage.summary.latest_config_updated_at || '—' }}</p>
         </section>
         <section class="card space-y-4 p-4">
           <div class="flex flex-wrap items-center justify-between gap-3"><h2 class="font-semibold">{{ t('profitOps.compare') }} · {{ t(`profitOps.${applied.dimension}`) }}</h2><button class="btn btn-secondary" @click="overview">{{ t('profitOps.overview') }}</button></div>
@@ -112,6 +113,7 @@ function walletText(m: ProfitMetrics) {
  return t(m.cost_source === 'wallet_window' || m.wallet_basis === 'wallet_window' ? 'profitOps.walletWindow' : 'profitOps.walletToday')
 }
 function sourceLabel(m: ProfitMetrics) {
+ if (m.cost_source === 'procurement_coverage') return t('profitOps.pricedRequests', { known: m.cost_covered_requests, total: m.requests })
  if (m.cost_source === 'account_procurement') return t('profitOps.accountProcurementSource')
  if (m.cost_source === 'account_usage') return t('profitOps.accountUsageCost')
  if (m.requests === 0) return '—'

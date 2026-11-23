@@ -22,8 +22,11 @@ func (r *dashboardAggregationRepository) RefreshAccountUsageFinancial(ctx contex
 	}
 	defer func() { _ = tx.Rollback() }()
 	var bucket time.Time
-	err = tx.QueryRowContext(ctx, `SELECT bucket FROM account_usage_financial_pending
- WHERE bucket < account_usage_bucket(now()) ORDER BY bucket DESC LIMIT 1`).Scan(&bucket)
+	err = tx.QueryRowContext(ctx, `SELECT COALESCE(
+ (SELECT bucket FROM account_usage_financial_pending WHERE bucket < account_usage_bucket(now()) ORDER BY bucket DESC LIMIT 1),
+ (SELECT bucket FROM account_profit_legacy_buckets WHERE bucket < account_usage_bucket(now()) ORDER BY bucket DESC LIMIT 1))
+ WHERE EXISTS (SELECT 1 FROM account_usage_financial_pending WHERE bucket < account_usage_bucket(now()))
+    OR EXISTS (SELECT 1 FROM account_profit_legacy_buckets WHERE bucket < account_usage_bucket(now()))`).Scan(&bucket)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -38,16 +41,19 @@ func (r *dashboardAggregationRepository) RefreshAccountUsageFinancial(ctx contex
 	if _, err = tx.ExecContext(ctx, `DELETE FROM account_usage_financial_rollups WHERE bucket=$1`, bucket); err != nil {
 		return false, err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO account_usage_financial_rollups
+	_, err = tx.ExecContext(ctx, `INSERT INTO account_usage_financial_rollups (bucket,account_id,group_id,model,public_model,upstream_model,requests,tokens,standard_charge,user_charge,account_charge,duration_sum,duration_count,unit_rate_charge,procurement_source,procurement_amount,image_quantities)
  SELECT $1::timestamptz,account_id,group_id,model,public_model,upstream_model,
  count(*),COALESCE(sum(tokens),0),COALESCE(sum(standard_charge),0),COALESCE(sum(user_charge),0),
- COALESCE(sum(account_charge),0),sum(duration_sum),sum(duration_count),COALESCE(sum(unit_rate_charge),0)
- FROM account_usage_financial_events WHERE created_at >= $1 AND created_at < $1::timestamptz+interval '5 minutes'
- GROUP BY account_id,group_id,model,public_model,upstream_model`, bucket)
+ COALESCE(sum(account_charge),0),sum(duration_sum),sum(duration_count),COALESCE(sum(unit_rate_charge),0),procurement_source,sum(procurement_amount),image_quantities
+ FROM account_profit_events WHERE created_at >= $1 AND created_at < $1::timestamptz+interval '5 minutes'
+ GROUP BY account_id,group_id,model,public_model,upstream_model,procurement_source,(procurement_amount IS NULL),image_quantities`, bucket)
 	if err != nil {
 		return false, err
 	}
 	if _, err = tx.ExecContext(ctx, `DELETE FROM account_usage_financial_pending WHERE bucket=$1`, bucket); err != nil {
+		return false, err
+	}
+	if _, err = tx.ExecContext(ctx, `DELETE FROM account_profit_legacy_buckets WHERE bucket=$1`, bucket); err != nil {
 		return false, err
 	}
 	return true, tx.Commit()
@@ -56,10 +62,12 @@ func (r *dashboardAggregationRepository) RefreshAccountUsageFinancial(ctx contex
 // Full five-minute buckets use saved statistics. Only partial boundaries and
 // the most recent five to ten minutes can read events. All three ranges are
 // disjoint even for a window shorter than one bucket.
-const accountUsageWindow = `WITH bounds AS (
+const financialWindowBounds = `WITH bounds AS (
  SELECT LEAST($2::timestamptz, CASE WHEN $1=account_usage_bucket($1) THEN $1 ELSE account_usage_bucket($1)+interval '5 minutes' END) AS lo,
  GREATEST($1::timestamptz,LEAST(account_usage_bucket($2),account_usage_bucket(now())-interval '5 minutes')) AS hi
-), facts AS (
+)`
+
+const accountUsageWindow = financialWindowBounds + `, facts AS (
  SELECT bucket AS at,account_id,group_id,model,public_model,upstream_model,requests,tokens,standard_charge,user_charge,account_charge,duration_sum,duration_count,unit_rate_charge
  FROM account_usage_financial_rollups,bounds WHERE bucket>=lo AND bucket<hi AND ($3::bigint=0 OR account_id=$3)
  UNION ALL

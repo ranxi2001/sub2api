@@ -4,18 +4,37 @@ import "github.com/Wei-Shaw/sub2api/internal/domain"
 
 // ProcurementCostSnapshot is request-time evidence, independent of the user
 // charge and account debit multiplier. A nil CostMultiplier means unknown, not
-// zero. A nil snapshot denotes history/legacy accounts, not a current estimate.
+// zero. A nil snapshot denotes usage recorded before capture was available.
 type ProcurementCostSnapshot struct {
-	Version        int      `json:"version"`
-	AccountType    string   `json:"account_type"`
-	Provider       string   `json:"provider"`
-	TargetPlatform string   `json:"target_platform"`
-	Basis          string   `json:"basis"`
-	CostMultiplier *float64 `json:"cost_multiplier,omitempty"`
+	Version        int                `json:"version"`
+	AccountType    string             `json:"account_type"`
+	Provider       string             `json:"provider"`
+	TargetPlatform string             `json:"target_platform"`
+	Basis          string             `json:"basis"`
+	ImagePrices    map[string]float64 `json:"image_prices,omitempty"`
+	CostMultiplier *float64           `json:"cost_multiplier,omitempty"`
 }
 
 func captureGatewayProcurementCost(log *UsageLog, account *Account) {
-	if log == nil || !account.IsGateway() {
+	if log == nil || account == nil {
+		return
+	}
+	if !account.IsGateway() {
+		snapshot := &ProcurementCostSnapshot{Version: 2, Basis: "account_usage", AccountType: account.Type, TargetPlatform: log.Platform}
+		if rate, ok := accountCostMultiplierNumber(account.Extra[AccountCostMultiplierExtraKey]); ok {
+			snapshot.CostMultiplier = &rate
+		}
+		if log.ImageCount > 0 {
+			if prices, ok := account.Extra[ImagePurchasePricesKey].(map[string]any); ok {
+				snapshot.ImagePrices = make(map[string]float64, len(prices))
+				for tier, raw := range prices {
+					if price, valid := accountCostMultiplierNumber(raw); valid {
+						snapshot.ImagePrices[tier] = price
+					}
+				}
+			}
+		}
+		log.ProcurementCostSnapshot = snapshot
 		return
 	}
 	provider := account.GetCredential(GatewayUpstreamKindCredentialKey)

@@ -72,7 +72,9 @@ func TestProcurementSnapshotUnknownAndLegacySemantics(t *testing.T) {
 	for _, kind := range []string{AccountTypeAPIKey, AccountTypeUpstream, AccountTypeOAuth} {
 		legacy := &UsageLog{Platform: PlatformOpenAI}
 		captureGatewayProcurementCost(legacy, &Account{Type: kind})
-		require.Nil(t, legacy.ProcurementCostSnapshot, "legacy single-platform reporting must retain its existing fallback")
+		require.NotNil(t, legacy.ProcurementCostSnapshot)
+		require.Equal(t, 2, legacy.ProcurementCostSnapshot.Version)
+		require.Nil(t, legacy.ProcurementCostSnapshot.CostMultiplier)
 	}
 	require.Equal(t, 10.0, log.TotalCost)
 	require.Equal(t, 3.0, log.ActualCost)
@@ -120,4 +122,15 @@ func TestProcurementSnapshotSub2APIManualRate(t *testing.T) {
 		require.NotNil(t, log.ProcurementCostSnapshot.CostMultiplier)
 		require.Equal(t, factor, *log.ProcurementCostSnapshot.CostMultiplier)
 	}
+}
+
+func TestProfitOperationsCapturesImagePriceAndSavedMultiplier(t *testing.T) {
+	prices := map[string]any{"1K": 0.005}
+	account := &Account{Type: AccountTypeAPIKey, Extra: map[string]any{ImagePurchasePricesKey: prices, AccountCostMultiplierExtraKey: 0.08}}
+	usage := &UsageLog{ImageCount: 2}
+	captureGatewayProcurementCost(usage, account)
+	prices["1K"] = 5.0
+	account.Extra[AccountCostMultiplierExtraKey] = 1
+	require.Equal(t, .005, usage.ProcurementCostSnapshot.ImagePrices["1K"])
+	require.Equal(t, .08, *usage.ProcurementCostSnapshot.CostMultiplier)
 }
