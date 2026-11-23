@@ -96,7 +96,7 @@
         class="space-y-5">
         <AccountOpsRuleList ref="ruleList" :channel-view="embedded" :scoped="!!channelId || !!accountId" :user-id="auth.user?.id" :accounts="scopedAccounts" :groups="accountGroups" :config="remote.config" :loading="thresholdLoading"
           :ready="thresholdReady" :error="thresholdError" :busy="mutating"
-          @batch-edit="batchAccounts = $event" @edit-group="showGroupDialog = true" @toggle="toggleGroup" @refresh="loadAccounts" @saved="acceptConfig">
+          @batch-edit="batchAccounts = $event" @edit-group="showGroupDialog = true" @toggle="toggleGroup" @refresh="loadAccounts()" @saved="acceptConfig">
           <template #actions><button type="button" class="btn btn-secondary text-sm" :disabled="thresholdLoading || mutating" data-testid="edit-account-groups" @click="showGroupDialog = true">{{ t('accountOps.manageGroups') }}</button></template>
           <template #global-settings>
             <AccountOpsGlobalSettings :config="remote.config" :disabled="mutating" @saving="globalSaving = $event" @saved="acceptConfig"
@@ -231,12 +231,23 @@ async function refresh() {
   if (mutating.value || globalSaving.value) return
   await Promise.all([load(), ...(activeTab.value === 'settings' ? [loadAccounts()] : [])])
 }
-async function loadAccounts() {
-  if(!auth.user)return
+async function loadAccounts(background = false) {
+  if (!auth.user || (background && thresholdLoading.value)) return
   const current=++accountsVersion;thresholdLoading.value=true
-  try{const [a, g] = await Promise.all([getAccountOpsThresholdAccounts(), getAccountOpsThresholdGroups()]);if(alive&&current===accountsVersion){thresholdAccounts.value=a;accountGroups.value=g;thresholdReady.value=true;thresholdError.value=''}}
-  catch(e){if(alive&&current===accountsVersion){thresholdError.value=message(e);app.showError(thresholdError.value)}}
-  finally{if(alive&&current===accountsVersion)thresholdLoading.value=false}
+  const reads = [getAccountOpsThresholdAccounts(), getAccountOpsThresholdGroups()] as const
+  try{const [a, g] = await Promise.all(reads);if(alive&&current===accountsVersion){thresholdAccounts.value=a;accountGroups.value=g;thresholdReady.value=true;thresholdError.value=''}}
+  catch (error) {
+    if (alive && current === accountsVersion) {
+      thresholdError.value = message(error)
+      if (!background) app.showError(thresholdError.value)
+    }
+  }
+  finally {
+    // Report the first failure immediately, but keep the poll occupied until
+    // both reads finish: Promise.all does not cancel its remaining request.
+    await Promise.allSettled(reads)
+    if (alive && current === accountsVersion) thresholdLoading.value = false
+  }
 }
 function selectTab(tab:'records'|'settings'){activeTab.value=tab;if(tab==='settings'&&!thresholdReady.value&&!thresholdLoading.value)void loadAccounts()}
 function tabKey(event:KeyboardEvent,tab:'records'|'settings'){if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const next=event.key==='Home'?'settings':event.key==='End'?'records':tab==='records'?'settings':'records';selectTab(next);document.getElementById(`ops-tab-${next}`)?.focus()}
@@ -298,6 +309,6 @@ async function removeWebhook(id:string){await mutate(()=>deleteAccountOpsWebhook
 async function testWebhook(id:string){if(testingId.value)return;const current=++testSequence;testingId.value=id;try{await testAccountOpsWebhook(id);if(alive&&current===testSequence)app.showSuccess(t('accountOps.testSuccess'))}catch(e){if(alive&&current===testSequence)app.showError(message(e))}finally{if(alive&&current===testSequence)testingId.value=null}}
 async function more(){if(loadingMore.value||loading.value)return;const current=version, sequence=++paginationSequence;loadingMore.value=true;try{const p=await getAccountOpsEvents(events.value.length);if(alive&&current===version){const merged=new Map([...events.value,...p.items].map(e=>[eventKey(e),e]));events.value=[...merged.values()];hasMore.value=p.has_more}}catch(e){if(alive&&current===version)app.showError(message(e))}finally{if(alive&&sequence===paginationSequence)loadingMore.value=false}}
 watch(()=>auth.user?`${auth.user.id}:${auth.user.role}`:'',()=>{version++;accountsVersion++;testSequence++;mutationSequence++;paginationSequence++;loading.value=loadingMore.value=mutating.value=thresholdLoading.value=false;thresholdAccounts.value=[];accountGroups.value=[];thresholdReady.value=false;showWebhook.value=showEmail.value=showAddChannel.value=showGroupDialog.value=false;testingId.value=null;enabledDraft.value=globalSaving.value=false;activeTab.value='settings';batchAccounts.value=[]},{flush:'sync'})
-onMounted(()=>{void load();void loadAccounts();timer=setInterval(()=>{if(props.active!==false&&document.visibilityState==='visible'&&!loadingMore.value&&!mutating.value&&!globalSaving.value){void load();if(activeTab.value==='settings')void loadAccounts()}},30000)})
+onMounted(()=>{void load();void loadAccounts();timer=setInterval(()=>{if(props.active!==false&&document.visibilityState==='visible'&&!loadingMore.value&&!mutating.value&&!globalSaving.value){void load();if(activeTab.value==='settings')void loadAccounts(true)}},30000)})
 onBeforeUnmount(()=>{alive=false;version++;accountsVersion++;testSequence++;mutationSequence++;paginationSequence++;if(timer)clearInterval(timer)})
 </script>

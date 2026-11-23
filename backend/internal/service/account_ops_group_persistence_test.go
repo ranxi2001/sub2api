@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -124,4 +125,35 @@ func TestAccountOpsReconcileReadsBindingOnlyForLegacyGroups(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAccountOpsThresholdAccountsAtGroupCapacity(t *testing.T) {
+	ctx := context.Background()
+	settings := &accountOpsGroupPersistenceSettings{}
+	svc := NewAccountOpsService(settings, &accountOpsRepoStub{}, nil)
+	accounts := &accountOpsGroupPersistenceAccounts{accountOpsGroupAccounts: accountOpsGroupAccounts{items: map[int64]*Account{
+		1: {ID: 1, Name: "New account", Type: AccountTypeAPIKey, Platform: PlatformOpenAI},
+	}}}
+	svc.SetNotificationDependencies(accounts, nil, false, "UTC")
+	cfg := defaultAccountOpsConfig()
+	cfg.GroupsInitialized = true
+	for i := 0; i < maxAccountOpsGroups; i++ {
+		cfg.Groups = append(cfg.Groups, AccountOpsGroup{ID: fmt.Sprintf("manual-example-%03d", i), Name: "Saved group"})
+	}
+	require.NoError(t, svc.SaveConfig(ctx, cfg))
+	raw, writes := settings.raw, settings.writes
+	items, err := svc.ThresholdAccounts(ctx)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	require.Equal(t, "account:1", items[0].GroupID)
+	groups, err := svc.ThresholdGroups(ctx)
+	require.NoError(t, err)
+	require.Len(t, groups, maxAccountOpsGroups)
+	require.Equal(t, raw, settings.raw)
+	require.Equal(t, writes, settings.writes)
+	cfg.Groups = cfg.Groups[:len(cfg.Groups)-1]
+	require.NoError(t, svc.SaveConfig(ctx, cfg))
+	items, err = svc.ThresholdAccounts(ctx)
+	require.NoError(t, err)
+	require.Equal(t, legacyManualAccountOpsAccountGroupID(1), items[0].GroupID)
 }

@@ -58,6 +58,106 @@ describe('account operations tabs and independent saves', () => {
     } finally { wrapper.unmount() }
   })
 
+  it('keeps a failed threshold poll inline and recovers on the next successful poll', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+    const wrapper = create()
+    try {
+      await flushPromises()
+      const toast = vi.spyOn(useAppStore(), 'showError')
+      vi.mocked(getAccountOpsThresholdAccounts).mockRejectedValue(new Error('Threshold accounts unavailable'))
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await vi.advanceTimersByTimeAsync(30_000)
+        await flushPromises()
+        expect(wrapper.text()).toContain('Threshold accounts unavailable')
+        expect(toast).not.toHaveBeenCalled()
+      }
+      vi.mocked(getAccountOpsThresholdAccounts).mockResolvedValue([])
+      await vi.advanceTimersByTimeAsync(30_000)
+      await flushPromises()
+      expect(wrapper.text()).not.toContain('Threshold accounts unavailable')
+    } finally {
+      wrapper.unmount()
+      visibility.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps a failed threshold read occupied until its sibling settles', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+    vi.mocked(getAccountOpsThresholdAccounts).mockResolvedValue(pollingAccounts())
+    vi.mocked(getAccountOpsThresholdGroups).mockResolvedValue(pollingGroups())
+    const pendingGroups = deferred<AccountOpsGroup[]>()
+    const wrapper = create()
+    try {
+      await flushPromises()
+      const toast = vi.spyOn(useAppStore(), 'showError')
+      expect(wrapper.text()).toContain('Demo 1')
+      vi.mocked(getAccountOpsThresholdAccounts).mockRejectedValueOnce(new Error('Threshold accounts unavailable'))
+      vi.mocked(getAccountOpsThresholdGroups).mockReturnValueOnce(pendingGroups.promise)
+      await vi.advanceTimersByTimeAsync(30_000)
+      await flushPromises()
+      expect(wrapper.text()).toContain('Threshold accounts unavailable')
+      expect(wrapper.text()).toContain('Demo 1')
+      expect(toast).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(30_000)
+      await flushPromises()
+      expect(getAccountOpsThresholdAccounts).toHaveBeenCalledTimes(2)
+      expect(getAccountOpsThresholdGroups).toHaveBeenCalledTimes(2)
+      pendingGroups.resolve(pollingGroups())
+      await flushPromises()
+      expect(wrapper.text()).toContain('Threshold accounts unavailable')
+      await vi.advanceTimersByTimeAsync(30_000)
+      await flushPromises()
+      expect(getAccountOpsThresholdAccounts).toHaveBeenCalledTimes(3)
+      expect(getAccountOpsThresholdGroups).toHaveBeenCalledTimes(3)
+      expect(wrapper.text()).not.toContain('Threshold accounts unavailable')
+      expect(wrapper.text()).toContain('Demo 1')
+      expect(toast).not.toHaveBeenCalled()
+    } finally {
+      pendingGroups.resolve(pollingGroups())
+      wrapper.unmount()
+      visibility.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps a manual refresh occupied across the next poll and reports its error immediately', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+    vi.mocked(getAccountOpsThresholdAccounts).mockResolvedValue(pollingAccounts())
+    vi.mocked(getAccountOpsThresholdGroups).mockResolvedValue(pollingGroups())
+    const pendingGroups = deferred<AccountOpsGroup[]>()
+    const wrapper = create()
+    try {
+      await flushPromises()
+      const toast = vi.spyOn(useAppStore(), 'showError')
+      await vi.advanceTimersByTimeAsync(29_000)
+      vi.mocked(getAccountOpsThresholdAccounts).mockRejectedValueOnce(new Error('Threshold accounts unavailable'))
+      vi.mocked(getAccountOpsThresholdGroups).mockReturnValueOnce(pendingGroups.promise)
+      await wrapper.get('button.btn-secondary').trigger('click')
+      await flushPromises()
+      expect(toast).toHaveBeenCalledOnce()
+      expect(wrapper.text()).toContain('Threshold accounts unavailable')
+      expect(wrapper.text()).toContain('Demo 1')
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(getAccountOpsThresholdAccounts).toHaveBeenCalledTimes(2)
+      expect(getAccountOpsThresholdGroups).toHaveBeenCalledTimes(2)
+      pendingGroups.resolve(pollingGroups())
+      await flushPromises()
+      await vi.advanceTimersByTimeAsync(30_000)
+      await flushPromises()
+      expect(wrapper.text()).not.toContain('Threshold accounts unavailable')
+      expect(getAccountOpsThresholdGroups).toHaveBeenCalledTimes(3)
+    } finally {
+      pendingGroups.resolve(pollingGroups())
+      wrapper.unmount()
+      visibility.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
   it('fences old post-save group reads and account polls after a newer save succeeds', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
     const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
