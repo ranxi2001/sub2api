@@ -1,0 +1,159 @@
+name: Payment fulfillment cancellation
+
+on:
+  pull_request:
+    paths:
+      - 'backend/internal/service/payment*'
+      - 'backend/internal/service/redeem*'
+      - 'backend/internal/service/subscription*'
+      - 'backend/internal/service/repair_f2_coupon_recovery_test.go'
+      - 'backend/internal/handler/payment_webhook*'
+      - 'backend/internal/repository/redeem_code_repo.go'
+      - 'backend/internal/repository/user_repo.go'
+      - 'backend/ent/**'
+      - 'backend/go.*'
+      - '.github/workflows/payment-fulfillment-cancellation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: payment-fulfillment-cancellation-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: fixture
+          POSTGRES_PASSWORD: fixture
+          POSTGRES_DB: payment_cancellation
+        ports: ['15432:5432']
+        options: >-
+          --health-cmd "pg_isready -U fixture -d payment_cancellation"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      CANDIDATE: ${{ github.event.pull_request.head.sha || github.sha }}
+      BASELINE: cf4e7b5085fa81396ee087282b3913efd88b9595
+      COUPON_TEST_DSN: 'postgres://fixture:fixture@127.0.0.1:15432/payment_cancellation?sslmode=disable'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.CANDIDATE }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Record candidate and prepare unchanged baseline with regression fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          test -z "$(git status --porcelain)"
+          mkdir -p "$RUNNER_TEMP/payment-cancellation-evidence"
+          red_root="$RUNNER_TEMP/payment-cancellation-red"
+          git worktree add --detach "$red_root" "$BASELINE"
+          for fixture in backend/internal/service/payment_fulfillment_cancellation_test.go backend/internal/handler/payment_webhook_cancellation_test.go; do
+            cp "$fixture" "$red_root/$fixture"
+            cmp "$fixture" "$red_root/$fixture"
+          done
+          test -z "$(git -C "$red_root" diff --name-only)"
+          printf 'candidate=%s\nbaseline=%s\n' "$CANDIDATE" "$BASELINE" > "$RUNNER_TEMP/payment-cancellation-evidence/source.txt"
+      - name: Require behavioral failures on original cancellation path
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/payment-cancellation-evidence/red.log"
+          cd "$RUNNER_TEMP/payment-cancellation-red/backend"
+          set +e
+          go test -race -p=1 -tags=unit ./internal/service ./internal/handler \
+            -run '^Test(PaymentCancellation(ValidatedTransitionSurvivesDisconnect|FailureFinalizationSurvivesCanceledContext)|PaymentWebhookCancellationCreditsOnceAfterVerification)$' \
+            -count=1 -v -timeout=8m > "$evidence" 2>&1
+          result=$?
+          set -e
+          cat "$evidence"
+          test "$result" -eq 1
+          if grep -Eiq -- 'panic:|fatal error:|DATA RACE|SIG(SEGV|ABRT|BUS|ILL|FPE|QUIT)|segmentation fault|signal:|core dumped|crash|timed out|timeout|build failed|setup failed|syntax error|undefined:|cannot (find|use|load|import)|no required module|no tests to run|--- SKIP:' "$evidence"; then
+            exit 1
+          fi
+          for name in PaymentCancellationValidatedTransitionSurvivesDisconnect PaymentCancellationFailureFinalizationSurvivesCanceledContext PaymentWebhookCancellationCreditsOnceAfterVerification; do
+            grep -F -- "--- FAIL: Test$name " "$evidence"
+          done
+          # Pin each assertion to its frozen fixture location and testify Test label.
+          # Reject extra assertions/subtest failures, including fixture/setup failures.
+          awk '
+            function reject() { bad = 1 }
+            /Error Trace:/ {
+              if (active) reject()
+              active = 1
+              block = ""
+            }
+            active { block = block $0 "\n" }
+            active && /Test:[[:space:]]/ {
+              name = $0
+              sub(/^.*Test:[[:space:]]*/, "", name)
+              sub(/[[:space:]]*$/, "", name)
+              valid = 0
+              if (name == "TestPaymentCancellationValidatedTransitionSurvivesDisconnect") {
+                valid = index(block, "payment_fulfillment_cancellation_test.go:102") &&
+                  block ~ /Error:[[:space:]]+Received unexpected error:/ &&
+                  index(block, "update to PAID: context canceled")
+              } else if (name == "TestPaymentCancellationFailureFinalizationSurvivesCanceledContext/false" ||
+                         name == "TestPaymentCancellationFailureFinalizationSurvivesCanceledContext/true") {
+                valid = index(block, "payment_fulfillment_cancellation_test.go:184") &&
+                  block ~ /Error:[[:space:]]+Not equal:/ &&
+                  index(block, "expected: \"FAILED\"") && index(block, "actual  : \"RECHARGING\"")
+              } else if (name == "TestPaymentWebhookCancellationCreditsOnceAfterVerification/disconnect") {
+                valid = index(block, "payment_webhook_cancellation_test.go:89") &&
+                  block ~ /Error:[[:space:]]+Received unexpected error:/ &&
+                  index(block, "context canceled")
+              }
+              if (!valid || ++seen[name] != 1) reject()
+              active = 0
+            }
+            /--- FAIL:/ {
+              name = $3
+              if (name != "TestPaymentCancellationValidatedTransitionSurvivesDisconnect" &&
+                  name != "TestPaymentCancellationFailureFinalizationSurvivesCanceledContext" &&
+                  name != "TestPaymentCancellationFailureFinalizationSurvivesCanceledContext/false" &&
+                  name != "TestPaymentCancellationFailureFinalizationSurvivesCanceledContext/true" &&
+                  name != "TestPaymentWebhookCancellationCreditsOnceAfterVerification" &&
+                  name != "TestPaymentWebhookCancellationCreditsOnceAfterVerification/disconnect") reject()
+            }
+            END {
+              if (active || bad ||
+                  seen["TestPaymentCancellationValidatedTransitionSurvivesDisconnect"] != 1 ||
+                  seen["TestPaymentCancellationFailureFinalizationSurvivesCanceledContext/false"] != 1 ||
+                  seen["TestPaymentCancellationFailureFinalizationSurvivesCanceledContext/true"] != 1 ||
+                  seen["TestPaymentWebhookCancellationCreditsOnceAfterVerification/disconnect"] != 1) exit 1
+            }
+          ' "$evidence"
+      - name: Candidate cancellation, transaction rollback, lease and coupon regressions with race detector
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/payment-cancellation-evidence/green.log"
+          cd backend
+          go test -race -p=1 -tags=unit ./internal/service ./internal/handler \
+            -run '^Test(PaymentCancellation.*|PaymentWebhookCancellation.*|FulfillmentLeaseVersionRejectsStaleWorker|AlreadyProcessedRecoversStaleRechargingLease|RetryFulfillmentRejectsFreshRechargingLease|DuplicatePaymentNotificationDoesNotReprocessCompletedBalanceOrder|ExecuteBalanceFulfillment(RecoversAfterRedeemWithoutCreditingAgain|RejectsCodeUsedByAnotherUser)|ExecuteSubscriptionFulfillmentRecoversCommittedAssignmentWithoutExtendingAgain|RepairF2.*|PaymentNotificationRejectsAmountMismatchBeforeFulfillment)$' \
+            -count=1 -v -timeout=10m 2>&1 | tee "$evidence"
+          if grep -Eq -- 'no tests to run|--- SKIP:' "$evidence"; then
+            exit 1
+          fi
+          for name in PaymentCancellationValidatedTransitionSurvivesDisconnect PaymentCancellationDuringBalanceWriteCreditsOnce PaymentCancellationFailedBalanceTransactionRollsBack PaymentCancellationFailureFinalizationSurvivesCanceledContext PaymentCancellationStaleCleanupCannotOverwriteNewLease PaymentCancellationExecutionDeadlineIsNotRenewed PaymentCancellationFailureFinalizationIsBoundedAndRetryable PaymentCancellationDirectFulfillmentSurvivesDisconnect PaymentCancellationCouponConfirmationSurvivesDisconnect PaymentWebhookCancellationCreditsOnceAfterVerification; do
+            grep -F -- "--- PASS: Test$name " "$evidence"
+          done
+          test -z "$(git status --porcelain)"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: payment-cancellation-${{ env.CANDIDATE }}
+          path: ${{ runner.temp }}/payment-cancellation-evidence
+          if-no-files-found: error
