@@ -40,12 +40,12 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 			validationModel = account.GetMappedModel(validationModel)
 		}
 	}
-	if account != nil && account.Platform == PlatformAnthropic {
-		if err := validateClaude55Request(parsed.Body.Bytes(), validationModel); err != nil {
-			s.countTokensError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
-			return err
-		}
+	prepared, err := prepareClaudeMessagesRequest(account, parsed, validationModel)
+	if err != nil {
+		s.countTokensError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		return err
 	}
+	parsed = prepared
 
 	if account != nil && account.IsAnthropicAPIKeyPassthroughEnabled() {
 		passthroughBody := parsed.Body.Bytes()

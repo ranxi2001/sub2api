@@ -700,7 +700,7 @@ func validateClaude55Request(body []byte, model string) error {
 		if isSonnet55 {
 			return fmt.Errorf("claude-sonnet-5-5 requires adaptive thinking or thinking.type=between_tools; omit thinking or use one of those modes")
 		}
-		return fmt.Errorf("%s requires adaptive thinking; omit thinking or use thinking.type=adaptive and output_config.effort", model)
+		return fmt.Errorf("%s requires adaptive thinking; received thinking.type=%s; omit thinking or use thinking.type=adaptive and output_config.effort", model, thinkingType)
 	case "between_tools":
 		if !isSonnet55 {
 			if isHaiku55 {

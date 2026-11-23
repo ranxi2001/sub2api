@@ -152,12 +152,12 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 			validationModel = account.GetMappedModel(validationModel)
 		}
 	}
-	if account != nil && account.Platform == PlatformAnthropic {
-		if err := validateClaude55Request(parsed.Body.Bytes(), validationModel); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"type": "error", "error": gin.H{"type": "invalid_request_error", "message": err.Error()}})
-			return nil, err
-		}
+	prepared, err := prepareClaudeMessagesRequest(account, parsed, validationModel)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"type": "error", "error": gin.H{"type": "invalid_request_error", "message": err.Error()}})
+		return nil, err
 	}
+	parsed = prepared
 	// 按请求 TTL 计费：在任何请求体改写之前读取客户端原始的 cache_control.ttl。
 	requestedCacheTTL := ""
 	if account.IsCacheTTLBillingFromRequestEnabled() {
