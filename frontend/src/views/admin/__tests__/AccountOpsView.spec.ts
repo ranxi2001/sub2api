@@ -58,6 +58,31 @@ describe('account operations tabs and independent saves', () => {
     } finally { wrapper.unmount() }
   })
 
+  it('keeps a failed threshold poll inline and recovers on the next successful poll', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+    const wrapper = create()
+    try {
+      await flushPromises()
+      const toast = vi.spyOn(useAppStore(), 'showError')
+      vi.mocked(getAccountOpsThresholdAccounts).mockRejectedValue(new Error('Threshold accounts unavailable'))
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await vi.advanceTimersByTimeAsync(30_000)
+        await flushPromises()
+        expect(wrapper.text()).toContain('Threshold accounts unavailable')
+        expect(toast).not.toHaveBeenCalled()
+      }
+      vi.mocked(getAccountOpsThresholdAccounts).mockResolvedValue([])
+      await vi.advanceTimersByTimeAsync(30_000)
+      await flushPromises()
+      expect(wrapper.text()).not.toContain('Threshold accounts unavailable')
+    } finally {
+      wrapper.unmount()
+      visibility.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
   it('fences old post-save group reads and account polls after a newer save succeeds', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
     const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
