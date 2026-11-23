@@ -1015,6 +1015,12 @@ func TestProxyOpenAIWSHTTPBridgeTurnHTTPStatusFailoverSafety(t *testing.T) {
 }
 
 func TestProxyOpenAIWSHTTPBridgeTurnRetriesRejectedFieldBeforeClientOutput(t *testing.T) {
+	t.Run("standard", func(t *testing.T) { testWSHTTPBridgeRejectedFieldRetry(t, "") })
+	t.Run("Responses Lite", func(t *testing.T) { testWSHTTPBridgeRejectedFieldRetry(t, "true") })
+}
+
+func testWSHTTPBridgeRejectedFieldRetry(t *testing.T, wantLiteHeader string) {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 
 	upstream := &httpUpstreamSequenceRecorder{responses: []*http.Response{
@@ -1041,7 +1047,11 @@ func TestProxyOpenAIWSHTTPBridgeTurnRetriesRejectedFieldBeforeClientOutput(t *te
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
-	payload := []byte(`{"type":"response.create","model":"gpt-5","input":"hi","truncation":"auto"}`)
+	metadata := ""
+	if wantLiteHeader != "" {
+		metadata = `,"client_metadata":{"` + responsesLiteWSMetadataKey + `":"true"}`
+	}
+	payload := []byte(`{"type":"response.create","model":"gpt-5","input":"hi","truncation":"auto"` + metadata + `}`)
 	var writes [][]byte
 
 	result, err := svc.proxyOpenAIWSHTTPBridgeTurn(
@@ -1057,6 +1067,10 @@ func TestProxyOpenAIWSHTTPBridgeTurnRetriesRejectedFieldBeforeClientOutput(t *te
 	require.NotNil(t, result)
 	require.Equal(t, 2, upstream.callCount)
 	require.Len(t, upstream.bodies, 2)
+	require.Len(t, upstream.reqs, 2)
+	for _, req := range upstream.reqs {
+		require.Equal(t, wantLiteHeader, req.Header.Get(responsesLiteHeader))
+	}
 	require.True(t, gjson.GetBytes(upstream.bodies[0], "truncation").Exists())
 	require.False(t, gjson.GetBytes(upstream.bodies[1], "truncation").Exists())
 	require.Len(t, writes, 1)
