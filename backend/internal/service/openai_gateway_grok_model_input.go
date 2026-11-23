@@ -391,7 +391,9 @@ func pairGrokReplayCallIDs(items []any) (map[int]string, map[int]string) {
 
 	consumedCalls := make(map[string]struct{})
 	consumeNextCall := func() string {
-		for _, callID := range pendingCalls {
+		for len(pendingCalls) > 0 {
+			callID := pendingCalls[0]
+			pendingCalls = pendingCalls[1:]
 			if _, consumed := consumedCalls[callID]; consumed {
 				continue
 			}
