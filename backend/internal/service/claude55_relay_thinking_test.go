@@ -46,7 +46,11 @@ func TestRelayLegacyThinkingAtMessagesEndpoints(t *testing.T) {
 			require.Equal(t, "adaptive", gjson.GetBytes(upstream.lastBody, "thinking.type").String())
 			require.False(t, gjson.GetBytes(upstream.lastBody, "thinking.budget_tokens").Exists())
 			require.Equal(t, "low", gjson.GetBytes(upstream.lastBody, "output_config.effort").String())
-			require.EqualValues(t, 1152, gjson.GetBytes(upstream.lastBody, "max_tokens").Int())
+			if tc.path == "/v1/messages" {
+				require.EqualValues(t, 1152, gjson.GetBytes(upstream.lastBody, "max_tokens").Int())
+			} else {
+				require.False(t, gjson.GetBytes(upstream.lastBody, "max_tokens").Exists())
+			}
 			require.Equal(t, body, parsed.Body.Bytes())
 		})
 	}
