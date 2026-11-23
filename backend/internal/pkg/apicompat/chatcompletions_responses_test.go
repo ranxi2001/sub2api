@@ -3,6 +3,7 @@ package apicompat
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -994,6 +995,59 @@ func TestResponsesToChatCompletions_BasicText(t *testing.T) {
 	assert.Equal(t, 10, chat.Usage.PromptTokens)
 	assert.Equal(t, 5, chat.Usage.CompletionTokens)
 	assert.Equal(t, 15, chat.Usage.TotalTokens)
+}
+
+func TestResponsesToChatCompletions_InterleavedContentParts(t *testing.T) {
+	resp := &ResponsesResponse{ID: "resp_mixed", Status: "completed", Output: []ResponsesOutput{
+		{Type: "message", Content: []ResponsesContentPart{
+			{Type: "output_text", Text: "first\n"},
+			{Type: "refusal", Refusal: "one "},
+			{Type: "output_text"},
+		}},
+		{Type: "reasoning", Summary: []ResponsesSummary{{Type: "summary_text", Text: "summary "}}},
+		{Type: "function_call", Name: "lookup", CallID: "call_1", Arguments: "{}"},
+		{Type: "message", Content: []ResponsesContentPart{
+			{Type: "refusal", Refusal: "two"},
+			{Type: "output_text", Text: "second"},
+		}},
+		{Type: "reasoning", Content: []ResponsesContentPart{{Type: "reasoning_text", Text: "fallback"}}},
+	}}
+
+	choice := ResponsesToChatCompletions(resp, "gpt-4o").Choices[0]
+	var content string
+	require.NoError(t, json.Unmarshal(choice.Message.Content, &content))
+	require.Equal(t, "first\nsecond", content)
+	require.Equal(t, "one two", choice.Message.Refusal)
+	require.Equal(t, "summary fallback", choice.Message.ReasoningContent)
+	require.Equal(t, "tool_calls", choice.FinishReason)
+	require.Len(t, choice.Message.ToolCalls, 1)
+	require.Equal(t, "call_1", choice.Message.ToolCalls[0].ID)
+}
+
+func BenchmarkResponsesToChatCompletionsTextParts(b *testing.B) {
+	for _, tc := range []struct {
+		name  string
+		parts int
+		width int
+	}{
+		{"Short", 1, 32},
+		{"Single64KiB", 1, 65536},
+		{"Split16", 16, 4096},
+		{"Split256", 256, 256},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			text := strings.Repeat("x", tc.width)
+			parts := make([]ResponsesContentPart, tc.parts)
+			for i := range parts {
+				parts[i] = ResponsesContentPart{Type: "output_text", Text: text}
+			}
+			resp := &ResponsesResponse{ID: "resp_fixture", Status: "completed", Output: []ResponsesOutput{{Type: "message", Content: parts}}}
+			b.ReportAllocs()
+			for b.Loop() {
+				ResponsesToChatCompletions(resp, "gpt-4o")
+			}
+		})
+	}
 }
 
 func TestResponsesToChatCompletions_ToolCalls(t *testing.T) {
