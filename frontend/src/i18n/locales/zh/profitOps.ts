@@ -1,6 +1,8 @@
 export default {
   "accountUsageAttribution": "渠道按账号当前归属汇总。调整归属后，所选时段的账号小计随账号归入当前渠道。",
-  "accountUsageFormula": "用户扣费和账号计费取自账号「使用统计」。毛利润为用户扣费减账号计费，毛利率按合计金额计算。",
+  "accountUsageFormula": "未绑定渠道的 Codex 官方 URL 和千问 Token Plan 按请求计算成本。对历史有效账号倍率为 1× 的记录，账号计费乘以该账号当前已保存的采购成本倍率。其他记录沿用账号计费。毛利润为用户扣费减计入成本。",
+  "profitCost": "计入成本",
+  "accountProcurementSource": "含账号采购成本倍率",
   "accountUsageCost": "账号计费",
   "accountUsageIncome": "用户扣费",
   "accountUsageBuilding": "此时段的账号小计正在后台更新，请稍后刷新。",

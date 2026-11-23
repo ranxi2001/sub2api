@@ -203,7 +203,16 @@ async function browser() {
       }
     })
     page = await context.newPage()
-    const navigation = createPageNavigation(page)
+    const navigation = createPageNavigation(page, {
+      async waitForBootstrap(url) {
+        if (!new URL(url).pathname.startsWith('/admin/')) return
+        const response = await page.waitForResponse(response =>
+          response.frame() === page.mainFrame() && response.request().method() === 'GET' &&
+          new URL(response.url()).origin === origin && new URL(response.url()).pathname === '/api/v1/auth/me')
+        assert.equal(response.status(), 200, 'restored session must load the current user')
+        assert.equal(await response.finished(), null, 'auth bootstrap must finish before the next navigation')
+      },
+    })
     page.setDefaultTimeout(20_000)
     page.on('requestfailed', request => {
       const url = new URL(request.url())

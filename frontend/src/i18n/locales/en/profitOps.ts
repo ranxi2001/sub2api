@@ -1,6 +1,8 @@
 export default {
   "accountUsageAttribution": "Channels use current account assignments. Reassigning an account moves its subtotal for the selected window to the new channel.",
-  "accountUsageFormula": "User charges and account charges come from account usage statistics. Gross profit is user charges less account charges. Margin uses the totals.",
+  "accountUsageFormula": "For unbound Codex and Qwen Token Plan endpoints, a request with an effective 1× account rate uses its account charge times the current saved purchase multiplier. Other requests use the recorded account charge. Gross profit is user charges less these costs.",
+  "profitCost": "Cost",
+  "accountProcurementSource": "Includes account purchase multiplier",
   "accountUsageCost": "Account charge",
   "accountUsageIncome": "User charge",
   "accountUsageBuilding": "Account statistics for this window are being updated. Refresh shortly.",
