@@ -4,11 +4,60 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
+
+func TestSanitizeGrokResponsesModelInputSingleObject(t *testing.T) {
+	const item = `{"type":"function_call_output","call_id":"call_a","output":{"large":9007199254740993,"count":1.2300e+09}}`
+	for _, tc := range []struct{ name, key, tail string }{
+		{"input", `"input"`, `, "after" : "kept"}`},
+		{"escaped key", `"in\u0070ut"`, `, "after" : "kept"}`},
+		{"duplicate key", `"input"`, `, "input" : "later", "after" : "kept"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			normalize := func(value string) []byte {
+				raw := `{"before" : true, ` + tc.key + " : " + value + tc.tail
+				body := []byte(raw)
+				got, err := sanitizeGrokResponsesModelInput(body)
+				require.NoError(t, err)
+				require.Equal(t, raw, string(body))
+				return got
+			}
+			got := normalize(item)
+			require.Equal(t, normalize("["+item+"]"), got)
+			require.True(t, strings.HasSuffix(string(got), tc.tail))
+			output := gjson.GetBytes(got, "input.0.output").String()
+			require.Equal(t, "9007199254740993", gjson.Get(output, "large").Raw)
+			require.Equal(t, "1.2300e+09", gjson.Get(output, "count").Raw)
+		})
+	}
+}
+
+func BenchmarkSanitizeGrokResponsesModelInput(b *testing.B) {
+	text := strings.Repeat(`synthetic \"example\"\n`, 48_000)
+	msg := `{"role":"user","content":"` + text + `"}`
+	for _, tc := range []struct{ name, input string }{
+		{"Array", "[" + msg + "]"},
+		{"Object", msg},
+		{"String", `"` + text + `"`},
+		{"ShortObject", `{"role":"user","content":"hello"}`},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			body := []byte(`{"model":"grok-4.5","input":` + tc.input + `}`)
+			b.SetBytes(int64(len(body)))
+			b.ReportAllocs()
+			for b.Loop() {
+				if _, err := sanitizeGrokResponsesModelInput(body); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
 
 func TestSanitizeGrokResponsesModelInputAgentMessage(t *testing.T) {
 	tests := []struct {

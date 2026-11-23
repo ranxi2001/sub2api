@@ -1,9 +1,9 @@
 package service
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
@@ -15,24 +15,19 @@ import (
 // shapes into the subset accepted by xAI's ModelInput decoder. Call IDs are
 // assigned in a separate pass so an output can safely appear before its call.
 func sanitizeGrokResponsesModelInput(body []byte) ([]byte, error) {
-	input := gjson.GetBytes(body, "input")
-	if !input.Exists() || input.Type == gjson.String {
+	input := gjson.Get(openAIWSPayloadStringView(body), "input")
+	if !input.IsArray() && !input.IsObject() {
 		return body, nil
 	}
+	var source io.Reader = strings.NewReader(input.Raw)
 	if input.IsObject() {
-		var err error
-		body, err = sjson.SetRawBytes(body, "input", []byte("["+input.Raw+"]"))
-		if err != nil {
-			return nil, fmt.Errorf("wrap Grok Responses model input: %w", err)
-		}
-		input = gjson.GetBytes(body, "input")
-	}
-	if !input.IsArray() {
-		return body, nil
+		// A single item goes through the same array decoder without rewriting
+		// the request before the final input is ready.
+		source = io.MultiReader(strings.NewReader("["), source, strings.NewReader("]"))
 	}
 
 	var items []any
-	decoder := json.NewDecoder(bytes.NewReader([]byte(input.Raw)))
+	decoder := json.NewDecoder(source)
 	decoder.UseNumber()
 	if err := decoder.Decode(&items); err != nil {
 		return nil, fmt.Errorf("parse Grok Responses model input: %w", err)
