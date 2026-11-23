@@ -13,8 +13,11 @@ import (
 )
 
 type ChannelMonitorV3Handler struct {
-	service  *service.ChannelMonitorV3Service
-	access   channelMonitorV3GroupAccess
+	service   *service.ChannelMonitorV3Service
+	access    channelMonitorV3GroupAccess
+	keyGroups interface {
+		BillingGroups(context.Context, *service.APIKey) ([]*service.APIKey, error)
+	}
 	settings channelMonitorModeSetter
 }
 
@@ -28,7 +31,7 @@ type channelMonitorModeSetter interface {
 }
 
 func NewChannelMonitorV3Handler(svc *service.ChannelMonitorV3Service, apiKeyService *service.APIKeyService, settingService *service.SettingService) *ChannelMonitorV3Handler {
-	return &ChannelMonitorV3Handler{service: svc, access: apiKeyService, settings: settingService}
+	return &ChannelMonitorV3Handler{service: svc, access: apiKeyService, keyGroups: apiKeyService, settings: settingService}
 }
 
 // viewer derives what the caller may see from the server side only: admins see
@@ -61,6 +64,41 @@ func (h *ChannelMonitorV3Handler) viewer(c *gin.Context) (service.ChannelMonitor
 		return service.ChannelMonitorV3Viewer{}, false
 	}
 	return viewer, true
+}
+
+// KeyGroupHealth publishes passive signals for the key's permitted groups.
+func (h *ChannelMonitorV3Handler) KeyGroupHealth(c *gin.Context) {
+	c.Header("Cache-Control", "private, no-store")
+	key, ok := middleware.GetAPIKeyFromContext(c)
+	if !ok || key == nil || key.User == nil {
+		response.Unauthorized(c, "API key required")
+		return
+	}
+	if h == nil || h.service == nil || h.keyGroups == nil {
+		response.Error(c, http.StatusServiceUnavailable, "Group health unavailable")
+		return
+	}
+	bound, err := h.keyGroups.BillingGroups(c.Request.Context(), key)
+	if err != nil {
+		response.Error(c, http.StatusServiceUnavailable, "Group access unavailable")
+		return
+	}
+	groups := make([]*service.Group, 0, len(bound))
+	for _, item := range bound {
+		if item.Group != nil && item.Group.IsActive() {
+			groups = append(groups, item.Group)
+		}
+	}
+	if len(groups) == 0 {
+		response.Error(c, http.StatusForbidden, "No permitted active groups")
+		return
+	}
+	health, err := h.service.KeyGroupHealth(c.Request.Context(), groups)
+	if err != nil {
+		response.Error(c, http.StatusServiceUnavailable, "Group metrics unavailable")
+		return
+	}
+	c.JSON(http.StatusOK, health)
 }
 
 // Status serves the status page; end (unix seconds) pages back to an older window.

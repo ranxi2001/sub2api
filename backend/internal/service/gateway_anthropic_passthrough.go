@@ -141,6 +141,16 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 			return handleAnthropicRequestTooLarge(c, resp)
 		}
 
+		if resp.StatusCode == http.StatusBadRequest && aiwanwuThinkingRoute(account, input.RequestModel) {
+			body, readErr := s.readUpstreamErrorBody(resp)
+			_ = resp.Body.Close()
+			if readErr == nil {
+				if failure := aiwanwuThinkingFailover(c, account, resp, body); failure != nil {
+					return nil, failure
+				}
+			}
+			resp.Body = io.NopCloser(bytes.NewReader(body))
+		}
 		// 透传分支禁止 400 请求体降级重试（该重试会改写请求体）
 		if resp.StatusCode >= 400 && resp.StatusCode != 400 && s.shouldRetryUpstreamError(account, resp.StatusCode) {
 			if attempt < maxRetryAttempts {
