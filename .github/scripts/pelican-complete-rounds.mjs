@@ -10,7 +10,7 @@ const pause = () => new Promise(resolve => setTimeout(resolve, 250))
 // previously reached lifecycle state alone cannot prevent a later auth/settings
 // request from being aborted by the harness. Failures remain in the caller's
 // strict requestfailed inventory; this barrier never filters or retries them.
-export function createPageNavigation(page) {
+export function createPageNavigation(page, { waitForBootstrap = () => Promise.resolve() } = {}) {
   const pending = new Set()
   const waiters = new Set()
   let activity = 0
@@ -53,13 +53,13 @@ export function createPageNavigation(page) {
     async goto(url, beforeNavigate = () => {}) {
       await settle()
       beforeNavigate()
-      await page.goto(url, { waitUntil: 'load' })
+      await Promise.all([waitForBootstrap(url), page.goto(url, { waitUntil: 'load' })])
       await settle()
     },
     async reload(beforeNavigate = () => {}) {
       await settle()
       beforeNavigate()
-      await page.reload({ waitUntil: 'load' })
+      await Promise.all([waitForBootstrap(page.url?.()), page.reload({ waitUntil: 'load' })])
       await settle()
     },
   }
