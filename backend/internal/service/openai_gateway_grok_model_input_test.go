@@ -142,6 +142,53 @@ func TestSanitizeGrokResponsesModelInputPairsCallsInTwoPasses(t *testing.T) {
 	require.Equal(t, "orphan", gjson.GetBytes(patched, "input.6.call_id").String())
 }
 
+func TestPairGrokReplayCallIDsSkipsAlreadyPairedCalls(t *testing.T) {
+	items := []any{
+		map[string]any{"type": "function_call_output", "id": "item_b"},
+		map[string]any{"type": "function_call", "call_id": "a"},
+		map[string]any{"type": "function_call", "call_id": "a"},
+		map[string]any{"type": "function_call", "call_id": "b", "id": "item_b"},
+		map[string]any{"type": "function_call", "call_id": "c"},
+		map[string]any{"type": "function_call_output"},
+		map[string]any{"type": "function_call_output", "call_id": "a"},
+		map[string]any{"type": "function_call_output"},
+		map[string]any{"type": "function_call_output", "call_id": "unknown"},
+		map[string]any{"type": "function_call_output"},
+	}
+
+	_, outputs := pairGrokReplayCallIDs(items)
+	require.Equal(t, map[int]string{
+		0: "b", 5: "a", 6: "a", 7: "c", 8: "unknown", 9: "grok_replay_call_1",
+	}, outputs)
+}
+
+func BenchmarkPairGrokReplayCallIDs(b *testing.B) {
+	for _, pairs := range []int{8, 64, 192, 512} {
+		for _, mode := range []string{"implicit", "mixed", "explicit"} {
+			b.Run(strconv.Itoa(pairs)+"/"+mode, func(b *testing.B) {
+				items := make([]any, 0, 2*pairs)
+				for i := 0; i < pairs; i++ {
+					id := "call_" + strconv.Itoa(i)
+					output := map[string]any{"type": "function_call_output"}
+					switch mode {
+					case "explicit":
+						output["call_id"] = id
+					case "mixed":
+						if i%2 == 0 {
+							output["call_id"] = "call_" + strconv.Itoa(pairs-1-i)
+						}
+					}
+					items = append(items, map[string]any{"type": "function_call", "call_id": id}, output)
+				}
+				b.ReportAllocs()
+				for b.Loop() {
+					pairGrokReplayCallIDs(items)
+				}
+			})
+		}
+	}
+}
+
 func TestSanitizeGrokResponsesModelInputMapsAllItemAliasesAndRejectsConflicts(t *testing.T) {
 	body := []byte(`{"input":[
 		{"type":"function_call","id":"fc_alias","call_id":"call_canonical","name":"one","arguments":"{}"},
