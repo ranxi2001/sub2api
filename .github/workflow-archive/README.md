@@ -58,3 +58,25 @@ GREEN/race/SDK/PostgreSQL/build gate and validator negative controls. Unit tests
 also remain selected by main CI, whose integration job explicitly runs the PG
 and official SDK fixtures. Archiving the fixed baseline does not mark PR review
 or the current full CI complete; the PR stays Draft pending those gates.
+
+## Issue 1032 payment fulfillment cancellation
+
+[payment-fulfillment-cancellation.yml](payment-fulfillment-cancellation.yml)
+preserves the completed fixed-baseline workflow from
+[PR #1033](https://github.com/ranxi2001/sub2api/pull/1033), byte for byte.
+Candidate `110fc0079754eb854e008a8330f42ba328d708d3` passed the strict
+three-root/four-assertion behavioral RED against
+`cf4e7b5085fa81396ee087282b3913efd88b9595`, then all ten new regression roots
+and selected sibling regressions with race detection, including PostgreSQL
+coupon coverage, in [run 45177612498](https://github.com/ranxi2001/sub2api/actions/runs/45177612498/job/137702821752).
+[Artifact 14821140263](https://github.com/ranxi2001/sub2api/actions/runs/45177612498/artifacts/14821140263)
+contains `source.txt`, `red.log` and `green.log`.
+
+This directory does not run in Actions. Historical reproduction requires
+restoring the workflow to `.github/workflows/` on a task branch and checking
+the frozen source/fixtures, assertion line numbers, toolchain and PostgreSQL
+setup; the archived configuration is not guaranteed to run on later source.
+Tests remain in place for main CI. At archive time two full-CI jobs were still
+pending: this focused evidence does not establish overall acceptance or
+acceptance of the archive commit. Scope remains Refs #1032; historical recovery,
+manual-compensation handling and the original incident remain unresolved.
