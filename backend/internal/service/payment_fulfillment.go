@@ -30,7 +30,24 @@ import (
 // misconfigured to point at us, or when our orders table has been wiped).
 var ErrOrderNotFound = errors.New("payment order not found")
 
-const paymentFulfillmentLeaseDuration = 5 * time.Minute
+const (
+	paymentFulfillmentLeaseDuration   = 5 * time.Minute
+	paymentFulfillmentTimeout         = 2 * time.Minute
+	paymentFailureFinalizationTimeout = 10 * time.Second
+)
+
+type paymentFulfillmentContextKey struct{}
+
+// Start only after payment validation, or at a trusted fulfillment entry point.
+// Keep request values, but give financial execution its own finite lifetime.
+// Nested calls must retain the same deadline, including an expired one.
+func paymentFulfillmentContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if started, _ := ctx.Value(paymentFulfillmentContextKey{}).(bool); started {
+		return ctx, func() {}
+	}
+	executionCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), paymentFulfillmentTimeout)
+	return context.WithValue(executionCtx, paymentFulfillmentContextKey{}, true), cancel
+}
 
 type paymentFulfillmentLease struct {
 	version time.Time
@@ -187,6 +204,9 @@ func expectedNotificationProviderKey(registry *payment.Registry, orderPaymentTyp
 }
 
 func (s *PaymentService) toPaid(ctx context.Context, o *dbent.PaymentOrder, tradeNo string, paid float64, pk string) error {
+	ctx, cancel := paymentFulfillmentContext(ctx)
+	defer cancel()
+
 	if orderHasCoupon(o) {
 		return s.confirmCouponOrder(ctx, o, tradeNo, paid, pk)
 	}
@@ -279,6 +299,9 @@ func (s *PaymentService) alreadyProcessed(ctx context.Context, o *dbent.PaymentO
 }
 
 func (s *PaymentService) executeFulfillment(ctx context.Context, oid int64) error {
+	ctx, cancel := paymentFulfillmentContext(ctx)
+	defer cancel()
+
 	o, err := s.entClient.PaymentOrder.Get(ctx, oid)
 	if err != nil {
 		return fmt.Errorf("get order: %w", err)
@@ -318,6 +341,9 @@ func (s *PaymentService) rejectUnsupportedOrderType(ctx context.Context, o *dben
 }
 
 func (s *PaymentService) ExecuteBalanceFulfillment(ctx context.Context, oid int64) error {
+	ctx, cancel := paymentFulfillmentContext(ctx)
+	defer cancel()
+
 	o, err := s.entClient.PaymentOrder.Get(ctx, oid)
 	if err != nil {
 		return infraerrors.NotFound("NOT_FOUND", "order not found")
@@ -635,6 +661,9 @@ func (s *PaymentService) sendSubscriptionPurchaseSuccessNotification(ctx context
 }
 
 func (s *PaymentService) ExecuteSubscriptionFulfillment(ctx context.Context, oid int64) error {
+	ctx, cancel := paymentFulfillmentContext(ctx)
+	defer cancel()
+
 	o, err := s.entClient.PaymentOrder.Get(ctx, oid)
 	if err != nil {
 		return infraerrors.NotFound("NOT_FOUND", "order not found")
@@ -983,6 +1012,11 @@ func (s *PaymentService) markFailed(ctx context.Context, oid int64, lease *payme
 		slog.Error("mark FAILED without fulfillment lease", "orderID", oid)
 		return
 	}
+	// Execution may have exhausted its deadline. Cleanup gets a separate budget,
+	// while the lease CAS below still rejects a worker whose ownership was lost.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), paymentFailureFinalizationTimeout)
+	defer cancel()
+
 	now := time.Now()
 	r := psErrMsg(cause)
 	// The lease version prevents a stale worker from overwriting a newer owner.
