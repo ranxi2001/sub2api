@@ -311,15 +311,19 @@ func (c *openAIWSToolCallReplayCollector) AddEvent(eventType string, message []b
 		if !output.IsArray() {
 			return
 		}
-		if openAIAgentCompletedResponse(message, true) && len(output.Array()) > 0 {
+		items := output.Array()
+		if len(items) == 0 {
+			return
+		}
+		if openAIAgentCompletedResponse(message, true) {
 			// A nonempty terminal is authoritative, including updated message
 			// contents and exclusions from previously streamed done items.
 			c.finalItems = nil
-			for _, item := range output.Array() {
+			for _, item := range items {
 				c.finalItems = append(c.finalItems, json.RawMessage(item.Raw))
 			}
 		}
-		for _, item := range output.Array() {
+		for _, item := range items {
 			c.addAllItem(item)
 			c.addItem(item)
 		}
