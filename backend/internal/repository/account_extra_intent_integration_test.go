@@ -43,6 +43,7 @@ func accountExtraIntentFixture(t *testing.T) (service.AdminAccountRepository, *s
 			service.AccountProbePenaltyExtraKey:   map[string]any{"enabled": true, "minimum_charge": .001},
 			service.AccountCostMultiplierExtraKey: .1,
 			service.AccountCostAutoSyncExtraKey:   true,
+			service.TokenProcurementBasisKey:      service.TokenProcurementAccount,
 		},
 	}
 	require.NoError(t, repo.Create(context.Background(), account))
@@ -55,7 +56,7 @@ func accountExtraIntentFixture(t *testing.T) (service.AdminAccountRepository, *s
 
 func assertAccountExtraIntent(t *testing.T, account *service.Account, want map[string]any) {
 	t.Helper()
-	for _, key := range []string{service.AccountProbePenaltyExtraKey, service.AccountCostMultiplierExtraKey, service.AccountCostAutoSyncExtraKey} {
+	for _, key := range []string{service.AccountProbePenaltyExtraKey, service.AccountCostMultiplierExtraKey, service.AccountCostAutoSyncExtraKey, service.TokenProcurementBasisKey} {
 		if value, exists := want[key]; exists {
 			require.Equal(t, value, account.Extra[key], key)
 		} else {
@@ -74,6 +75,7 @@ func TestAccountExtraIntentServiceReadBeforeConcurrentCommit(t *testing.T) {
 						service.AccountProbePenaltyExtraKey:   map[string]any{"enabled": change != "disable", "minimum_charge": .002},
 						service.AccountCostMultiplierExtraKey: .2,
 						service.AccountCostAutoSyncExtraKey:   false,
+						service.TokenProcurementBasisKey:      service.TokenProcurementStandard,
 					}
 					if change == "delete" {
 						latest = map[string]any{}
@@ -84,7 +86,7 @@ func TestAccountExtraIntentServiceReadBeforeConcurrentCommit(t *testing.T) {
 						read = true
 						require.Equal(t, .001, stale.ProbePenaltyMinimum(), "A must read the old enabled setting")
 						if change == "delete" {
-							_, err := integrationDB.ExecContext(ctx, `UPDATE accounts SET extra=extra-'probe_penalty'-'cost_multiplier'-'cost_multiplier_auto_sync' WHERE id=$1`, account.ID)
+							_, err := integrationDB.ExecContext(ctx, `UPDATE accounts SET extra=extra-'probe_penalty'-'cost_multiplier'-'cost_multiplier_auto_sync'-'token_procurement_basis' WHERE id=$1`, account.ID)
 							return err
 						}
 						return repo.UpdateExtra(ctx, account.ID, latest)
@@ -124,7 +126,7 @@ func TestAccountExtraIntentServiceReadBeforeConcurrentCommit(t *testing.T) {
 }
 
 func TestAccountExtraIntentExplicitServiceUpdates(t *testing.T) {
-	for _, route := range []string{"admin", "account-service"} {
+	for _, route := range []string{"admin", "account-service", "admin-bulk"} {
 		t.Run(route, func(t *testing.T) {
 			repo, account := accountExtraIntentFixture(t)
 			ctx := context.Background()
@@ -133,21 +135,30 @@ func TestAccountExtraIntentExplicitServiceUpdates(t *testing.T) {
 					service.AccountProbePenaltyExtraKey:   map[string]any{"enabled": false, "minimum_charge": .002},
 					service.AccountCostMultiplierExtraKey: .2,
 					service.AccountCostAutoSyncExtraKey:   false,
+					service.TokenProcurementBasisKey:      service.TokenProcurementStandard,
 				},
 				{
 					service.AccountProbePenaltyExtraKey:   map[string]any{"enabled": true, "minimum_charge": .003},
 					service.AccountCostMultiplierExtraKey: 0.0,
 					service.AccountCostAutoSyncExtraKey:   true,
+					service.TokenProcurementBasisKey:      service.TokenProcurementAccount,
 				},
 				{
 					service.AccountProbePenaltyExtraKey:   nil,
 					service.AccountCostMultiplierExtraKey: nil,
 					service.AccountCostAutoSyncExtraKey:   nil,
+					service.TokenProcurementBasisKey:      nil,
 				},
 			} {
 				var err error
 				if route == "admin" {
 					_, err = accountExtraIntentAdmin(repo).UpdateAccount(ctx, account.ID, &service.UpdateAccountInput{Extra: extra})
+				} else if route == "admin-bulk" {
+					var result *service.BulkUpdateAccountsResult
+					result, err = accountExtraIntentAdmin(repo).BulkUpdateAccounts(ctx, &service.BulkUpdateAccountsInput{AccountIDs: []int64{account.ID}, Extra: extra})
+					require.NoError(t, err)
+					require.Equal(t, 1, result.Success)
+					require.Zero(t, result.Failed)
 				} else {
 					_, err = service.NewAccountService(repo, nil).Update(ctx, account.ID, service.UpdateAccountRequest{Extra: &extra})
 				}
@@ -157,5 +168,59 @@ func TestAccountExtraIntentExplicitServiceUpdates(t *testing.T) {
 				assertAccountExtraIntent(t, got, extra)
 			}
 		})
+	}
+}
+
+func TestAccountExtraIntentTokenBasisAfterBulkCommit(t *testing.T) {
+	for _, loaded := range []string{service.TokenProcurementAccount, service.TokenProcurementStandard} {
+		for _, change := range []string{"switch", "clear"} {
+			for _, platform := range []string{"", service.PlatformOpenAI} {
+				t.Run(loaded+"/"+change+"/platform="+platform, func(t *testing.T) {
+					repo, account := accountExtraIntentFixture(t)
+					ctx := context.Background()
+					require.NoError(t, repo.UpdateExtra(ctx, account.ID, map[string]any{service.TokenProcurementBasisKey: loaded}))
+					var latest any
+					if change == "switch" {
+						latest = service.TokenProcurementStandard
+						if loaded == service.TokenProcurementStandard {
+							latest = service.TokenProcurementAccount
+						}
+					}
+					read := false
+					gate := &accountExtraIntentReadRepo{AdminAccountRepository: repo}
+					gate.afterRead = func(ctx context.Context, stale *service.Account) error {
+						read = true
+						require.Equal(t, loaded, stale.Extra[service.TokenProcurementBasisKey])
+						// Commit through the documented bulk service after A's read,
+						// before its ordinary save reaches the repository row lock.
+						result, err := accountExtraIntentAdmin(repo).BulkUpdateAccounts(ctx, &service.BulkUpdateAccountsInput{
+							AccountIDs: []int64{account.ID}, Extra: map[string]any{service.TokenProcurementBasisKey: latest},
+						})
+						require.NoError(t, err)
+						require.Equal(t, 1, result.Success)
+						require.Zero(t, result.Failed)
+						return nil
+					}
+					name := "token-basis-renamed"
+					// The ordinary editor owns the name, not the API-only basis.
+					saved, err := accountExtraIntentAdmin(gate).UpdateAccount(ctx, account.ID, &service.UpdateAccountInput{
+						Name: name, Platform: platform, Extra: map[string]any{"form_setting": "saved"},
+					})
+					require.NoError(t, err)
+					require.True(t, read)
+					got, err := repo.GetByID(ctx, account.ID)
+					require.NoError(t, err)
+					for _, current := range []*service.Account{got, saved} {
+						require.Equal(t, name, current.Name)
+						require.Contains(t, current.Extra, service.TokenProcurementBasisKey)
+						require.Equal(t, latest, current.Extra[service.TokenProcurementBasisKey])
+						require.Equal(t, "saved", current.Extra["form_setting"])
+						if platform != "" {
+							require.Equal(t, platform, current.Platform)
+						}
+					}
+				})
+			}
+		}
 	}
 }

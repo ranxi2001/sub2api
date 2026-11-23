@@ -3459,6 +3459,41 @@ describe('independent account cost multiplier', () => {
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
     expect(updateAccountMock.mock.calls.at(-1)?.[1]?.extra?.cost_multiplier).toBe(0)
   })
+  describe.each([false, true])('API-only token procurement basis (platform switch: %s)', (switchPlatform) => {
+    it.each([
+      { loaded: 'account_stats', latest: 'standard_charge' },
+      { loaded: 'standard_charge', latest: 'account_stats' },
+      { loaded: 'account_stats', latest: null },
+      { loaded: 'standard_charge', latest: null }
+    ])('omits $loaded after an API update to $latest on a name edit', async ({ loaded, latest }) => {
+      const account = { ...buildAccount(), extra: { token_procurement_basis: loaded, unrelated: 'keep' } }
+      const wrapper = mountModal(account)
+      await flushPromises()
+
+      // A separate API client commits while the dialog still holds its old DTO.
+      const updatedAccount = { ...account, name: 'Renamed after API update',
+        platform: switchPlatform ? 'anthropic' : account.platform,
+        extra: { ...account.extra, token_procurement_basis: latest } }
+      updateAccountMock.mockReset().mockResolvedValue(updatedAccount)
+      if (switchPlatform) {
+        await wrapper.get('[data-testid="edit-account-platform"]').setValue('anthropic')
+        await flushPromises()
+      }
+      await wrapper.get('[data-tour="edit-account-form-name"]').setValue(updatedAccount.name)
+      await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+      await flushPromises()
+
+      expect(updateAccountMock).toHaveBeenCalledTimes(1)
+      const [id, payload] = updateAccountMock.mock.calls[0]
+      expect(id).toBe(account.id)
+      expect(payload.name).toBe(updatedAccount.name)
+      expect(payload.extra).not.toHaveProperty('token_procurement_basis')
+      if (switchPlatform) expect(payload.platform).toBe('anthropic')
+      else expect(payload.extra.unrelated).toBe('keep')
+      expect(account.extra.token_procurement_basis).toBe(loaded)
+      expect(wrapper.emitted('updated')?.[0]?.[0]).toEqual(updatedAccount)
+    })
+  })
   it('lets an operator disable upstream cost syncing and save the actual recharge cost', async () => {
     const account = { ...buildAccount(), extra: { cost_multiplier: 1, upstream_billing_probe_enabled: true } }
     const wrapper = mountModal(account)
