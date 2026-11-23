@@ -334,7 +334,7 @@ func openAIAgentCompletedResponse(body []byte, nested bool) bool {
 	if !utf8.Valid(body) || !openAIEncryptedJSONUnambiguous(body) {
 		return false
 	}
-	response := gjson.ParseBytes(body)
+	response := gjson.Parse(openAIWSPayloadStringView(body))
 	if nested {
 		response = response.Get("response")
 	}
