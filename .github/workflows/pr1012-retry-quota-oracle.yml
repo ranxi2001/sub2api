@@ -208,7 +208,7 @@ jobs:
           printf '%s\n' "$status" > "$evidence/red-f1.exitcode"
           cat "$evidence/red-f1.jsonl"
           python3 .github/scripts/pr1012-oracle.py red-f1 "$evidence/red-f1.exitcode" "$evidence/red-f1.jsonl" 2>&1 | tee "$evidence/red-f1-verdict.txt"
-      - name: RED F2 requires retry=true alone in all 48 default and explicit429 quota reader leaves
+      - name: RED F2 verifies 24 API key retry failures and 24 passing OAuth controls
         if: ${{ !cancelled() && steps.prerequisites.outcome == 'success' && steps.prepare_remaining.outcome == 'success' }}
         shell: bash
         run: |

@@ -37,11 +37,11 @@ def normalized_quota_leaves():
     }
 
 
-def pool429_quota_leaves():
+def pool429_quota_leaves(kinds=("oauth", "apikey")):
     return {
         f"{POOL429}/{kind}/{quota}/{variant}/passthrough={passthrough}/pool={policy}"
         for kind, quota, variant, passthrough, policy in itertools.product(
-            ("oauth", "apikey"), QUOTAS, ("uppercase", "padded"), BOOLS, ("default", "explicit429")
+            kinds, QUOTAS, ("uppercase", "padded"), BOOLS, ("default", "explicit429")
         )
     }
 
@@ -122,6 +122,7 @@ def verify(mode, status_path, log_path):
     for row in rows:
         fragments[(row.get("Package"), row.get("Test"))] += row.get("Output", "")
     failed = {(row.get("Package"), row["Test"]) for row in rows if row.get("Action") == "fail" and row.get("Test")}
+    passing_controls = set()
     if mode == "green":
         assert status == 0, f"GREEN exit {status}"
         expected = green_tests()
@@ -146,7 +147,10 @@ def verify(mode, status_path, log_path):
         if mode == "red-f1":
             expected_failures = expected | {(package, NORMALIZED)}
         if mode == "red-f2":
-            expected_failures = expected | {(package, POOL429)}
+            # OAuth never enters pool mode. At the frozen F2 revision the
+            # OAuth quota classifier already vetoed these 24 retries.
+            passing_controls = {(package, name) for name in pool429_quota_leaves(("oauth",))}
+            expected_failures = (expected - passing_controls) | {(package, POOL429)}
         assert failed == expected_failures, f"missing or unexpected RED assertions: {failed ^ expected_failures}"
         assert counts[(package, None, "fail")] == 1, "missing package failure"
         assert counts[(package, None, "pass")] == 0, "unexpected package PASS"
@@ -161,7 +165,10 @@ def verify(mode, status_path, log_path):
                     assert "retry deadline fallback observation: stage=backoff second_after_deadline=true owners=[Bearer fixture-deadline-owner Bearer fixture-healthy-backup]" in observed, key
                 wanted, actual = 1, 2
             elif mode == "red-f2":
-                assert "SSE pool quota observation: semantic_status=429 retry=true deadline_zero=true rejection_proof=false output_bytes=0 retry_started=false raw_preserved=true" in observed, key
+                retry = "false" if key in passing_controls else "true"
+                assert f"SSE pool quota observation: semantic_status=429 retry={retry} deadline_zero=true rejection_proof=false output_bytes=0 retry_started=false raw_preserved=true" in observed, key
+                if key in passing_controls:
+                    continue
                 assert "terminal normalized quota must veto same-account pool retry" in observed, key
                 assert re.search(r"Error:\s+Should be false", observed), key
                 assert len(re.findall(r"Error Trace:", observed)) == 1, key
@@ -179,7 +186,8 @@ def verify(mode, status_path, log_path):
             assert re.search(rf"actual\s*:\s+{actual}\b", observed), key
     for package, name in expected:
         assert counts[(package, name, "run")] == 1, f"missing/duplicate RUN: {name}"
-        assert counts[(package, name, terminal)] == 1, f"missing/duplicate {terminal}: {name}"
+        outcome = "pass" if (package, name) in passing_controls else terminal
+        assert counts[(package, name, outcome)] == 1, f"missing/duplicate {outcome}: {name}"
         assert sum(counts[(package, name, action)] for action in ("pass", "fail", "skip")) == 1, name
     print(f"{mode}: verified {len(expected)} exact named executions")
 
