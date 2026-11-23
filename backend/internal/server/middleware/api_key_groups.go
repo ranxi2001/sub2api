@@ -15,7 +15,11 @@ import (
 )
 
 func isMultiGroupBillingInfoRequest(c *gin.Context, key *service.APIKey) bool {
-	return c.Request.URL.Path == "/v1/sub2api/billing" && len(key.ConfiguredGroupIDs()) > 1
+	return (c.Request.URL.Path == "/v1/sub2api/billing" || isKeyGroupHealthRequest(c)) && len(key.ConfiguredGroupIDs()) > 1
+}
+
+func isKeyGroupHealthRequest(c *gin.Context) bool {
+	return c.Request.Method == http.MethodGet && c.FullPath() == "/v1/sub2api/group-health"
 }
 
 const gatewayUsageRecordsPath = "/v1/usage/records"

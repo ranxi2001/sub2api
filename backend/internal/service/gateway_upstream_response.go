@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -23,6 +24,24 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+// This relay sometimes rejects the thinking envelope without identifying the field.
+// Keep signed history and thinking semantics intact for the next account.
+func aiwanwuThinkingRoute(account *Account, model string) bool {
+	if account == nil || account.Platform != PlatformAnthropic || account.Type != AccountTypeAPIKey || model != "claude-opus-5-5" {
+		return false
+	}
+	origin, err := url.Parse(account.GetBaseURL())
+	return err == nil && origin.Scheme == "https" && (strings.EqualFold(origin.Hostname(), "www.aiwanwu.cc") || strings.EqualFold(origin.Hostname(), "aiwanwu.cc"))
+}
+
+func aiwanwuThinkingFailover(c *gin.Context, account *Account, resp *http.Response, body []byte) *UpstreamFailoverError {
+	if !gjson.ValidBytes(body) || gjson.GetBytes(body, "error.message").String() != "Unsupported field in thinking" {
+		return nil
+	}
+	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{ProxyID: opsUpstreamProxyID(account), Platform: account.Platform, AccountID: account.ID, UpstreamStatusCode: resp.StatusCode, UpstreamRequestID: resp.Header.Get("x-request-id"), Kind: "failover", Message: "Unsupported field in thinking"})
+	return &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: body, RequestScopedTransient: true}
+}
 
 // isClaudeCodeClient 判断请求是否来自真正的 Claude Code 客户端。
 // 判定条件：

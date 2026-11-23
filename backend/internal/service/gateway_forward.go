@@ -485,6 +485,12 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 			if readErr == nil {
 				_ = resp.Body.Close()
 
+				if aiwanwuThinkingRoute(account, reqModel) {
+					if failure := aiwanwuThinkingFailover(c, account, resp, respBody); failure != nil {
+						return nil, failure
+					}
+				}
+
 				if s.shouldRectifySignatureError(ctx, account, respBody, reqModel) {
 					appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 						ProxyID:            opsUpstreamProxyID(account),

@@ -26,6 +26,10 @@ func RegionalAPIKeyAuth(svc regionalAPIKeyAuthenticator, cfg *config.Config) gin
 			AbortWithError(c, http.StatusServiceUnavailable, "REGIONAL_USAGE_RECORDS_UNAVAILABLE", "Usage records are available on the primary site. Please use the primary site address.")
 			return
 		}
+		if isKeyGroupHealthRequest(c) {
+			AbortWithError(c, http.StatusServiceUnavailable, "REGIONAL_GROUP_HEALTH_UNAVAILABLE", "Query group health on the primary site")
+			return
+		}
 		if apiKeyHeadersTooLarge(c) {
 			AbortWithError(c, http.StatusUnauthorized, "INVALID_API_KEY", "Invalid API key")
 			return
