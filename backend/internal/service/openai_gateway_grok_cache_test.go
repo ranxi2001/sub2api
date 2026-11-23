@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -1080,6 +1081,43 @@ func TestApplyGrokCacheIdentityPreservesIneligibleClientToolFields(t *testing.T)
 			require.Equal(t, beforeTools.Raw, gjson.GetBytes(body, "tools").Raw)
 			require.Equal(t, beforeChoice.Exists(), gjson.GetBytes(body, "tool_choice").Exists())
 			require.Equal(t, beforeChoice.Raw, gjson.GetBytes(body, "tool_choice").Raw)
+		})
+	}
+}
+
+func TestHasGrokResponsesToolIntent(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want bool
+	}{
+		{"plain history", `{"input":[{"role":"user","content":"tools"}]}`, false},
+		{"nested field", `{"input":[{"type":"message","tools":[{}]}]}`, false},
+		{"explicit null", `{"input":[],"tools":null}`, true},
+		{"escaped choice", `{"tool_cho\u0069ce":false}`, true},
+		{"empty additional tools", `{"input":[{"type":"additional_tools","tools":[]}]}`, false},
+		{"later declaration", `{"input":[{"type":"additional_tools","tools":[]},{"type":" additional_tools ","tools":[null]}]}`, true},
+		{"omitted declaration body", `{"input":[{"type":"additional_tools"}]}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, hasGrokResponsesToolIntent([]byte(tc.body)))
+		})
+	}
+}
+
+func BenchmarkHasGrokResponsesToolIntent(b *testing.B) {
+	longText := strings.Repeat("x", 1<<20)
+	for _, tc := range []struct{ name, body string }{
+		{"Short", `{"input":[{"role":"user","content":"hello"}]}`},
+		{"LongHistory", `{"input":[{"role":"user","content":"` + longText + `"}]}`},
+		{"LargeTools", `{"tools":[{"type":"function","name":"lookup","description":"` + longText + `"}]}`},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			body := []byte(tc.body)
+			b.ReportAllocs()
+			for b.Loop() {
+				hasGrokResponsesToolIntent(body)
+			}
 		})
 	}
 }
