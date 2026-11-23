@@ -37,10 +37,35 @@ func openAIWSMayContainClientMetadata(body []byte) bool {
 	return bytes.Contains(body, []byte("client_metadata")) || bytes.Contains(body, []byte(`\u`))
 }
 
-// resolveOpenAIWSClientThreadID 提取 codex 客户端的线程标识。codex 多智能体会话里
+type openAIWSClientMetadataLookup struct {
+	body    []byte
+	scanned bool
+}
+
+func (l *openAIWSClientMetadataLookup) get(path string) string {
+	// Scan only when a header lookup falls back to the body. Thread and lane
+	// lookups can then reuse the same result for the rest of this request.
+	if !l.scanned {
+		l.scanned = true
+		if !openAIWSMayContainClientMetadata(l.body) {
+			l.body = nil
+		}
+	}
+	if len(l.body) == 0 {
+		return ""
+	}
+	return gjson.GetBytes(l.body, path).String()
+}
+
+func resolveOpenAIWSClientThreadID(c *gin.Context, body []byte) string {
+	lookup := openAIWSClientMetadataLookup{body: body}
+	return lookup.threadID(c)
+}
+
+// threadID 提取 codex 客户端的线程标识。codex 多智能体会话里
 // 父线程与全部子智能体共用同一个 session-id 头，只有线程标识能把它们区分开。
 // 优先级：thread-id 头 → x-codex-turn-metadata 头 → x-codex-window-id 头 → 请求体 client_metadata。
-func resolveOpenAIWSClientThreadID(c *gin.Context, body []byte) string {
+func (l *openAIWSClientMetadataLookup) threadID(c *gin.Context) string {
 	if c != nil && c.Request != nil {
 		if id := strings.TrimSpace(c.GetHeader(openAIWSThreadIDHeader)); id != "" {
 			return id
@@ -54,13 +79,10 @@ func resolveOpenAIWSClientThreadID(c *gin.Context, body []byte) string {
 			}
 		}
 	}
-	if !openAIWSMayContainClientMetadata(body) {
-		return ""
-	}
-	if id := strings.TrimSpace(gjson.GetBytes(body, "client_metadata.thread_id").String()); id != "" {
+	if id := strings.TrimSpace(l.get("client_metadata.thread_id")); id != "" {
 		return id
 	}
-	return codexTurnMetadataThreadID(gjson.GetBytes(body, "client_metadata."+openAIWSTurnMetadataHeader).String())
+	return codexTurnMetadataThreadID(l.get("client_metadata." + openAIWSTurnMetadataHeader))
 }
 
 // codexTurnMetadata 是 x-codex-turn-metadata JSON 里执行作用域用到的字段。
@@ -88,46 +110,45 @@ func codexTurnMetadataThreadID(raw string) string {
 	return metadata.ThreadID
 }
 
-// openAIWSExecutionTurnMetadata 取本次连接的 turn 元数据：x-codex-turn-metadata 头优先，
+// turnMetadata 取本次连接的 turn 元数据：x-codex-turn-metadata 头优先，
 // 其次请求体 client_metadata 内嵌的同名 JSON（Desktop 走 HTTP 时只有后者）。
-func openAIWSExecutionTurnMetadata(c *gin.Context, body []byte) codexTurnMetadata {
+func (l *openAIWSClientMetadataLookup) turnMetadata(c *gin.Context) codexTurnMetadata {
 	if c != nil && c.Request != nil {
 		if metadata, ok := parseCodexTurnMetadata(c.GetHeader(openAIWSTurnMetadataHeader)); ok {
 			return metadata
 		}
 	}
-	if !openAIWSMayContainClientMetadata(body) {
-		return codexTurnMetadata{}
-	}
-	metadata, _ := parseCodexTurnMetadata(gjson.GetBytes(body, "client_metadata."+openAIWSTurnMetadataHeader).String())
+	metadata, _ := parseCodexTurnMetadata(l.get("client_metadata." + openAIWSTurnMetadataHeader))
 	return metadata
 }
 
-func openAIWSExecutionSubagent(c *gin.Context, body []byte) string {
+func (l *openAIWSClientMetadataLookup) subagent(c *gin.Context) string {
 	if c != nil && c.Request != nil {
 		if subagent := strings.TrimSpace(c.GetHeader(openAISubagentHeader)); subagent != "" {
 			return strings.ToLower(subagent)
 		}
 	}
-	if !openAIWSMayContainClientMetadata(body) {
-		return ""
-	}
-	return strings.ToLower(strings.TrimSpace(gjson.GetBytes(body, "client_metadata."+openAISubagentHeader).String()))
+	return strings.ToLower(strings.TrimSpace(l.get("client_metadata." + openAISubagentHeader)))
 }
 
-// resolveOpenAIWSExecutionLane 派生执行作用域里的“道”，同道才互相抢占、共享会话级状态。
+func resolveOpenAIWSExecutionLane(c *gin.Context, body []byte) string {
+	lookup := openAIWSClientMetadataLookup{body: body}
+	return lookup.lane(c)
+}
+
+// lane 派生执行作用域里的“道”，同道才互相抢占、共享会话级状态。
 // 主道（turn / prewarm / compaction / 未声明）返回空串，其余 request_kind 各自成道，取值
 // 语义见上面的常量注释；没有线程元数据但声明了 x-openai-subagent 的（guardian 评分器）
 // 按子智能体值成道，它们与用户 turn 同键时同样会互相切断在飞轮次。
-func resolveOpenAIWSExecutionLane(c *gin.Context, body []byte) string {
-	metadata := openAIWSExecutionTurnMetadata(c, body)
+func (l *openAIWSClientMetadataLookup) lane(c *gin.Context) string {
+	metadata := l.turnMetadata(c)
 	switch metadata.RequestKind {
 	case "", openAIWSRequestKindTurn, openAIWSRequestKindPrewarm, openAIWSRequestKindCompaction:
 	default:
 		return "kind=" + metadata.RequestKind
 	}
 	if metadata.ThreadID == "" {
-		if subagent := openAIWSExecutionSubagent(c, body); subagent != "" {
+		if subagent := l.subagent(c); subagent != "" {
 			return "subagent=" + subagent
 		}
 	}
@@ -149,8 +170,9 @@ func openAIWSExecutionScopeSeed(apiKeyID int64, identity, value, lane string) st
 // 两种身份都没有时返回空作用域：按请求内容推导的粘性种子只服务账号亲和，
 // 不是可靠身份，不参与抢占。
 func resolveOpenAIWSExecutionScope(c *gin.Context, body []byte, apiKeyID int64) (scope, threadID string) {
-	lane := resolveOpenAIWSExecutionLane(c, body)
-	if threadID = resolveOpenAIWSClientThreadID(c, body); threadID != "" {
+	lookup := openAIWSClientMetadataLookup{body: body}
+	lane := lookup.lane(c)
+	if threadID = lookup.threadID(c); threadID != "" {
 		scope, _ = deriveOpenAISessionHashes(openAIWSExecutionScopeSeed(apiKeyID, "thread", threadID, lane))
 		return scope, threadID
 	}

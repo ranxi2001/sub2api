@@ -517,13 +517,15 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	if err != nil {
 		return nil, fmt.Errorf("prepare http bridge body: %w", err)
 	}
-	grokIntentSourceBody := append([]byte(nil), body...)
-	_, grokExplicitToolsField := openAIWSHTTPBridgeRawField(grokIntentSourceBody, "tools")
-	grokExplicitToolIntent := account.Platform == PlatformGrok && hasGrokResponsesToolIntent(grokIntentSourceBody)
+	var grokIntentSourceBody []byte
 	var clientToolMapping apicompat.ResponsesClientToolMapping
 	functionToolUpstream := (account.Platform == PlatformOpenAI && account.Type == AccountTypeAPIKey) || account.Platform == PlatformGrok
 	if functionToolUpstream {
+		var grokExplicitToolsField, grokExplicitToolIntent bool
 		if account.Platform == PlatformGrok {
+			grokIntentSourceBody = append([]byte(nil), body...)
+			_, grokExplicitToolsField = openAIWSHTTPBridgeRawField(grokIntentSourceBody, "tools")
+			grokExplicitToolIntent = hasGrokResponsesToolIntent(grokIntentSourceBody)
 			body, err = sanitizeGrokResponsesInput(body)
 			if err != nil {
 				return nil, fmt.Errorf("sanitize Grok WS HTTP bridge input: %w", err)

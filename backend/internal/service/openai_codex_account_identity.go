@@ -235,7 +235,7 @@ func applyCodexAccountIdentityClientMetadataRaw(body []byte, account *Account, a
 	if len(body) == 0 || codexAccountIdentityNamespace(account) == "" {
 		return body, false, nil
 	}
-	root := gjson.ParseBytes(body)
+	root := parseRawJSONView(body)
 	if !root.IsObject() {
 		return body, false, nil
 	}

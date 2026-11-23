@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -318,6 +319,15 @@ func TestOpenAIResponsesToolSchemaGatesAreNecessary(t *testing.T) {
 		requireOpenAIResponsesToolSchemaPatternGateCovers(t, raw)
 		requireOpenAIResponsesToolParameterGateCovers(t, raw)
 	}
+}
+
+func FuzzOpenAIResponsesContainsUnicode00Prefix(f *testing.F) {
+	for _, seed := range []string{"", `0\`, `\u0`, `\u00`, `0\n0\u00`, `\\u00ff`, `\u1234 00`} {
+		f.Add([]byte(seed))
+	}
+	f.Fuzz(func(t *testing.T, body []byte) {
+		require.Equal(t, bytes.Contains(body, []byte(`\u00`)), openAIResponsesContainsUnicode00Prefix(body))
+	})
 }
 
 func FuzzOpenAIResponsesToolSchemaGatesAreNecessary(f *testing.F) {

@@ -102,10 +102,9 @@ var (
 	// Short needles on purpose: bytes.Contains switches to a much slower
 	// algorithm for longer needles (a quoted 7-byte key costs ~12x a 5-byte one)
 	// and these run on every request.
-	openAIResponsesOneOfHint         = []byte("oneOf")
-	openAIResponsesAnyOfHint         = []byte("anyOf")
-	openAIResponsesRegexGroupBytes   = []byte("(?")
-	openAIResponsesJSONUnicodeEscape = []byte(`\u`)
+	openAIResponsesOneOfHint       = []byte("oneOf")
+	openAIResponsesAnyOfHint       = []byte("anyOf")
+	openAIResponsesRegexGroupBytes = []byte("(?")
 	// Any escaped spelling of an ASCII letter is \u00XX, so this also stands in
 	// for a union keyword written that way.
 	openAIResponsesUnicodeLetterEscape = []byte(`\u00`)
@@ -125,7 +124,20 @@ func openAIResponsesBodyMayNeedToolParameterRepair(body []byte) bool {
 	return bytes.Contains(body, openAIResponsesNullLiteral) ||
 		bytes.Contains(body, openAIResponsesOneOfHint) ||
 		bytes.Contains(body, openAIResponsesAnyOfHint) ||
-		bytes.Contains(body, openAIResponsesUnicodeLetterEscape)
+		openAIResponsesContainsUnicode00Prefix(body)
+}
+
+// A history full of escaped quotes and newlines has many backslashes to reject.
+// Skip to the first possible zero before searching for the complete prefix.
+func openAIResponsesContainsUnicode00Prefix(body []byte) bool {
+	slash := bytes.IndexByte(body, '\\')
+	if slash < 0 {
+		return false
+	}
+	body = body[slash:]
+	// In "\u00" the first zero is two bytes after the start of the match.
+	zero := bytes.IndexByte(body, '0')
+	return zero >= 0 && bytes.Contains(body[max(0, zero-2):], openAIResponsesUnicodeLetterEscape)
 }
 
 // openAIResponsesBodyMayContainUnsupportedRegex is a necessary condition for
@@ -148,11 +160,8 @@ func openAIResponsesBodyMayContainUnsupportedRegex(body []byte) bool {
 	if bytes.Contains(body, openAIResponsesRegexGroupBytes) {
 		return true
 	}
-	if !bytes.Contains(body, openAIResponsesJSONUnicodeEscape) {
-		return false
-	}
 	// 任何 \u00XX 转义都可能写成上述三种形态里的括号、问号或反斜杠。
-	return bytes.Contains(body, openAIResponsesUnicodeLetterEscape)
+	return openAIResponsesContainsUnicode00Prefix(body)
 }
 
 // openAIResponsesJSONPatternIsUnsupported reports whether a JSON string span
