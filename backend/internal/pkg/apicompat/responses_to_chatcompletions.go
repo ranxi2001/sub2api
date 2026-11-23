@@ -31,9 +31,7 @@ func ResponsesToChatCompletions(resp *ResponsesResponse, model string) *ChatComp
 		ServiceTier: resp.ServiceTier,
 	}
 
-	var contentText string
-	var refusalText string
-	var reasoningText string
+	var contentParts, refusalParts, reasoningParts []string
 	var toolCalls []ChatToolCall
 
 	for _, item := range resp.Output {
@@ -42,9 +40,9 @@ func ResponsesToChatCompletions(resp *ResponsesResponse, model string) *ChatComp
 			for _, part := range item.Content {
 				switch {
 				case part.Type == "output_text" && part.Text != "":
-					contentText += part.Text
+					contentParts = append(contentParts, part.Text)
 				case part.Type == "refusal" && part.Refusal != "":
-					refusalText += part.Refusal
+					refusalParts = append(refusalParts, part.Refusal)
 				}
 			}
 		case "function_call":
@@ -69,22 +67,25 @@ func ResponsesToChatCompletions(resp *ResponsesResponse, model string) *ChatComp
 				},
 			})
 		case "reasoning":
-			reasoningText += responsesReasoningText(item)
+			if text := responsesReasoningText(item); text != "" {
+				reasoningParts = append(reasoningParts, text)
+			}
 		case "web_search_call":
 			// silently consumed — results already incorporated into text output
 		}
 	}
 
-	msg := ChatMessage{Role: "assistant", Refusal: refusalText}
+	msg := ChatMessage{
+		Role:             "assistant",
+		Refusal:          strings.Join(refusalParts, ""),
+		ReasoningContent: strings.Join(reasoningParts, ""),
+	}
 	if len(toolCalls) > 0 {
 		msg.ToolCalls = toolCalls
 	}
-	if contentText != "" {
-		raw, _ := json.Marshal(contentText)
+	if len(contentParts) > 0 {
+		raw, _ := json.Marshal(strings.Join(contentParts, ""))
 		msg.Content = raw
-	}
-	if reasoningText != "" {
-		msg.ReasoningContent = reasoningText
 	}
 
 	finishReason := responsesStatusToChatFinishReason(resp.Status, resp.IncompleteDetails, toolCalls)
