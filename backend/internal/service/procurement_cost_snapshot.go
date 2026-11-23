@@ -15,7 +15,7 @@ type ProcurementCostSnapshot struct {
 	CostMultiplier *float64           `json:"cost_multiplier,omitempty"`
 }
 
-func captureProcurementCost(log *UsageLog, account *Account) {
+func captureGatewayProcurementCost(log *UsageLog, account *Account) {
 	if log == nil || account == nil {
 		return
 	}
