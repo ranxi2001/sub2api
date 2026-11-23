@@ -121,7 +121,7 @@ try{
  await page.goto('http://127.0.0.1:4185/admin/channel-config',{waitUntil:'networkidle'})
  await page.getByTestId('profit-summary').waitFor()
  await page.getByTestId('profit-summary').locator('[data-field="gross_margin"]').filter({hasText:'75.00%'}).waitFor()
- await page.getByTestId('profit-summary').getByText('账号计费',{exact:true}).waitFor()
+ await page.getByTestId('profit-summary').getByText('计入成本',{exact:true}).waitFor()
  await page.screenshot({path:path.join(output,'channel-config-profit.png'),fullPage:true})
  const reportCalls=await page.evaluate(()=>globalThis.__entityFixture.calls.filter(c=>c.url==='/admin/profit-operations/snapshot').length)
  const management=page.getByTestId('config-panel-channels')

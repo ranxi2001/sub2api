@@ -100,7 +100,7 @@ const accountUsage = computed(() => !snapshot.value || snapshot.value.usage.basi
 let request=0, alive=true, controller: AbortController|undefined
 function number(v: number|null|undefined, decimals=6) { return v==null || !Number.isFinite(v) ? t('profitOps.unknown') : v.toLocaleString(undefined,{minimumFractionDigits:decimals,maximumFractionDigits:decimals}) }
 function metricLabel(key: Metric, m: ProfitMetrics) {
- if (accountUsage.value && key === 'upstream_cost') return t('profitOps.accountUsageCost')
+ if (accountUsage.value && key === 'upstream_cost') return t('profitOps.profitCost')
  if (accountUsage.value && key === 'request_income') return t('profitOps.accountUsageIncome')
  return t(`profitOps.${m.requests > 0 && m.supplier_requests === 0 && isCostMetric(key) ? estimateLabels[key] : key}`)
 }
@@ -112,6 +112,7 @@ function walletText(m: ProfitMetrics) {
  return t(m.cost_source === 'wallet_window' || m.wallet_basis === 'wallet_window' ? 'profitOps.walletWindow' : 'profitOps.walletToday')
 }
 function sourceLabel(m: ProfitMetrics) {
+ if (m.cost_source === 'account_procurement') return t('profitOps.accountProcurementSource')
  if (m.cost_source === 'account_usage') return t('profitOps.accountUsageCost')
  if (m.requests === 0) return '—'
  const estimate = m.supplier_requests < m.requests ? estimateText(m) : ''

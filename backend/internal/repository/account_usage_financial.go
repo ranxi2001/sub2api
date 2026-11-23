@@ -41,7 +41,7 @@ func (r *dashboardAggregationRepository) RefreshAccountUsageFinancial(ctx contex
 	_, err = tx.ExecContext(ctx, `INSERT INTO account_usage_financial_rollups
  SELECT $1::timestamptz,account_id,group_id,model,public_model,upstream_model,
  count(*),COALESCE(sum(tokens),0),COALESCE(sum(standard_charge),0),COALESCE(sum(user_charge),0),
- COALESCE(sum(account_charge),0),sum(duration_sum),sum(duration_count)
+ COALESCE(sum(account_charge),0),sum(duration_sum),sum(duration_count),COALESCE(sum(unit_rate_charge),0)
  FROM account_usage_financial_events WHERE created_at >= $1 AND created_at < $1::timestamptz+interval '5 minutes'
  GROUP BY account_id,group_id,model,public_model,upstream_model`, bucket)
 	if err != nil {
@@ -60,13 +60,13 @@ const accountUsageWindow = `WITH bounds AS (
  SELECT LEAST($2::timestamptz, CASE WHEN $1=account_usage_bucket($1) THEN $1 ELSE account_usage_bucket($1)+interval '5 minutes' END) AS lo,
  GREATEST($1::timestamptz,LEAST(account_usage_bucket($2),account_usage_bucket(now())-interval '5 minutes')) AS hi
 ), facts AS (
- SELECT bucket AS at,account_id,group_id,model,public_model,upstream_model,requests,tokens,standard_charge,user_charge,account_charge,duration_sum,duration_count
+ SELECT bucket AS at,account_id,group_id,model,public_model,upstream_model,requests,tokens,standard_charge,user_charge,account_charge,duration_sum,duration_count,unit_rate_charge
  FROM account_usage_financial_rollups,bounds WHERE bucket>=lo AND bucket<hi AND ($3::bigint=0 OR account_id=$3)
  UNION ALL
- SELECT created_at,account_id,group_id,model,public_model,upstream_model,requests,tokens,standard_charge,user_charge,account_charge,duration_sum,duration_count
+ SELECT created_at,account_id,group_id,model,public_model,upstream_model,requests,tokens,standard_charge,user_charge,account_charge,duration_sum,duration_count,unit_rate_charge
  FROM account_usage_financial_events,bounds WHERE created_at>=$1 AND created_at<lo AND ($3::bigint=0 OR account_id=$3)
  UNION ALL
- SELECT created_at,account_id,group_id,model,public_model,upstream_model,requests,tokens,standard_charge,user_charge,account_charge,duration_sum,duration_count
+ SELECT created_at,account_id,group_id,model,public_model,upstream_model,requests,tokens,standard_charge,user_charge,account_charge,duration_sum,duration_count,unit_rate_charge
  FROM account_usage_financial_events,bounds WHERE created_at>=GREATEST(lo,hi) AND created_at<$2 AND ($3::bigint=0 OR account_id=$3)
 )`
 

@@ -52,6 +52,23 @@ func TestProfitOperationsAccountUsageRollup(t *testing.T) {
 		require.Equal(t, profit, result.Summary.Profit)
 	}
 	check(1, 10, 2, 8)
+	_, err = integrationDB.Exec(`UPDATE accounts SET type='oauth',extra='{"cost_multiplier":0.25}',rate_multiplier=3 WHERE id=$1`, f.account)
+	require.NoError(t, err)
+	_, err = integrationDB.Exec(`INSERT INTO usage_logs(user_id,api_key_id,account_id,request_id,model,total_cost,actual_cost,account_stats_cost,account_rate_multiplier,created_at)
+ VALUES($1,$2,$3,'one-times','fixture',50,12,8,1,$4)`, f.user, f.key, f.account, from.Add(time.Minute))
+	require.NoError(t, err)
+	check(2, 22, 4, 18) // 4 × 0.5 + 8 × 1 × 0.25
+	_, err = integrationDB.Exec("UPDATE account_usage_financial_rollups SET unit_rate_charge=NULL WHERE bucket=$1 AND account_id=$2", from, f.account)
+	require.NoError(t, err)
+	check(2, 22, 4, 18)
+	filter.From = from.Add(time.Minute)
+	check(2, 22, 4, 18)
+	filter.From = from
+	_, err = integrationDB.Exec("UPDATE accounts SET extra='{}' WHERE id=$1", f.account)
+	require.NoError(t, err)
+	check(2, 22, 10, 12)
+	_, err = integrationDB.Exec("DELETE FROM usage_logs WHERE account_id=$1 AND request_id='one-times'", f.account)
+	require.NoError(t, err)
 	// Late corrections invalidate the published slice. A partial range on
 	// either edge still uses the same persisted prices and half-open bounds.
 	_, err = integrationDB.Exec("UPDATE usage_logs SET actual_cost=9 WHERE account_id=$1 AND request_id='financial-rollup'", f.account)
