@@ -56,6 +56,10 @@ CI artifact 预期包含应用/harness SHA/tree、显式未完成清单、命名
 
 采集不读 headers、Cookie、请求/响应正文、stack 或任意错误文本，不启用 HAR/trace，不增加浏览器求值、网络操作、等待或重试。最多保留最近 8192 个允许事件，`dropped_events` 明示截断；缺少 frame 时记录 unknown，不把未关联请求推断成新文档。原零错误和业务断言不变；一次未复发的绿 CI 不能解释原始中止根因。
 
+导航 harness 在初始空白页、应用脚本运行前安装主文档 interval 登记；每次整页 goto/reload 在原 20 秒准备期限内先等待 load，再停止即将离开的文档后续 interval 调度，最后排空原请求 inventory 后才发出 navigation intent。已经执行的回调及已发出的 fetch/XHR 不取消、不过滤；setTimeout 和请求超时仍按原样执行。新文档自动建立新的登记，正常 auth bootstrap 和定时刷新继续运行。该边界只处理整页导航前的周期任务竞态，不声称隔离任意异步调度。
+
+`document-intervals-retired` 元数据事件记录文档编号及停止的 interval 数量；采集器本身仍仅记录元数据，调度变更由独立导航 harness 执行。原 250 毫秒排空观察未增加，安装与停止调度耗时也计入同一 20 秒期限；缺少边界、超时或尝试重复使用已退休文档均失败，不重试。纯 Node navigation tests 包括 intent/commit 间到期的 auth 竞态、已发请求继续完成、新文档正常 auth、abort-auth/settings 拒绝控制及期限检查，不能替代当前 SHA 的真实浏览器 E2E。
+
 ## 证据目录权限
 
 浏览器与假上游容器使用 CI runner 的 UID/GID，保持 `cap_drop: ALL` 和只读根文件系统。证据目录由同一 runner 创建，因此无需增加 DAC_OVERRIDE 或放宽目录权限。网络结构投影核对这两个容器的实际用户；浏览器启动失败也写入场景结果。
