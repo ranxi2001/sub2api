@@ -772,3 +772,65 @@ func TestProbeGroupWriteHonorsDisableDuringRequest(t *testing.T) {
 	require.Equal(t, notes, *after.Notes)
 	require.Equal(t, false, after.Extra[service.UpstreamBillingGroupSyncEnabledExtraKey])
 }
+
+// Deterministically interleave a database edit between the service's read and
+// the repository write. This exercises the real transaction and row lock, not a
+// mock that simply compares versions in memory.
+func TestAccountUpstreamGroupSyncVersionProtectsReadWriteBoundary(t *testing.T) {
+	for _, change := range []string{"none", "name", "notes", "api_key", "base_url", "priority"} {
+		t.Run(change, func(t *testing.T) {
+			ctx := context.Background()
+			tx := testEntTx(t)
+			repo := newAccountRepositoryWithSQL(tx.Client(), tx, nil)
+			account := mustCreateAccount(t, tx.Client(), &service.Account{
+				Name: "Original", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
+				Credentials: map[string]any{"api_key": "synthetic-key", "base_url": "https://relay.example/v1"},
+			})
+			loaded, err := repo.GetByID(ctx, account.ID)
+			require.NoError(t, err)
+			version := loaded.UpdatedAt
+			if change != "none" {
+				update := tx.Client().Account.UpdateOneID(account.ID).SetUpdatedAt(version.Add(time.Second))
+				switch change {
+				case "name":
+					update.SetName("Manual name")
+				case "notes":
+					update.SetNotes("Manual notes")
+				case "priority":
+					update.SetPriority(9)
+				case "api_key", "base_url":
+					credentials := map[string]any{"api_key": "synthetic-key", "base_url": "https://relay.example/v1"}
+					credentials[change] = "synthetic-replacement"
+					update.SetCredentials(credentials)
+				}
+				_, err = update.Save(ctx)
+				require.NoError(t, err)
+			}
+			before, err := repo.GetByID(ctx, account.ID)
+			require.NoError(t, err)
+			loaded.Name = "Remote name"
+			notes := "Remote notes"
+			loaded.Notes = &notes
+			err = repo.UpdateWithAccountBillingSettings(ctx, loaded, service.AccountBillingSettingsUpdate{
+				SetName: true, SetNotes: true, ExpectedUpdatedAt: &version,
+			})
+			if change == "none" {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, service.ErrAccountUpdateConflict)
+			}
+			got, err := repo.GetByID(ctx, account.ID)
+			require.NoError(t, err)
+			if change == "none" {
+				require.Equal(t, "Remote name", got.Name)
+				require.Equal(t, "Remote notes", *got.Notes)
+			} else {
+				require.Equal(t, before.Name, got.Name)
+				require.Equal(t, before.Notes, got.Notes)
+				require.Equal(t, before.Credentials, got.Credentials)
+				require.Equal(t, before.Priority, got.Priority)
+				require.Equal(t, before.UpdatedAt, got.UpdatedAt)
+			}
+		})
+	}
+}

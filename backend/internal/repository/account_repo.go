@@ -672,6 +672,29 @@ func (r *accountRepository) updateLockedAccount(
 	}
 	account.Extra = extra
 	// lockAndMergeAccountProbeExtra holds the account row lock in this transaction.
+	if settings.ExpectedUpdatedAt != nil {
+		rows, err := client.QueryContext(ctx, "SELECT updated_at FROM accounts WHERE id = $1 AND deleted_at IS NULL", account.ID)
+		if err != nil {
+			return nil, err
+		}
+		var version time.Time
+		if !rows.Next() {
+			err = rows.Err()
+			_ = rows.Close()
+			if err != nil {
+				return nil, err
+			}
+			return nil, service.ErrAccountNotFound
+		}
+		err = rows.Scan(&version)
+		_ = rows.Close()
+		if err != nil {
+			return nil, err
+		}
+		if !version.Equal(*settings.ExpectedUpdatedAt) {
+			return nil, service.ErrAccountUpdateConflict
+		}
+	}
 	if err := accounttimer.CancelPending(ctx, client, account.ID, time.Now().UTC()); err != nil {
 		return nil, err
 	}

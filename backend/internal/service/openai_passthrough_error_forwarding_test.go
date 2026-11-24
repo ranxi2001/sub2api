@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -463,7 +464,7 @@ func forwardOpenAIPassthroughErrorForTest(t *testing.T, c *gin.Context, upstream
 		Credentials: credentials,
 		Extra:       map[string]any{"openai_passthrough": true}, Status: StatusActive, Schedulable: true,
 	}
-	_, err := svc.Forward(context.Background(), c, account, []byte(`{"model":"gpt-5.4","input":"hi"}`))
+	_, err := svc.Forward(c.Request.Context(), c, account, []byte(`{"model":"gpt-5.4","input":"hi"}`))
 	require.Error(t, err)
 }
 
@@ -692,5 +693,124 @@ func TestOpenAIGatewayService_APIKeyPassthrough_CompactFailedRewritesCapacityShe
 			require.Equal(t, wantCode, gjson.Get(events[0][1], "response.error.code").String())
 			require.Contains(t, gjson.Get(events[0][1], "response.error.message").String(), "at capacity")
 		})
+	}
+}
+
+// Exercise the same client oracle through Forward, including the committed
+// compact bridge. All header values and identities below are synthetic.
+func TestOpenAIGatewayService_APIKeyPassthrough_HeaderOverrideSecrets(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, branch := range []string{"default", "rule_body", "rule_message"} {
+		for _, mode := range []string{"json", "compact_committed"} {
+			for _, tc := range []struct {
+				name, template, echo, want string
+			}{
+				{"static", "relay-secret-123", "relay-secret-123", "[redacted]"},
+				{"identity_template", "relay-prefix-123{{user_id}}relay-suffix-456", "relay-prefix-12342relay-suffix-456", "[redacted]42[redacted]"},
+				{"overlapping_literals", "synthetic-primary-key-suffix", "synthetic-primary-key-suffix", "[redacted]"},
+				{"short_control", "x{{user_id}}", "ordinary text: x", "ordinary text: x"},
+				{"separator_control", "------{{user_id}}", "ordinary ------ text", "ordinary ------ text"},
+				{"identity_only_control", "{{user_id}}", "ordinary text", "ordinary text"},
+			} {
+				t.Run(branch+"/"+mode+"/"+tc.name, func(t *testing.T) {
+					rec, c := newOpenAIPassthroughErrorTestContext()
+					if mode == "compact_committed" {
+						c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
+						MarkOpenAICompactClientStream(c)
+						stop := StartOpenAICompactSSEKeepalive(c, time.Hour)
+						defer stop()
+						require.True(t, c.MustGet(openAICompactSSEKeepaliveKey).(*openAICompactSSEKeepalive).beat())
+					}
+					c.Request = c.Request.WithContext(WithHeaderOverrideRequestScope(c.Request.Context(), 42, 84, nil))
+					code, wantCode := "invalid_encrypted_content", "invalid_encrypted_content"
+					if branch != "default" {
+						code, wantCode = "code:"+tc.echo, "code:"+tc.want
+						rules := &ErrorPassthroughService{}
+						rules.setLocalCache([]*model.ErrorPassthroughRule{{
+							ID: 1, Name: "synthetic-header-error", Enabled: true, Priority: 1,
+							ErrorCodes: []int{400}, MatchMode: model.MatchModeAny,
+							Platforms: []string{PlatformOpenAI}, PassthroughCode: true,
+							PassthroughBody: branch == "rule_body",
+						}})
+						BindErrorPassthroughService(c, rules)
+					}
+					body, err := json.Marshal(map[string]any{"error": map[string]any{
+						"code": code, "message": "Rejected " + tc.echo,
+						"type": "type:" + tc.echo, "param": "param:" + tc.echo,
+					}})
+					require.NoError(t, err)
+					forwardOpenAIPassthroughErrorForTest(t, c, 400, string(body), map[string]any{
+						"api_key": "synthetic-primary-key", "header_override_enabled": true,
+						"header_overrides": map[string]any{"x-relay-auth": tc.template},
+					})
+					payload, path := rec.Body.String(), "error"
+					if mode == "compact_committed" {
+						require.Equal(t, 200, rec.Code)
+						events := parseSSEEvents(rec.Body.String())
+						require.Len(t, events, 1)
+						require.Equal(t, "response.failed", events[0][0])
+						payload, path = events[0][1], "response.error"
+					} else {
+						require.Equal(t, 400, rec.Code)
+						if branch != "rule_message" {
+							require.Equal(t, "type:"+tc.want, gjson.Get(payload, "error.type").String())
+							require.Equal(t, "param:"+tc.want, gjson.Get(payload, "error.param").String())
+						}
+					}
+					require.Equal(t, "Rejected "+tc.want, gjson.Get(payload, path+".message").String())
+					if branch != "rule_message" {
+						require.Equal(t, wantCode, gjson.Get(payload, path+".code").String())
+					}
+					for _, secret := range []string{"relay-secret-123", "relay-prefix-123", "relay-suffix-456", "synthetic-primary-key"} {
+						require.NotContains(t, rec.Body.String(), secret)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestOpenAIGatewayService_APIKeyPassthrough_ProtocolCodeWhitespaceAndSecretCollision(t *testing.T) {
+	for _, code := range []string{"invalid_encrypted_content", "thinking_signature_invalid"} {
+		for _, nested := range []bool{false, true} {
+			for _, secretCollision := range []bool{false, true} {
+				for _, compact := range []bool{false, true} {
+					t.Run(fmt.Sprintf("%s/nested=%t/secret=%t/compact=%t", code, nested, secretCollision, compact), func(t *testing.T) {
+						rec, c := newOpenAIPassthroughErrorTestContext()
+						if compact {
+							MarkOpenAICompactClientStream(c)
+							stop := StartOpenAICompactSSEKeepalive(c, time.Hour)
+							defer stop()
+							require.True(t, c.MustGet(openAICompactSSEKeepaliveKey).(*openAICompactSSEKeepalive).beat())
+						}
+						fields := map[string]any{"code": " \t" + code + " ", "message": "The encrypted content gAAAAA_fake could not be verified."}
+						if nested {
+							inner, err := json.Marshal(map[string]any{"error": fields})
+							require.NoError(t, err)
+							fields = map[string]any{"message": string(inner)}
+						}
+						body, err := json.Marshal(map[string]any{"error": fields})
+						require.NoError(t, err)
+						credentials := map[string]any{"api_key": "synthetic-primary-key"}
+						want := code
+						if secretCollision {
+							credentials["header_override_enabled"] = true
+							credentials["header_overrides"] = map[string]any{"x-relay-auth": code}
+							want = "[redacted]"
+						}
+						forwardOpenAIPassthroughErrorForTest(t, c, 400, string(body), credentials)
+						payload, path := rec.Body.String(), "error"
+						if compact {
+							events := parseSSEEvents(payload)
+							require.Len(t, events, 1)
+							payload, path = events[0][1], "response.error"
+						}
+						require.Equal(t, want, gjson.Get(payload, path+".code").String())
+						require.Equal(t, openAIEncryptedErrorRedacted, gjson.Get(payload, path+".message").String())
+						require.NotContains(t, rec.Body.String(), "gAAAAA_fake")
+					})
+				}
+			}
+		}
 	}
 }

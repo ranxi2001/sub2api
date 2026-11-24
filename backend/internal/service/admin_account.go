@@ -713,6 +713,25 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if err != nil {
 		return nil, err
 	}
+	var expectedUpdatedAt *time.Time
+	if input.UpstreamGroupGuard != nil {
+		current, err := NewUpstreamGroupSyncGuard(account)
+		if err != nil || current.Source != input.UpstreamGroupGuard.Source {
+			return nil, ErrAccountUpdateConflict
+		}
+		// The preview owns only fields that still match its original snapshot.
+		// Copy the input so a skipped field cannot mutate the caller's request.
+		guarded := *input
+		if account.Name != input.UpstreamGroupGuard.Name {
+			guarded.Name = ""
+		}
+		if !reflect.DeepEqual(account.Notes, input.UpstreamGroupGuard.Notes) {
+			guarded.Notes = nil
+		}
+		input = &guarded
+		version := account.UpdatedAt
+		expectedUpdatedAt = &version
+	}
 	if err := validateGatewayAccountUpdate(account, input); err != nil {
 		return nil, err
 	}
@@ -1108,7 +1127,8 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if updater != nil {
 		if err := updater.UpdateWithAccountBillingSettings(
 			ctx, account, AccountBillingSettingsUpdate{
-				ProbeEnabled: requestedProbeEnabledUpdate, RateSyncEnabled: requestedRateSyncEnabledUpdate,
+				ExpectedUpdatedAt: expectedUpdatedAt,
+				ProbeEnabled:      requestedProbeEnabledUpdate, RateSyncEnabled: requestedRateSyncEnabledUpdate,
 				GroupSyncEnabled: groupSyncUpdate, RateMultiplier: input.RateMultiplier,
 				SetName: input.Name != "", SetNotes: input.Notes != nil,
 			},
@@ -1118,6 +1138,11 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		billingSettingsAppliedAtomically = true
 	}
 	if !billingSettingsAppliedAtomically {
+		if expectedUpdatedAt != nil {
+			// A repository without atomic version checking must not silently
+			// downgrade a conditional update to an unconditional write.
+			return nil, ErrAccountUpdateConflict
+		}
 		if err := s.accountRepo.Update(ctx, account); err != nil {
 			return nil, err
 		}

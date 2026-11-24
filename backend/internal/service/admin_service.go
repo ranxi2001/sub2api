@@ -472,6 +472,7 @@ type ShadowOptions struct {
 }
 
 type UpdateAccountInput struct {
+	UpstreamGroupGuard  *UpstreamGroupSyncGuard
 	ProxyMode           string // 受限写入在验权后选择代理。
 	Platform            string // Empty preserves the existing platform.
 	Name                string

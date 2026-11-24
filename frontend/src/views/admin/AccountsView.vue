@@ -2689,23 +2689,41 @@ const handleAccountUpdated = (updatedAccount: Account) => {
   patchAccountInList(updatedAccount)
   enterAutoRefreshSilentWindow()
 }
+// Only compare connection settings here. The server guard also covers secrets
+// omitted from lite rows and checks the row version inside the write transaction.
+const upstreamGroupSource = (account: AccountListItem) => JSON.stringify({
+  platform: account.platform, type: account.type, proxy_id: account.proxy_id ?? null,
+  credentials: account.credentials
+})
 const syncUpstreamGroup = async (account: AccountListItem) => {
   if (syncingUpstreamGroup.has(account.id)) return
+  const original = { name: account.name, notes: account.notes, source: upstreamGroupSource(account) }
+  const contextVersion = accountListContextVersion
   syncingUpstreamGroup.add(account.id)
   try {
     const fields = await adminAPI.accounts.previewUpstreamGroup({ account_id: account.id })
+    const current = accounts.value.find(item => item.id === account.id)
+    if (accountViewDisposed || contextVersion !== accountListContextVersion || !current || upstreamGroupSource(current) !== original.source) return
     if (!fields.name && !fields.notes) {
       appStore.showInfo(t('admin.accounts.upstreamBilling.groupUnavailable'))
       return
     }
-    if (fields.name === account.name) delete fields.name
-    if (fields.notes === account.notes) delete fields.notes
+    if (current.name !== original.name || fields.name === current.name) delete fields.name
+    if (current.notes !== original.notes || fields.notes === current.notes) delete fields.notes
     if (fields.name || fields.notes) {
-      handleAccountUpdated(await adminAPI.accounts.update(account.id, fields))
+      // An older server cannot provide concurrency protection; never fall back
+      // to the unconditional PATCH that caused delayed previews to overwrite edits.
+      if (!fields.upstream_group_guard) {
+        appStore.showError(t('admin.accounts.upstreamBilling.groupFailed'))
+        return
+      }
+      const updated = await adminAPI.accounts.update(account.id, fields)
+      if (accountViewDisposed || contextVersion !== accountListContextVersion) return
+      if (accounts.value.find(item => item.id === account.id) === current) handleAccountUpdated(updated)
     }
     appStore.showSuccess(t('admin.accounts.upstreamBilling.groupSynced'))
   } catch (error) {
-    appStore.showError(extractApiErrorMessage(error, t('admin.accounts.upstreamBilling.groupFailed')))
+    if (!accountViewDisposed && contextVersion === accountListContextVersion) appStore.showError(extractApiErrorMessage(error, t('admin.accounts.upstreamBilling.groupFailed')))
   } finally {
     syncingUpstreamGroup.delete(account.id)
   }

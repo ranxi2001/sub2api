@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"strings"
 	"sync"
@@ -1432,4 +1434,81 @@ func TestUpstreamBillingGroupInfoNeverReturnsTextPostgresRejects(t *testing.T) {
 	}
 	got := upstreamBillingGroupInfo([]byte(`{"group_name":"  标准组 🚀 ","group_description":"支持推理模型\r\n第二行"}`))
 	require.Equal(t, BillingGroupInfo{Name: "标准组 🚀", Description: "支持推理模型\r\n第二行"}, got)
+}
+
+// A real HTTP server checks what the upstream receives, not merely the URL
+// builder's output. The same oracle covers preview and scheduled rate/group sync.
+func TestUpstreamBillingGroupQueryPreservesExistingParameters(t *testing.T) {
+	for _, mode := range []string{"preview", "scheduled_group", "scheduled_rate_only"} {
+		for _, suffix := range []string{
+			"", "?tenant=demo&auth=synthetic%2Btoken&tag=a&tag=b",
+			"?tenant=demo&auth=synthetic%2Btoken&include=previous#display-only",
+		} {
+			t.Run(mode+"/"+suffix, func(t *testing.T) {
+				includeGroup := mode != "scheduled_rate_only"
+				requests := make(chan *http.Request, 4)
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if strings.HasSuffix(r.URL.Path, "/usage") {
+						body := upstreamBalanceProbeWalletBody()
+						defer body.Close()
+						_, _ = io.Copy(w, body)
+						return
+					}
+					requests <- r.Clone(context.Background())
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = io.WriteString(w, `{"object":"sub2api.key_billing","schema_version":1,"billing_scope":"token","group_rate_multiplier":0.5,"resolved_rate_multiplier":0.5,"effective_rate_multiplier":0.5,"peak_rate_enabled":false,"observed_at":"2026-07-13T01:00:00Z","group_name":"Remote group","group_description":"Remote notes"}`)
+				}))
+				defer server.Close()
+				rate, notes := 1.0, "Local notes"
+				account := &Account{ID: 17, Name: "Local name", Notes: &notes, Platform: PlatformOpenAI,
+					Type: AccountTypeAPIKey, Status: StatusActive, RateMultiplier: &rate,
+					Credentials: map[string]any{"api_key": "synthetic-key", "base_url": server.URL + "/relay/v1" + suffix},
+					Extra: map[string]any{UpstreamBillingProbeEnabledExtraKey: true,
+						UpstreamBillingRateSyncEnabledExtraKey: true, UpstreamBillingGroupSyncEnabledExtraKey: includeGroup},
+				}
+				repo := &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{account.ID: account}}
+				svc := newUpstreamBillingProbeTestService(repo, &billingGroupQueryHTTP{client: server.Client()}, &upstreamBillingProbeSettingRepo{})
+				if mode == "preview" {
+					group, err := svc.PreviewGroup(context.Background(), account)
+					require.NoError(t, err)
+					require.Equal(t, BillingGroupInfo{Name: "Remote group", Description: "Remote notes"}, *group)
+					require.Equal(t, "Local name", account.Name)
+					require.Equal(t, 1.0, *account.RateMultiplier)
+				} else {
+					snapshot, err := svc.probeScheduledAccount(context.Background(), account.ID, 30)
+					require.NoError(t, err)
+					require.Equal(t, UpstreamBillingProbeStatusOK, snapshot.Status)
+					require.Equal(t, 0.5, *account.RateMultiplier)
+					if includeGroup {
+						require.Equal(t, "Remote group", account.Name)
+						require.Equal(t, "Remote notes", *account.Notes)
+					} else {
+						require.Equal(t, "Local name", account.Name)
+						require.Equal(t, "Local notes", *account.Notes)
+					}
+				}
+				require.Len(t, requests, 1)
+				request := <-requests
+				require.Equal(t, "/relay/v1/sub2api/billing", request.URL.Path)
+				require.Equal(t, "Bearer synthetic-key", request.Header.Get("Authorization"))
+				base, err := url.Parse(server.URL + "/relay/v1" + suffix)
+				require.NoError(t, err)
+				want := base.Query()
+				if includeGroup {
+					want.Set("include", "group")
+				}
+				require.Equal(t, want, request.URL.Query())
+				require.NotContains(t, request.RequestURI, "display-only")
+			})
+		}
+	}
+}
+
+type billingGroupQueryHTTP struct{ client *http.Client }
+
+func (u *billingGroupQueryHTTP) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	return u.client.Do(req)
+}
+func (u *billingGroupQueryHTTP) DoWithTLS(req *http.Request, proxy string, id int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	return u.Do(req, proxy, id, concurrency)
 }

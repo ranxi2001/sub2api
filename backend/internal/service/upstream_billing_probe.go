@@ -695,7 +695,7 @@ func (s *UpstreamBillingProbeService) PreviewGroup(ctx context.Context, account 
 	if err != nil {
 		return nil, infraerrors.New(http.StatusBadGateway, "UPSTREAM_GROUP_PREVIEW_FAILED", "Could not read group information from the upstream")
 	}
-	reply := s.fetchUpstreamProbeBody(ctx, account, target, buildOpenAIEndpointURL(baseURL, "/v1/sub2api/billing")+"?include=group", upstreamBillingProbeMaxBodyBytes, upstreamBillingProbeRequestTimeout)
+	reply := s.fetchUpstreamProbeBody(ctx, account, target, upstreamBillingProbeURL(baseURL, true), upstreamBillingProbeMaxBodyBytes, upstreamBillingProbeRequestTimeout)
 	if reply.failure == "" && (reply.statusCode == http.StatusNotFound || reply.statusCode == http.StatusMethodNotAllowed) {
 		return &BillingGroupInfo{}, nil
 	}
@@ -771,10 +771,7 @@ func (s *UpstreamBillingProbeService) probeLoadedAccount(ctx context.Context, ac
 	if err != nil {
 		return s.persistProbeFailure(ctx, account, intervalMinutes, now, 0, err.Error(), 0)
 	}
-	billingURL := buildOpenAIEndpointURL(normalizedBaseURL, "/v1/sub2api/billing")
-	if includeGroup {
-		billingURL += "?include=group"
-	}
+	billingURL := upstreamBillingProbeURL(normalizedBaseURL, includeGroup)
 	rateResult := s.fetchUpstreamProbeBody(ctx, account, target, billingURL, upstreamBillingProbeMaxBodyBytes, upstreamBillingProbeRequestTimeout)
 	previousRate := account.BillingRateMultiplier()
 	snapshot, syncRate := upstreamBillingRateSnapshotFromResult(account, intervalMinutes, now, rateResult, previousRate)
@@ -815,6 +812,24 @@ func (s *UpstreamBillingProbeService) probeLoadedAccount(ctx context.Context, ac
 type upstreamBillingProbeTarget struct {
 	apiKey   string
 	proxyURL string
+}
+
+// baseURL has already passed the existing upstream URL validation. Preserve
+// routing and authentication parameters when requesting group text. Fragment
+// handling remains owned by buildOpenAIEndpointURL (never sent upstream).
+func upstreamBillingProbeURL(baseURL string, includeGroup bool) string {
+	endpoint := buildOpenAIEndpointURL(baseURL, "/v1/sub2api/billing")
+	if !includeGroup {
+		return endpoint
+	}
+	parsed, err := url.Parse(endpoint)
+	if err != nil {
+		return endpoint // The request builder retains its existing failure path.
+	}
+	query := parsed.Query()
+	query.Set("include", "group")
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
 }
 
 // upstreamBillingProbeHTTPResult is one upstream GET. failure is set when no

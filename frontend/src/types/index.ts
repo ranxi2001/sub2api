@@ -1834,7 +1834,14 @@ export interface AccountGroupBinding {
   created_at: string
 }
 
+export interface UpstreamGroupSyncGuard {
+  source: string
+  name: string
+  notes: string | null
+}
+
 export interface UpdateAccountRequest {
+  upstream_group_guard?: UpstreamGroupSyncGuard
 	platform?: AccountPlatform
   name?: string
   notes?: string | null

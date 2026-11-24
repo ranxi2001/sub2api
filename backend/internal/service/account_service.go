@@ -10,9 +10,10 @@ import (
 )
 
 var (
-	ErrAccountNotFound      = infraerrors.NotFound("ACCOUNT_NOT_FOUND", "account not found")
-	ErrAccountNilInput      = infraerrors.BadRequest("ACCOUNT_NIL_INPUT", "account input cannot be nil")
-	ErrAccountNotInFallback = infraerrors.BadRequest("ACCOUNT_NOT_IN_FALLBACK", "account is not in proxy fallback state")
+	ErrAccountUpdateConflict = infraerrors.Conflict("ACCOUNT_UPDATE_CONFLICT", "account changed during group sync; retry the sync")
+	ErrAccountNotFound       = infraerrors.NotFound("ACCOUNT_NOT_FOUND", "account not found")
+	ErrAccountNilInput       = infraerrors.BadRequest("ACCOUNT_NIL_INPUT", "account input cannot be nil")
+	ErrAccountNotInFallback  = infraerrors.BadRequest("ACCOUNT_NOT_IN_FALLBACK", "account is not in proxy fallback state")
 )
 
 const AccountListGroupUngrouped int64 = -1
@@ -159,6 +160,7 @@ type GatewayAccountTransactionRepository interface {
 // AccountBillingSettingsUpdate carries explicit edits to fields shared with the billing probe.
 // Omitted fields retain the values in the locked row.
 type AccountBillingSettingsUpdate struct {
+	ExpectedUpdatedAt                               *time.Time
 	ProbeEnabled, RateSyncEnabled, GroupSyncEnabled *bool
 	RateMultiplier                                  *float64
 	SetName, SetNotes                               bool

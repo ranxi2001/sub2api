@@ -11,6 +11,7 @@ import type {
   AccountListItem,
   CreateAccountRequest,
   UpdateAccountRequest,
+  UpstreamGroupSyncGuard,
   PaginatedResponse,
   AccountUsageInfo,
   WindowStats,
@@ -1124,12 +1125,13 @@ export type UpstreamGroupSource = { account_id: number } | {
 }
 
 export async function previewUpstreamGroup(source: UpstreamGroupSource, signal?: AbortSignal) {
-  const { data } = await apiClient.post<{ group_name?: string; group_description?: string }>(
+  const { data } = await apiClient.post<{ group_name?: string; group_description?: string; sync_guard?: UpstreamGroupSyncGuard }>(
     '/admin/accounts/upstream-billing-probe/group-preview', source, { signal }
   )
-  const fields: { name?: string; notes?: string } = {}
+  const fields: { name?: string; notes?: string; upstream_group_guard?: UpstreamGroupSyncGuard } = {}
   if (data.group_name?.trim()) fields.name = data.group_name
   if (data.group_description?.trim()) fields.notes = data.group_description
+  if (data.sync_guard) fields.upstream_group_guard = data.sync_guard
   return fields
 }
 

@@ -168,6 +168,8 @@ type CreateAccountRequest struct {
 // UpdateAccountRequest represents update account request
 // 使用指针类型来区分"未提供"和"设置为0"
 type UpdateAccountRequest struct {
+	UpstreamGroupGuard *service.UpstreamGroupSyncGuard `json:"upstream_group_guard"`
+
 	Platform            string         `json:"platform"`
 	Name                string         `json:"name"`
 	Notes               *string        `json:"notes"`
@@ -1332,6 +1334,7 @@ func (h *AccountHandler) Update(c *gin.Context) {
 	skipCheck := req.ConfirmMixedChannelRisk != nil && *req.ConfirmMixedChannelRisk
 
 	account, err := h.adminService.UpdateAccount(c.Request.Context(), accountID, &service.UpdateAccountInput{
+		UpstreamGroupGuard:    req.UpstreamGroupGuard,
 		Platform:              req.Platform,
 		Name:                  req.Name,
 		Notes:                 req.Notes,

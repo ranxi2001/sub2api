@@ -3,7 +3,9 @@ package service
 import (
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/tidwall/gjson"
 )
@@ -12,14 +14,44 @@ import (
 // 若账号配置了自定义 base_url 或凭据（api_key/access_token），一并屏蔽，
 // 避免上游错误文案泄露真实上游地址或账号凭据。
 func sanitizeOpenAIPassthroughClientErrorText(account *Account, text string) string {
-	sanitized := sanitizeUpstreamErrorMessage(strings.TrimSpace(text))
+	// Recognize encrypted diagnostics before any configured literal can hide
+	// their marker. Redact secrets before query sanitization changes their bytes.
+	text = redactOpenAIEncryptedDiagnostic(strings.TrimSpace(text))
+	return sanitizeUpstreamErrorMessage(redactOpenAIPassthroughAccountSecrets(account, text))
+}
+
+// Keep account-secret redaction separate from diagnostic redaction: even an
+// otherwise valid protocol identifier can be a configured header secret.
+func redactOpenAIPassthroughAccountSecrets(account *Account, sanitized string) string {
 	if sanitized == "" || account == nil {
 		return sanitized
 	}
+	var secrets []string
 	for _, credKey := range []string{"api_key", "access_token", "refresh_token"} {
 		if secret := strings.TrimSpace(account.GetCredential(credKey)); len(secret) >= 6 {
-			sanitized = strings.ReplaceAll(sanitized, secret, "[redacted]")
+			secrets = append(secrets, secret)
 		}
+	}
+	for _, template := range account.GetHeaderOverrides() {
+		// Use the same parser as trusted identity headers, without resolving or
+		// recording request identity. Short separators must not corrupt all text.
+		walkHeaderOverrideTemplate(template, func(literal string) {
+			literal = strings.TrimSpace(literal)
+			if len(literal) >= 6 && strings.ContainsFunc(literal, func(r rune) bool {
+				return unicode.IsLetter(r) || unicode.IsDigit(r)
+			}) {
+				secrets = append(secrets, literal)
+			}
+		}, func(string) bool { return true })
+	}
+	// Match overlapping values longest first, without rescanning replacement text.
+	sort.Slice(secrets, func(i, j int) bool { return len(secrets[i]) > len(secrets[j]) })
+	pairs := make([]string, 0, len(secrets)*2)
+	for _, secret := range secrets {
+		pairs = append(pairs, secret, "[redacted]")
+	}
+	if len(pairs) > 0 {
+		sanitized = strings.NewReplacer(pairs...).Replace(sanitized)
 	}
 	rawBaseURL := strings.TrimSpace(account.GetCredential("base_url"))
 	if rawBaseURL == "" {
@@ -83,8 +115,9 @@ func openAIPassthroughClientErrorField(account *Account, value gjson.Result) str
 func openAIPassthroughClientErrorCode(account *Account, body []byte) string {
 	code := gjson.GetBytes(body, "error.code")
 	// These protocol identifiers carry no diagnostic text or encrypted locator.
-	if code.Type == gjson.String && (code.Str == "invalid_encrypted_content" || code.Str == "thinking_signature_invalid") {
-		return code.Str
+	trimmed := strings.TrimSpace(code.Str)
+	if code.Type == gjson.String && (trimmed == "invalid_encrypted_content" || trimmed == "thinking_signature_invalid") {
+		return redactOpenAIPassthroughAccountSecrets(account, trimmed)
 	}
 	blank := !code.Exists() || code.Type == gjson.Null ||
 		(code.Type == gjson.String && strings.TrimSpace(code.Str) == "")
@@ -95,7 +128,7 @@ func openAIPassthroughClientErrorCode(account *Account, body []byte) string {
 	// Apply the same exact protocol-code exception to the classifier's nested
 	// message fallback. Diagnostic text and every other field stay sanitized.
 	if inner == "invalid_encrypted_content" || inner == "thinking_signature_invalid" {
-		return inner
+		return redactOpenAIPassthroughAccountSecrets(account, inner)
 	}
 	inner = sanitizeOpenAIPassthroughClientErrorText(account, inner)
 	if len(inner) > openAIPassthroughClientErrorFieldMaxBytes || strings.HasPrefix(inner, "{") || strings.HasPrefix(inner, "[") {

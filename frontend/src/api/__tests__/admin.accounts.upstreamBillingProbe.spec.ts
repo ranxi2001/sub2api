@@ -82,6 +82,9 @@ describe('admin account upstream billing probe API', () => {
     await expect(previewUpstreamGroup(source)).resolves.toEqual({ name: '标准组', notes: '共享账号' })
     post.mockResolvedValueOnce({ data: { group_name: '标准组', group_description: '' } })
     await expect(previewUpstreamGroup(source)).resolves.toEqual({ name: '标准组' })
+    const guard = { source: 'synthetic-source', name: 'Original', notes: null }
+    post.mockResolvedValueOnce({ data: { group_name: 'New', sync_guard: guard } })
+    await expect(previewUpstreamGroup(source)).resolves.toEqual({ name: 'New', upstream_group_guard: guard })
     expect(post).toHaveBeenCalledWith('/admin/accounts/upstream-billing-probe/group-preview', source, { signal: undefined })
   })
 })

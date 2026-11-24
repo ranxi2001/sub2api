@@ -141,12 +141,26 @@ func (h *AccountHandler) PreviewUpstreamGroup(c *gin.Context) {
 			account.Proxy = proxy
 		}
 	}
+	// Capture the source and original text before starting the remote request.
+	// No credential or rendered header value is returned in this guard.
+	var guard *service.UpstreamGroupSyncGuard
+	if req.AccountID > 0 {
+		var err error
+		guard, err = service.NewUpstreamGroupSyncGuard(account)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+	}
 	group, err := h.upstreamBillingProbe.PreviewGroup(ctx, account)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
-	response.Success(c, group)
+	response.Success(c, struct {
+		*service.BillingGroupInfo
+		SyncGuard *service.UpstreamGroupSyncGuard `json:"sync_guard,omitempty"`
+	}{group, guard})
 }
 
 func (h *AccountHandler) ProbeUpstreamBillingBatch(c *gin.Context) {
