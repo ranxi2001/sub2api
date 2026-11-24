@@ -1018,10 +1018,10 @@ func writeOpenAIPassthroughErrorEnvelope(c *gin.Context, downstreamStatus int, u
 	c.Data(downstreamStatus, "application/json; charset=utf-8", body)
 }
 
-// isOpenAIInvalidEncryptedContentError 判断上游 400 错误是否为 Responses
+// isOpenAIPassthroughInvalidEncryptedContentError 判断上游 400 错误是否为 Responses
 // reasoning/compaction 密文校验失败（invalid_encrypted_content）。
 // 该错误属于确定性请求失败，客户端需据此识别密文失效或验签失败。
-func isOpenAIInvalidEncryptedContentError(statusCode int, upstreamMsg string, body []byte) bool {
+func isOpenAIPassthroughInvalidEncryptedContentError(statusCode int, upstreamMsg string, body []byte) bool {
 	if statusCode != http.StatusBadRequest {
 		return false
 	}
@@ -1111,6 +1111,10 @@ func openAIPassthroughClientErrorField(account *Account, value gjson.Result) str
 // error.code 是对象、数组或布尔值时不回退，直接视为无 code。
 func openAIPassthroughClientErrorCode(account *Account, body []byte) string {
 	code := gjson.GetBytes(body, "error.code")
+	// These protocol identifiers carry no diagnostic text or encrypted locator.
+	if code.Type == gjson.String && (code.Str == "invalid_encrypted_content" || code.Str == "thinking_signature_invalid") {
+		return code.Str
+	}
 	blank := !code.Exists() || code.Type == gjson.Null ||
 		(code.Type == gjson.String && strings.TrimSpace(code.Str) == "")
 	if !blank {
@@ -1337,7 +1341,7 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 	// （shouldFailoverOpenAIPassthroughResponse 已保证不切号），客户端需要其
 	// error.code/param/message 做明确处理（如丢弃失效加密思考块或触发自动压缩）；
 	// 在净化信封内仅保留标准字段并脱敏，不暴露上游额外字段与敏感头。
-	if isOpenAIInvalidEncryptedContentError(resp.StatusCode, upstreamMsg, body) {
+	if isOpenAIPassthroughInvalidEncryptedContentError(resp.StatusCode, extractUpstreamErrorMessage(body), body) {
 		writeOpenAIPassthroughStructuredErrorEnvelope(
 			c,
 			resp.StatusCode,

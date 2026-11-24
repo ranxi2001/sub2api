@@ -2,7 +2,6 @@ package service
 
 import (
 	"net/http"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -20,6 +19,7 @@ func (s *OpenAIGatewayService) writeOpenAIContextLimitError(resp *http.Response,
 	if !isOpenAIContextWindowError(message, payload) {
 		return false
 	}
+	message = sanitizeOpenAIPassthroughClientErrorText(account, message)
 	if message == "" {
 		message = "Input exceeds the model context window. Compact the conversation and try again."
 	}
@@ -55,7 +55,7 @@ func (s *OpenAIGatewayService) writeOpenAIContextLimitError(resp *http.Response,
 	MarkResponseCommitted(c)
 	errorPayload := gin.H{"type": errorType, "code": code, "message": message}
 	for _, path := range []string{"response.error.param", "error.param"} {
-		if param := strings.TrimSpace(gjson.GetBytes(payload, path).String()); param != "" {
+		if param := openAIPassthroughClientErrorField(account, gjson.GetBytes(payload, path)); param != "" {
 			errorPayload["param"] = param
 			break
 		}

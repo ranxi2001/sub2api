@@ -71,7 +71,8 @@ func TestOpenAIGatewayService_APIKeyPassthrough_InvalidEncryptedContentPreserves
 	require.Equal(t, "invalid_request_error", gjson.Get(body, "error.type").String())
 	require.Equal(t, "invalid_encrypted_content", gjson.Get(body, "error.code").String())
 	require.Equal(t, "input", gjson.Get(body, "error.param").String())
-	require.Contains(t, gjson.Get(body, "error.message").String(), "Encrypted content could not be decrypted or parsed.")
+	require.Equal(t, openAIEncryptedErrorRedacted, gjson.Get(body, "error.message").String())
+	require.NotContains(t, body, "gAAAAA_fake")
 	require.NotContains(t, body, "sk-upstream-secret")
 	require.NotContains(t, body, "secret-upstream.example")
 	require.False(t, gjson.Get(body, "debug").Exists())
@@ -95,7 +96,7 @@ func TestOpenAIGatewayService_APIKeyPassthrough_InvalidEncryptedContentRedactsUp
 				StatusCode: http.StatusBadRequest,
 				Header:     http.Header{"Content-Type": []string{"application/json"}},
 				Body: io.NopCloser(strings.NewReader(
-					`{"error":{"message":"https://secret-upstream.example/v1?key=secret123 rejected encrypted content for sk-test-secret-key","type":"invalid_request_error","code":"invalid_encrypted_content","param":"input"}}`,
+					`{"error":{"message":"https://secret-upstream.example/v1?key=secret123 rejected input for sk-test-secret-key","type":"invalid_request_error","code":"invalid_encrypted_content","param":"input"}}`,
 				)),
 			}},
 		}
@@ -329,7 +330,7 @@ func TestOpenAIGatewayService_APIKeyPassthrough_ContextWindowPreservesCodeAndCom
 		events := parseCompactBridgeSSE(t, stripKeepaliveComments(rec.Body.String()))
 		require.Len(t, events, 1)
 		require.Equal(t, "response.failed", events[0][0])
-		require.Contains(t, gjson.Get(events[0][1], "response.error.message").String(), "could not be verified")
+		require.Equal(t, openAIEncryptedErrorRedacted, gjson.Get(events[0][1], "response.error.message").String())
 		// 心跳已提交时 error.code 也必须保留，否则 compact 流上客户端仍无法识别该错误。
 		require.Equal(t, "invalid_encrypted_content", gjson.Get(events[0][1], "response.error.code").String())
 	})
@@ -448,7 +449,7 @@ func TestOpenAIGatewayService_APIKeyPassthrough_StructuredErrorHardening(t *test
 			map[string]any{"api_key": "sk-test"})
 		require.Equal(t, http.StatusBadRequest, rec.Code)
 		body := rec.Body.String()
-		require.False(t, gjson.Get(body, "error.code").Exists())
+		require.Equal(t, "context_length_exceeded", gjson.Get(body, "error.code").String())
 		require.NotContains(t, body, "tok-abcdef")
 		require.Contains(t, gjson.Get(body, "error.message").String(), "exceeds the context window")
 	})
