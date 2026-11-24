@@ -59,7 +59,7 @@ return {config:request,status:200,statusText:'OK',headers:{},data:{code:0,data}}
 };
 window.preview=mount(View,{attachTo:'#app',global:{plugins:[pinia,i18n],stubs:{
 AppLayout:{setup(_, {slots}){return()=>h('main',{class:'min-h-screen bg-gray-50 p-6 text-gray-900'},slots.default?.())}},
-UsageStatsCards:true,ModelDistributionChart:true,GroupDistributionChart:true,EndpointDistributionChart:true,TokenUsageTrend:true,TrafficPanel:true,UsageTable:true
+UsageStatsCards:true,ModelDistributionChart:true,GroupDistributionChart:true,EndpointDistributionChart:true,TokenUsageTrend:true,UsageTable:true
 }}});
 `, { flag: 'wx' })
   process.chdir(root)
@@ -68,7 +68,11 @@ UsageStatsCards:true,ModelDistributionChart:true,GroupDistributionChart:true,End
     resolve: { alias: { '@': join(root, 'src') } },
     plugins: [{ name: 'http2-filter-preview', enforce: 'pre', load(id) {
       const clean = id.split('?')[0]
-      if (before && !id.includes('?') && clean === join(root, 'src/views/user/UsageView.vue')) return git('show', baseline + ':frontend/src/views/user/UsageView.vue')
+      if (before && !id.includes('?') && clean === join(root, 'src/views/user/UsageView.vue')) {
+        // The historical view imports the retired panel. This preview exercises the error tab only.
+        return git('show', baseline + ':frontend/src/views/user/UsageView.vue')
+          .replace("import TrafficPanel from '@/components/usage/TrafficPanel.vue'", "const TrafficPanel = { render: () => null }")
+      }
     }, configureServer(vite) {
       vite.middlewares.use((request, response, next) => {
         if (request.url === '/' || request.url?.startsWith('/?')) {

@@ -175,7 +175,6 @@
         <button v-if="errorViewEnabled" class="tab" :class="{ 'tab-active': activeTab === 'errors' }" @click="switchToErrors">
           {{ t('usage.tabs.errors') }}
         </button>
-        <button class="tab" :class="{ 'tab-active': activeTab === 'traffic' }" @click="activeTab = 'traffic'">{{ t('traffic.title') }}</button>
         <div class="flex items-center gap-1">
           <button type="button" class="tab" :class="{ 'tab-active': activeTab === 'api' }" @click="activeTab = 'api'">{{ t('usageApi.title') }}</button>
           <NewFeatureBadge v-if="authStore.isAdmin" :notice-id="NEW_FEATURE_NOTICES.usageRecordsApi" :user-id="authStore.user?.id" />
@@ -221,7 +220,6 @@
         @ipGeoBatchFailed="handleIpGeoBatchFailed"
       />
       <UsageApiGuide v-if="activeTab === 'api'" />
-      <TrafficPanel v-if="activeTab === 'traffic'" :api-key-options="apiKeyOptions" class="card" />
     </div>
     <ExportProgressDialog
       :show="exportProgress.show"
@@ -252,7 +250,6 @@ import UsageApiGuide from '@/components/usage/UsageApiGuide.vue'
 import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
 import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import { useAuthStore } from '@/stores/auth'
-import TrafficPanel from '@/components/usage/TrafficPanel.vue'
 import ModelDistributionChart from '@/components/charts/ModelDistributionChart.vue'
 import GroupDistributionChart from '@/components/charts/GroupDistributionChart.vue'
 import EndpointDistributionChart from '@/components/charts/EndpointDistributionChart.vue'
@@ -388,7 +385,7 @@ const groupDistributionMetric = ref<DistributionMetric>('tokens')
 const endpointDistributionMetric = ref<DistributionMetric>('tokens')
 const endpointDistributionSource = ref<EndpointSource>('inbound')
 const tabBar = ref<HTMLElement | null>(null)
-const activeTab = ref<'usage' | 'errors' | 'traffic' | 'api'>('usage')
+const activeTab = ref<'usage' | 'errors' | 'api'>('usage')
 const showUsageControls = computed(() => activeTab.value === 'usage' || activeTab.value === 'errors')
 const errorViewEnabled = computed(() => appStore.cachedPublicSettings?.allow_user_view_error_requests ?? false)
 const includeCacheRate = computed(() => showUsageCacheRate(appStore.cachedPublicSettings, 'user'))
