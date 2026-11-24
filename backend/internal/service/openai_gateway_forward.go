@@ -170,6 +170,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		return nil, markOpenAIInitialAdmissionError(admissionErr)
 	}
 	account = latest
+	body = normalizeQwenRequestEffort(account, body, "", "reasoning.effort")
 	if err := CheckUpstreamModeration(ctx, c, account); err != nil {
 		return nil, err
 	}

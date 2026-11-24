@@ -219,5 +219,7 @@ backend/internal/handler/model_plaza_currency_test.go
 backend/internal/handler/gateway_anthropic_media_test.go
 backend/internal/handler/gateway_anthropic_tool_media_test.go
 
-# Usage record pagination and CSV tests require the consolidated usage handler.
+# Match usage record and Qwen effort tests to the APIs in a full historical
+# worktree. The current candidate runs both with their production sources.
 backend/internal/handler/usage_records_test.go
+backend/internal/service/qwen_reasoning_effort_test.go

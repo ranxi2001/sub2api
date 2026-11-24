@@ -114,8 +114,9 @@ jobs:
           print(f'fixture ownership: shared={len(shared)} local={len(local)} intersection=empty')
           PY
           bash "$GITHUB_WORKSPACE/.github/scripts/exclude-later-http2-red-fixtures.sh" "$baseline" . "$EXPECTED_HEAD_SHA" | tee "$RUNNER_TEMP/issue805-evidence/http2-exclusions.txt"
-          # The shared owner above restores this candidate-only fixture absent.
-          # Verify its baseline, candidate blob and resulting deletion; never rm twice.
+          # The HTTP2 helper calls prepare-upstream-v0222-red-fixtures.py via
+          # prepare-free-fast-red-fixtures.sh. That shared owner alone removes
+          # usage_records_test.go; verify its deletion without removing it again.
           target=backend/internal/handler/usage_records_test.go
           if git cat-file -e "$baseline:$target" 2>/dev/null; then exit 1; fi
           candidate_blob=$(git rev-parse "$EXPECTED_HEAD_SHA:$target")

@@ -121,8 +121,7 @@ func (s *OpenAIGatewayService) forwardResponsesViaNativeAnthropic(
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
 	// Bill the Anthropic effort actually sent upstream (for example xhigh → max).
-	reasoningEffort := NormalizeClaudeOutputEffort(gjson.GetBytes(forwardedBody, "output_config.effort").String())
-	reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, forwardedBody, upstreamModel)
+	reasoningEffort := nativeMessagesUsageEffort(account, forwardedBody, upstreamModel)
 
 	if _, err := s.admitOpenAITurn(ctx, c, account, upstreamModel, forwardedBody); err != nil {
 		return nil, err
