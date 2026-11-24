@@ -44,7 +44,7 @@ SPECS = [VIEW, API,
          "src/components/common/__tests__/NewFeatureBadge.spec.ts",
          "src/stores/__tests__/newFeatureNotices.spec.ts"]
 REQUIRED_TITLES = {
-    VIEW: [f"protects a completed {label} edit from a delayed group preview" for label in
+    VIEW: [f"protects a completed '{label}' edit from a delayed group preview" for label in
            ["name", "notes", "both text fields", "credentials", "URL", "protocol URL", "proxy", "platform", "unrelated priority", "unchanged"]]
           + [f"keeps local text on {scenario}" for scenario in ["preview failure", "patch conflict", "missing guard", "unmounted"]],
     API: ["maps upstream group text to editable fields and skips empty values"],
