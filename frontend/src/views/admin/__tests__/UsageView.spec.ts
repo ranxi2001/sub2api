@@ -903,7 +903,7 @@ describe('admin UsageView ranking tab', () => {
     expect(wrapper.find('[data-test="ranking"]').exists()).toBe(false)
 
     const tabs = wrapper.findAll('[data-testid="usage-detail-tab"]')
-    expect(tabs).toHaveLength(6)
+    expect(tabs).toHaveLength(5)
     expect(wrapper.find('[data-test="connection-tab"]').exists()).toBe(false)
     await tabs[2].trigger('click')
     await flushPromises()

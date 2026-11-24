@@ -79,7 +79,7 @@ func TestGatewayRoutesGroupModelAllowlistMountedOnEveryGatewayRoute(t *testing.T
 	source := string(routeSource)
 
 	// rootRoute helper：apiKeyAuth 之后、compositeTarget 之前。
-	rootHelper := regexp.MustCompile(regexp.QuoteMeta(`r.Handle(method, path, traffic, limit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), captureTraffic, imageAdmission, groupModelAllowlist, rejectConflictingFields, apiKeyModelPolicy, groupCodexCLIOnly, groupBlockSubagents, groupAntiDistillation, groupStreamOnly, apiKeyLongContext, podRoute, compositeTarget, apiKeyLongContext, requireGroupAnthropic, handler)`))
+	rootHelper := regexp.MustCompile(regexp.QuoteMeta(`r.Handle(method, path, limit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), captureTraffic, imageAdmission, groupModelAllowlist, rejectConflictingFields, apiKeyModelPolicy, groupCodexCLIOnly, groupBlockSubagents, groupAntiDistillation, groupStreamOnly, apiKeyLongContext, podRoute, compositeTarget, apiKeyLongContext, requireGroupAnthropic, handler)`))
 	require.Regexp(t, rootHelper, source,
 		"root alias helper must place the allowlist after apiKeyAuth, then protection and stream-only admission before compositeTarget")
 
@@ -104,7 +104,7 @@ func TestGatewayRoutesGroupModelAllowlistMountedOnEveryGatewayRoute(t *testing.T
 	}
 
 	// codexDirect 链是一条 Use 调用，直接断言顺序。
-	codexDirect := regexp.MustCompile(regexp.QuoteMeta(`codexDirect.Use(traffic, groupBodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), captureTraffic, imageAdmission, groupModelAllowlist, rejectConflictingFields, apiKeyModelPolicy, groupCodexCLIOnly, groupBlockSubagents, groupAntiDistillation, groupStreamOnly, apiKeyLongContext, podRoute, compositeTarget, apiKeyLongContext, requireGroupAnthropic)`))
+	codexDirect := regexp.MustCompile(regexp.QuoteMeta(`codexDirect.Use(groupBodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), captureTraffic, imageAdmission, groupModelAllowlist, rejectConflictingFields, apiKeyModelPolicy, groupCodexCLIOnly, groupBlockSubagents, groupAntiDistillation, groupStreamOnly, apiKeyLongContext, podRoute, compositeTarget, apiKeyLongContext, requireGroupAnthropic)`))
 	require.Regexp(t, codexDirect, source, "codexDirect chain must mount the allowlist after auth, then protection and stream-only admission before compositeTarget")
 
 	// 所有带 apiKeyAuth 的根路径路由必须收敛到 rootRoute，避免漏挂。
