@@ -57,17 +57,17 @@
           <label class="input-label mb-0">{{ t('common.name') }}</label>
           <UpstreamGroupSyncButton
             :user-id="authStore.user?.id"
-            v-if="account.type === 'apikey' || (account.platform === 'antigravity' && account.type === 'upstream')"
+            v-if="editingAccount.type === 'apikey' || (editingAccount.platform === 'antigravity' && editingAccount.type === 'upstream')"
             v-model:name="form.name"
             v-model:notes="form.notes"
             :source="upstreamGroupSource"
-            :allow-auto="account.type === 'apikey'"
+            :allow-auto="editingAccount.type === 'apikey'"
             :auto="upstreamGroupSyncEnabled"
             @update:auto="setUpstreamGroupSync"
           />
         </div>
         <input v-model="form.name" type="text" required class="input" data-tour="edit-account-form-name" />
-        <p v-if="account.type === 'apikey' && upstreamGroupSyncEnabled" class="input-hint">
+        <p v-if="editingAccount.type === 'apikey' && upstreamGroupSyncEnabled" class="input-hint">
           {{ t('admin.accounts.upstreamBilling.autoSyncGroupHint') }}
         </p>
       </div>
@@ -5266,13 +5266,13 @@ const billingBaseUrl = computed(() => (
 ).trim())
 const savedBillingBaseUrl = ref('')
 const upstreamGroupSource = computed(() => {
-  const account = props.account
+  const account = editingAccount.value
   if (!account) return null
   const apiKey = editApiKey.value.trim()
   if (apiKey && billingBaseUrl.value) {
     return { platform: account.platform, base_url: billingBaseUrl.value, api_key: apiKey, proxy_id: form.proxy_id }
   }
-  if (billingBaseUrl.value === savedBillingBaseUrl.value && form.proxy_id === account.proxy_id && !apiKey) {
+  if (!platformChanged.value && billingBaseUrl.value === savedBillingBaseUrl.value && form.proxy_id === account.proxy_id && !apiKey) {
     return { account_id: account.id }
   }
   return null
