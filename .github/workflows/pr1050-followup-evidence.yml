@@ -29,7 +29,6 @@ on:
       - 'frontend/src/components/common/__tests__/NewFeatureBadge.spec.ts'
       - 'frontend/src/stores/newFeatureNotices.ts'
       - 'frontend/src/stores/__tests__/newFeatureNotices.spec.ts'
-      - 'frontend/src/constants/newFeatureNotices.ts'
       - 'frontend/src/views/admin/AccountsView.vue'
       - 'frontend/src/views/admin/__tests__/AccountsView.lite.spec.ts'
       - 'frontend/src/views/admin/__tests__/AccountsView.sparkShadow.spec.ts'
