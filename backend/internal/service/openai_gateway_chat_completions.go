@@ -152,6 +152,14 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		return nil, admissionErr
 	}
 	account = latest
+	// Alias normalization must follow the payload shape: Responses-shaped
+	// Chat requests may bypass the typed converter and go straight upstream.
+	isResponsesShape := !gjson.GetBytes(body, "messages").Exists() && gjson.GetBytes(body, "input").Exists()
+	effortPath := "reasoning_effort"
+	if isResponsesShape {
+		effortPath = "reasoning.effort"
+	}
+	body = normalizeQwenRequestEffort(account, body, defaultMappedModel, effortPath)
 	proxyCtx, releaseProxy, proxyErr := s.beginOpenAIRequestProxy(ctx, c, account)
 	if proxyErr != nil {
 		return nil, proxyErr
@@ -202,7 +210,6 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	// Cursor compatibility: some clients send a Responses-shaped body to the
 	// /v1/chat/completions URL. Detect it before protocol routing so adaptive
 	// accounts never forward the body unchanged to a Chat Completions endpoint.
-	isResponsesShape := !gjson.GetBytes(body, "messages").Exists() && gjson.GetBytes(body, "input").Exists()
 	inbound := APIProtocolChatCompletions
 	if isResponsesShape {
 		inbound = APIProtocolResponses

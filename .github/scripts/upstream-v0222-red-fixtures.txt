@@ -218,3 +218,8 @@ backend/internal/handler/model_plaza_currency_test.go
 # Frozen candidate blobs: eb860ff6bb7a0900ed1243d29d58c7ae4ae0eb83 / a69b0b585c25073321953af8630d64c743db2893.
 backend/internal/handler/gateway_anthropic_media_test.go
 backend/internal/handler/gateway_anthropic_tool_media_test.go
+
+# Match usage record and Qwen effort tests to the APIs in a full historical
+# worktree. The current candidate runs both with their production sources.
+backend/internal/handler/usage_records_test.go
+backend/internal/service/qwen_reasoning_effort_test.go
