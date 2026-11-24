@@ -64,7 +64,7 @@ apiClient.defaults.adapter=async request=>{
   // Omit this field deliberately: test the real frontend initializer, not a synthetic server default.
   data=state.settings?structuredClone(state.settings):structuredClone(common);
   if(method==='get')state.reads.push(structuredClone(data));
- }else if(path==='/admin/settings'||path==='/settings/public')data={...structuredClone(baseSettingsResponse),subscription_enabled:false,lottery_enabled:false};
+ }else if(path==='/admin/settings'||path==='/settings/public')data={...structuredClone(baseSettingsResponse),site_logo:'/'+mode+'/logo.svg',subscription_enabled:false,lottery_enabled:false};
  else if(path==='/admin/system/check-updates')data={current_version:'fixture',latest_version:'fixture',has_update:false,build_type:'source'};
  else if(path.includes('/announcements')||path.includes('/subscriptions/active'))data=[];
  else if(path.includes('/groups'))data=[];
