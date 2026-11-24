@@ -4,10 +4,21 @@ vi.mock('@/api/admin/accounts', () => ({
   getAntigravityDefaultModelMapping: vi.fn()
 }))
 
-import { buildModelMappingObject, getModelsByPlatform, getPresetMappingsByPlatform, reconcileUpstreamModelMapping, splitModelMappingObject } from '../useModelWhitelist'
+import { allModels, buildModelMappingObject, getModelsByPlatform, getPresetMappingsByPlatform, reconcileUpstreamModelMapping, splitModelMappingObject } from '../useModelWhitelist'
 import { BUILTIN_PLATFORM_CATALOG, resetPlatformCatalog, setPlatformCatalog } from '@/constants/platformCatalog'
 
 describe('useModelWhitelist', () => {
+  it('offers current Qwen API IDs in platform presets and dropdown options', () => {
+    const models = getModelsByPlatform('qwen')
+    const options = allModels.map(model => model.value)
+    for (const id of ['qwen4-max', 'qwen3.8-max', 'qwen3.8-max-0902', 'qwen3.8-flash', 'qwen3.8-27b']) {
+      expect(models).toContain(id)
+      expect(options).toContain(id)
+    }
+    expect(new Set(models).size).toBe(models.length)
+    expect(models).not.toContain('deepseek-v4-pro')
+  })
+
   it('leaves gateway model defaults unrestricted without changing legacy platform defaults', () => {
     expect(getModelsByPlatform('gateway')).toEqual([])
     expect(getModelsByPlatform('anthropic').length).toBeGreaterThan(0)
