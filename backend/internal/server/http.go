@@ -132,15 +132,9 @@ func ProvideRouter(
 	})
 	lifecycle.onDrain = append(lifecycle.onDrain, manager.Stop)
 	r.Use(manager.Ingress())
-	if handlers.Admin != nil && handlers.Admin.Usage != nil {
-		stop, err := handlers.Admin.Usage.ConfigureTrafficDelivery(func() string {
-			return filepath.Join(setup.GetDataDir(), "user-traffic-pending")
-		})
-		if err != nil {
-			log.Printf("Traffic statistics disabled: %v", err)
-		} else {
-			lifecycle.onDrain = append(lifecycle.onDrain, stop)
-		}
+	// Each node owns its local spool from the retired user traffic recorder.
+	if err := removeLegacyTrafficFiles(filepath.Join(setup.GetDataDir(), "user-traffic-pending")); err != nil {
+		slog.Warn("could not remove legacy user traffic spool", "error", err)
 	}
 	r.GET("/internal/serverless/probe", manager.ProbeHandler)
 	return SetupRouter(r, handlers, jwtAuth, optionalJWTAuth, adminAuth, apiKeyAuth, auditLog, stepUpAuth, apiKeyService, subscriptionService, opsService, settingService, compositeResolver, cfg, redisClient)
