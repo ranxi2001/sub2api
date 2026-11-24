@@ -23,7 +23,7 @@ func readAccountUsageProfit(ctx context.Context, tx *sql.Tx, f service.UpstreamO
 	// sort and direction are allowlisted by NormalizeProfitOperationsFilter.
 	q := financialWindowBounds + `, cfg AS (
  SELECT c.*,a.extra->'image_purchase_prices' AS image_prices,
-        a.extra->>'token_procurement_basis'='standard_charge' AS standard_tokens
+        c.account_type<>'gateway' AND a.extra->>'token_procurement_basis'='standard_charge' AS standard_tokens
  FROM jsonb_to_recordset($4::jsonb) AS c(id bigint,name text,key text,channel_id bigint,channel_name text,channel_code text,
  channel_remark text,assignment text,schedulable boolean,concurrency integer,status text,deleted boolean,cost_basis text,multiplier numeric,account_type text)
  LEFT JOIN accounts a ON a.id=c.id
@@ -31,7 +31,8 @@ func readAccountUsageProfit(ctx context.Context, tx *sql.Tx, f service.UpstreamO
  SELECT DISTINCT r.bucket FROM account_usage_financial_rollups r
  LEFT JOIN cfg c ON c.id=r.account_id CROSS JOIN bounds
  WHERE bucket>=lo AND bucket<hi AND ($3::bigint=0 OR r.account_id=$3)
-   AND (procurement_source IS NULL OR (c.standard_tokens AND token_basis_projected IS NOT TRUE AND procurement_source IN ('legacy_rate','snapshot')))
+   AND (procurement_source IS NULL OR procurement_source='account' OR
+        (c.standard_tokens AND token_basis_projected IS NOT TRUE AND procurement_source IN ('legacy_rate','snapshot','legacy_token_debit')))
 ), facts AS (
  SELECT account_id,group_id,model,public_model,upstream_model,requests,standard_charge,user_charge,account_charge,procurement_source,procurement_amount,image_quantities,standard_token_amount
  FROM account_usage_financial_rollups,bounds WHERE bucket>=lo AND bucket<hi AND procurement_source IS NOT NULL AND NOT EXISTS (SELECT 1 FROM old_buckets b WHERE b.bucket=account_usage_financial_rollups.bucket) AND ($3::bigint=0 OR account_id=$3)
@@ -44,7 +45,8 @@ func readAccountUsageProfit(ctx context.Context, tx *sql.Tx, f service.UpstreamO
 ), priced AS (
  SELECT f.*,c.standard_tokens,COALESCE(c.key,'unknown:account_missing') AS upstream_key,c.name AS account_name,c.channel_id,c.channel_name,c.channel_code,
  c.channel_remark,c.assignment,CASE $5 WHEN 'public' THEN public_model WHEN 'recorded' THEN model ELSE COALESCE(upstream_model,'(unknown upstream model)') END AS model_key,
- CASE WHEN procurement_source='snapshot' AND c.standard_tokens AND standard_token_amount IS NOT NULL THEN standard_token_amount
+ CASE WHEN procurement_source='legacy_token_debit' AND c.standard_tokens THEN standard_token_amount
+      WHEN procurement_source='snapshot' AND c.standard_tokens AND standard_token_amount IS NOT NULL THEN standard_token_amount
       WHEN procurement_source='legacy_rate' AND c.cost_basis='current_saved_multiplier' THEN
         (CASE WHEN c.standard_tokens THEN COALESCE(standard_token_amount,procurement_amount) ELSE procurement_amount END)*c.multiplier
       WHEN procurement_source='legacy_image_account' AND NULLIF(c.image_prices,'{}'::jsonb) IS NULL THEN account_charge
@@ -68,7 +70,7 @@ func readAccountUsageProfit(ctx context.Context, tx *sql.Tx, f service.UpstreamO
  COALESCE(sum(procurement_cost) FILTER(WHERE procurement_source='settled'),0) AS covered_reconciled_cost,
  COALESCE(sum(procurement_cost) FILTER(WHERE procurement_source<>'settled'),0) AS covered_estimated_cost,
  COALESCE(sum(requests) FILTER(WHERE (procurement_source IN ('legacy_rate','legacy_image') OR
-   (procurement_source='snapshot' AND standard_tokens AND standard_token_amount IS NOT NULL)) AND procurement_cost IS NOT NULL),0) AS current_config_requests,
+   (procurement_source IN ('snapshot','legacy_token_debit') AND standard_tokens AND standard_token_amount IS NOT NULL)) AND procurement_cost IS NOT NULL),0) AS current_config_requests,
  'procurement_coverage' AS cost_source,CASE WHEN $10='upstream' THEN max(channel_id) END AS channel_id,
  max(channel_code) AS channel_code,max(channel_remark) AS channel_remark,max(assignment) AS assignment
  FROM named GROUP BY GROUPING SETS ((key),())
