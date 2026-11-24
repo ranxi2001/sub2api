@@ -10,7 +10,7 @@ import (
 const AccountCostMultiplierExtraKey = "cost_multiplier"
 const AccountCostAutoSyncExtraKey = "cost_multiplier_auto_sync"
 
-// TokenProcurementBasisKey selects the verified price book for unit-rate token usage.
+// TokenProcurementBasisKey selects the verified price book for token usage.
 const TokenProcurementBasisKey = "token_procurement_basis"
 const TokenProcurementStandard = "standard_charge"
 const TokenProcurementAccount = "account_stats"
