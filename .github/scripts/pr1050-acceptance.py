@@ -36,6 +36,7 @@ LEAVES = {
 VIEW = "src/views/admin/__tests__/AccountsView.lite.spec.ts"
 API = "src/api/__tests__/admin.accounts.upstreamBillingProbe.spec.ts"
 SPECS = [VIEW, API,
+         "src/views/admin/__tests__/AccountsView.sparkShadow.spec.ts",
          "src/components/account/__tests__/HeaderOverrideEditor.spec.ts",
          "src/components/account/__tests__/CreateAccountModal.spec.ts",
          "src/components/account/__tests__/EditAccountModal.spec.ts",
@@ -47,6 +48,8 @@ REQUIRED_TITLES = {
            ["name", "notes", "both text fields", "credentials", "URL", "protocol URL", "proxy", "platform", "unrelated priority", "unchanged"]]
           + [f"keeps local text on {scenario}" for scenario in ["preview failure", "patch conflict", "missing guard", "unmounted"]],
     API: ["maps upstream group text to editable fields and skips empty values"],
+    "src/views/admin/__tests__/AccountsView.sparkShadow.spec.ts": [
+        "仅将具有安全 base_url 的 API Key 账号名称链接到站点主页"],
     "src/components/account/__tests__/HeaderOverrideEditor.spec.ts": [
         "adds a suggested row when no value input is being edited",
         "leaves the name empty when the suggested name is taken by another value",

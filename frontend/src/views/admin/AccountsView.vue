@@ -272,7 +272,7 @@
                   v-if="accountHomepageUrl(row)"
                   :content="accountHomepageUrl(row)"
                   width-class="w-max max-w-sm break-all"
-                  class="-ml-1"
+                  class="-ml-1 self-start"
                 >
                   <template #trigger>
                     <a

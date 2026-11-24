@@ -32,6 +32,7 @@ on:
       - 'frontend/src/constants/newFeatureNotices.ts'
       - 'frontend/src/views/admin/AccountsView.vue'
       - 'frontend/src/views/admin/__tests__/AccountsView.lite.spec.ts'
+      - 'frontend/src/views/admin/__tests__/AccountsView.sparkShadow.spec.ts'
       - 'frontend/src/api/admin/accounts.ts'
       - 'frontend/src/api/__tests__/admin.accounts.upstreamBillingProbe.spec.ts'
       - 'frontend/src/i18n/**'
@@ -66,13 +67,19 @@ jobs:
           --health-cmd "redis-cli ping"
           --health-interval 5s --health-timeout 5s --health-retries 12
     env:
-      EVIDENCE_DIR: ${{ runner.temp }}/pr1050-regressions
       SUB2API_TEST_POSTGRES_DSN: postgres://fixture:fixture@127.0.0.1:15432/sub2api_test?sslmode=disable
       SUB2API_TEST_REDIS_URL: redis://127.0.0.1:16379/0
       GOMAXPROCS: '2'
       GOFLAGS: '-p=2'
       NODE_OPTIONS: --max-old-space-size=6144
     steps:
+      - name: Initialize evidence paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          EVIDENCE_DIR="$RUNNER_TEMP/pr1050-regressions"
+          printf 'EVIDENCE_DIR=%s\n' "$EVIDENCE_DIR" >> "$GITHUB_ENV"
+          mkdir -p "$EVIDENCE_DIR"
       - uses: actions/checkout@v6
         with:
           ref: ${{ env.EXPECTED_HEAD_SHA }}
@@ -112,12 +119,21 @@ jobs:
     timeout-minutes: 35
     env:
       SOURCE_BASE: c3f5cbde082f8785aaa9eae59ce9e6bc2542706c
-      BASELINE_ROOT: ${{ runner.temp }}/pr1050-before/frontend
-      CANDIDATE_ROOT: ${{ runner.temp }}/pr1050-after/frontend
-      EVIDENCE_DIR: ${{ runner.temp }}/pr1050-ui-evidence
-      PLAYWRIGHT_ROOT: ${{ runner.temp }}/pr1050-browser/node_modules/playwright
       NODE_OPTIONS: --max-old-space-size=6144
     steps:
+      - name: Initialize evidence paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASELINE_ROOT="$RUNNER_TEMP/pr1050-before/frontend"
+          CANDIDATE_ROOT="$RUNNER_TEMP/pr1050-after/frontend"
+          EVIDENCE_DIR="$RUNNER_TEMP/pr1050-ui-evidence"
+          PLAYWRIGHT_ROOT="$RUNNER_TEMP/pr1050-browser/node_modules/playwright"
+          printf 'BASELINE_ROOT=%s\n' "$BASELINE_ROOT" >> "$GITHUB_ENV"
+          printf 'CANDIDATE_ROOT=%s\n' "$CANDIDATE_ROOT" >> "$GITHUB_ENV"
+          printf 'EVIDENCE_DIR=%s\n' "$EVIDENCE_DIR" >> "$GITHUB_ENV"
+          printf 'PLAYWRIGHT_ROOT=%s\n' "$PLAYWRIGHT_ROOT" >> "$GITHUB_ENV"
+          mkdir -p "$EVIDENCE_DIR"
       - uses: actions/checkout@v6
         with:
           ref: ${{ env.EXPECTED_HEAD_SHA }}
