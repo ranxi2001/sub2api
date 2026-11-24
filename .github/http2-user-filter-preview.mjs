@@ -68,7 +68,11 @@ UsageStatsCards:true,ModelDistributionChart:true,GroupDistributionChart:true,End
     resolve: { alias: { '@': join(root, 'src') } },
     plugins: [{ name: 'http2-filter-preview', enforce: 'pre', load(id) {
       const clean = id.split('?')[0]
-      if (before && !id.includes('?') && clean === join(root, 'src/views/user/UsageView.vue')) return git('show', baseline + ':frontend/src/views/user/UsageView.vue')
+      if (before && !id.includes('?') && clean === join(root, 'src/views/user/UsageView.vue')) {
+        // The historical view imports the retired panel. This preview exercises the error tab only.
+        return git('show', baseline + ':frontend/src/views/user/UsageView.vue')
+          .replace("import TrafficPanel from '@/components/usage/TrafficPanel.vue'", "const TrafficPanel = { render: () => null }")
+      }
     }, configureServer(vite) {
       vite.middlewares.use((request, response, next) => {
         if (request.url === '/' || request.url?.startsWith('/?')) {
