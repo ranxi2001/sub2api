@@ -106,8 +106,6 @@ FRONTEND_CRITICAL_VITEST := \
 	src/components/admin/usage/__tests__/UsageCleanupDialog.spec.ts \
 	src/components/usage/__tests__/UsageApiGuide.spec.ts \
 	src/views/user/__tests__/UsageView.spec.ts \
-	src/components/usage/__tests__/TrafficPanel.spec.ts \
-	src/api/__tests__/traffic.spec.ts \
 	src/views/user/__tests__/UsageEntryView.spec.ts \
 	src/components/admin/usage/__tests__/UsageFilters.spec.ts \
 	src/components/admin/usage/__tests__/LatencyObservabilityPanel.spec.ts \

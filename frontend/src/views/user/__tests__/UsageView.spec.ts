@@ -8,7 +8,6 @@ import UsageView from '../UsageView.vue'
 import UsageApiGuide from '@/components/usage/UsageApiGuide.vue'
 import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
 import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
-import TrafficPanel from '@/components/usage/TrafficPanel.vue'
 import UserErrorRequestsTable from '@/components/user/UserErrorRequestsTable.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import Pagination from '@/components/common/Pagination.vue'
@@ -23,7 +22,6 @@ const {
   getDashboardModels,
   getDashboardSnapshotV2,
   listMyErrorRequests,
-  getTrafficKeys,
   list,
   getAvailable,
   showError,
@@ -36,7 +34,6 @@ const {
   getDashboardModels: vi.fn(),
   getDashboardSnapshotV2: vi.fn(),
   listMyErrorRequests: vi.fn(),
-  getTrafficKeys: vi.fn(),
   list: vi.fn(),
   getAvailable: vi.fn(),
   showError: vi.fn(),
@@ -106,15 +103,6 @@ vi.mock('@/api', () => ({
   userGroupsAPI: {
     getAvailable,
   },
-}))
-
-vi.mock('@/api/traffic', async importOriginal => ({
-  ...await importOriginal<typeof import('@/api/traffic')>(),
-  getTrafficKeys,
-  getTraffic: vi.fn().mockResolvedValue({
-    period: 'day', start: '2026-03-08T00:00:00Z', end: '2026-03-09T00:00:00Z',
-    requests: 0, upload_bytes: 0, download_bytes: 0, total_bytes: 0, items: [], trend: [],
-  }),
 }))
 
 const appStoreState = vi.hoisted(() => ({
@@ -224,7 +212,6 @@ describe('user UsageView', () => {
     getDashboardModels.mockReset()
     getDashboardSnapshotV2.mockReset()
     listMyErrorRequests.mockReset()
-    getTrafficKeys.mockReset().mockResolvedValue([])
     list.mockReset()
     getAvailable.mockReset()
     showError.mockReset()
@@ -299,19 +286,19 @@ describe('user UsageView', () => {
     }
   })
 
-  it.each([false, true])('opens the fourth tab without loading data (admin=%s)', async (admin) => {
+  it.each([false, true])('opens the API guide tab without loading data (admin=%s)', async (admin) => {
     appStoreState.isAdmin = admin
     const wrapper = mountUsageView()
     await flushPromises()
     const tabs = wrapper.findAll('button.tab')
-    expect(tabs).toHaveLength(4)
-    expect(tabs[3].text()).toBe('usageApi.title')
+    expect(tabs).toHaveLength(3)
+    expect(tabs[2].text()).toBe('usageApi.title')
     const badge = wrapper.findComponent(NewFeatureBadge)
     expect(badge.exists()).toBe(admin)
     if (admin) expect(badge.props()).toMatchObject({ noticeId: NEW_FEATURE_NOTICES.usageRecordsApi, userId: 41 })
     const calls = query.mock.calls.length
     const statCalls = getStats.mock.calls.length
-    await tabs[3].trigger('click')
+    await tabs[2].trigger('click')
     expect(wrapper.findComponent(UsageApiGuide).exists()).toBe(true)
     expect(wrapper.findComponent(UsageTable).exists()).toBe(false)
     expect(wrapper.findComponent(DateRangePicker).exists()).toBe(false)
@@ -334,7 +321,7 @@ describe('user UsageView', () => {
     const wrapper = mountUsageView()
     const tabs = wrapper.findAll('button.tab')
     await tabs[1].trigger('click')
-    await tabs[3].trigger('click')
+    await tabs[2].trigger('click')
     expect(wrapper.findComponent(UsageApiGuide).exists()).toBe(true)
     expect(list.mock.calls[0][3].signal.aborted).toBe(true)
     expect(query.mock.calls[0][1].signal.aborted).toBe(true)
@@ -360,7 +347,7 @@ describe('user UsageView', () => {
     const reload = pendingPage()
     query.mockResolvedValue(page1)
     const wrapper = mountUsageView()
-    const [usage, , , guide] = wrapper.findAll('button.tab')
+    const [usage, , guide] = wrapper.findAll('button.tab')
     const table = () => wrapper.getComponent(UsageTable)
     try {
       await flushPromises()
@@ -411,10 +398,9 @@ describe('user UsageView', () => {
   })
 
   it.each([
-    { path: 'directly', via: [] },
-    { path: 'through usage details', via: ['usage'] },
-    { path: 'through traffic and usage details', via: ['traffic', 'usage'] },
-  ] as const)('reloads the pending error page when returning from the guide $path', async ({ via }) => {
+    { path: 'directly', viaUsage: false },
+    { path: 'through usage details', viaUsage: true },
+  ] as const)('reloads the pending error page when returning from the guide $path', async ({ viaUsage }) => {
     const page = (id: number) => ({ items: [{ id }], total: 30 })
     let finishStale!: (response: ReturnType<typeof page>) => void
     let finishCurrent!: (response: ReturnType<typeof page>) => void
@@ -423,8 +409,7 @@ describe('user UsageView', () => {
       .mockReturnValueOnce(new Promise(resolve => { finishStale = resolve }))
       .mockReturnValueOnce(new Promise(resolve => { finishCurrent = resolve }))
     const wrapper = mountUsageView()
-    const [usage, errors, traffic, guide] = wrapper.findAll('button.tab')
-    const detourTabs = { usage, traffic }
+    const [usage, errors, guide] = wrapper.findAll('button.tab')
     const table = () => wrapper.getComponent(UserErrorRequestsTable)
     try {
       await errors.trigger('click')
@@ -432,7 +417,7 @@ describe('user UsageView', () => {
       expect(table().props()).toMatchObject({ page: 1, rows: [{ id: 1 }], loading: false })
       table().vm.$emit('update:page', 2)
       await guide.trigger('click')
-      for (const tab of via) await detourTabs[tab].trigger('click')
+      if (viaUsage) await usage.trigger('click')
       await errors.trigger('click')
       expect(listMyErrorRequests.mock.calls.map(([params]) => params.page)).toEqual([1, 2, 2])
       expect(table().props()).toMatchObject({ page: 2, rows: [], loading: true })
@@ -454,7 +439,7 @@ describe('user UsageView', () => {
       .mockReturnValueOnce(new Promise(resolve => { finishStale = resolve }))
       .mockResolvedValueOnce({ items: [{ id: 3 }], total: 1 })
     const wrapper = mountUsageView()
-    const [usage, errors, , guide] = wrapper.findAll('button.tab')
+    const [usage, errors, guide] = wrapper.findAll('button.tab')
     try {
       await errors.trigger('click')
       const status = wrapper.findAllComponents(Select).find(select =>
@@ -503,32 +488,9 @@ describe('user UsageView', () => {
     expect(showError).not.toHaveBeenCalled()
   })
 
-  it('loads only the traffic key options when leaving the guide for traffic', async () => {
-    const wrapper = mountUsageView()
-    const [usage, , traffic, guide] = wrapper.findAll('button.tab')
-    try {
-      await guide.trigger('click')
-      const detailRequests = [query, getStats, getDashboardModels, getDashboardSnapshotV2, getAvailable]
-      for (const request of [...detailRequests, list]) request.mockClear()
-      getTrafficKeys.mockResolvedValueOnce([{ id: 2, name: 'traffic key', deleted: false }])
-      await traffic.trigger('click')
-      await flushPromises()
-      expect(wrapper.getComponent(TrafficPanel).getComponent(Select).props('options')).toContainEqual({ value: 2, label: 'traffic key' })
-      expect(getTrafficKeys).toHaveBeenCalledTimes(1)
-      expect(getTrafficKeys).toHaveBeenCalledWith(false, undefined, '', expect.any(AbortSignal))
-      expect(list).not.toHaveBeenCalled()
-      for (const request of [...detailRequests, listMyErrorRequests]) expect(request).not.toHaveBeenCalled()
-      await usage.trigger('click')
-      await flushPromises()
-      for (const request of [...detailRequests, list]) expect(request).toHaveBeenCalledTimes(1)
-    } finally {
-      wrapper.unmount()
-    }
-  })
-
   it('scrolls the tab row into view after rendering the guide only', async () => {
     const wrapper = mountUsageView()
-    const [usage, errors, traffic, guide] = wrapper.findAll('button.tab')
+    const [usage, errors, guide] = wrapper.findAll('button.tab')
     const row = usage.element.parentElement!
     const scrollIntoView = vi.fn(() => {
       expect(wrapper.findComponent(UsageApiGuide).exists()).toBe(true)
@@ -541,22 +503,11 @@ describe('user UsageView', () => {
       expect(scrollIntoView).not.toHaveBeenCalled()
       await guide.trigger('click')
       expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start', behavior: 'instant' })
-      await traffic.trigger('click')
       await errors.trigger('click')
       expect(scrollIntoView).toHaveBeenCalledTimes(1)
     } finally {
       wrapper.unmount()
     }
-  })
-
-  it('passes the same own API key choices to traffic and usage details', async () => {
-    const wrapper = mountUsageView(); await flushPromises()
-    const usageOptions = wrapper.findAllComponents(Select).find(select =>
-      (select.props('options') as SelectOption[]).some(option => option.label === 'demo-key')
-    )!.props('options')
-    await wrapper.findAll('button').find(button => button.text() === 'traffic.title')!.trigger('click')
-    expect(wrapper.getComponent(TrafficPanel).props('apiKeyOptions')).toEqual(usageOptions)
-    wrapper.unmount()
   })
 
   it('loads logs, stats, model stats, and snapshot on first render', async () => {

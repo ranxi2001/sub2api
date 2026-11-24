@@ -357,7 +357,7 @@ describe('observer usage filters', () => {
   })
 })
 
-describe('UsageFilters — identity-only traffic filters', () => {
+describe('UsageFilters — user and API key filters', () => {
   let wrapper: ReturnType<typeof mount>
   beforeEach(() => {
     vi.useFakeTimers()
@@ -368,7 +368,7 @@ describe('UsageFilters — identity-only traffic filters', () => {
     ])
     mockSearchApiKeys.mockReset().mockResolvedValue([{ id: 10, name: 'First key' }])
     wrapper = mount(UsageFilters, {
-      props: { modelValue: defaultFilters(), identityOnly: true, showActions: false, exporting: false, startDate: '', endDate: '' },
+      props: { modelValue: defaultFilters(), showActions: false, exporting: false, startDate: '', endDate: '' },
     })
   })
   afterEach(() => { wrapper.unmount(); vi.useRealTimers() })
@@ -380,14 +380,6 @@ describe('UsageFilters — identity-only traffic filters', () => {
     await wrapper.findAll('button').find(button => button.text().includes(email))!.trigger('click')
     await flushPromises()
   }
-
-  it('renders only shared user/key searches without loading unrelated filter data', async () => {
-    await flushPromises()
-    expect(wrapper.findAll('input')).toHaveLength(2)
-    expect(wrapper.findAllComponents({ name: 'Select' })).toHaveLength(0)
-    expect(mockGroupsList).not.toHaveBeenCalled()
-    expect(wrapper.props('modelValue').start_date).toBe('')
-  })
 
   it('clears the selected key when changing users and loads the new user’s keys', async () => {
     await chooseUser('first@example.test')

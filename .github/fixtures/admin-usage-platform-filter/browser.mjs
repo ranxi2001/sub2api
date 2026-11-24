@@ -57,7 +57,7 @@ const { chromium } = createRequire(path.join(process.env.PLAYWRIGHT_ROOT, 'packa
 const alias = (find, name) => ({ find, replacement: path.join(fixtureDir, `${name}.js`) })
 const server = await createServer({ root: frontend, configFile: false, plugins: [(vueModule.default || vueModule)()], resolve: {alias:[
   alias(/^@\/api\/admin$/, 'api'),alias(/^@\/api\/admin\/usage$/, 'api'),alias('@/stores/auth','auth'),alias('@/stores/app','app'),alias(/^vue-router$/,'router'),alias('@/components/layout/AppLayout.vue','layout'),
-  ...['admin/usage/UsageConnections','admin/usage/LatencyObservabilityPanel','usage/TrafficPanel','admin/usage/UserTokenRanking','admin/usage/UsageCleanupDialog','admin/user/UserBalanceHistoryModal'].map(name=>alias(`@/components/${name}.vue`,'blank')),
+  ...['admin/usage/UsageConnections','admin/usage/LatencyObservabilityPanel','admin/usage/UserTokenRanking','admin/usage/UsageCleanupDialog','admin/user/UserBalanceHistoryModal'].map(name=>alias(`@/components/${name}.vue`,'blank')),
   alias('@/views/admin/ops/components/OpsErrorLogTable.vue','blank'),alias('@/views/admin/ops/components/OpsErrorDetailModal.vue','blank'),
   alias(/^@\/router$/, 'router'),
   {find:'@',replacement:path.join(frontend,'src')},

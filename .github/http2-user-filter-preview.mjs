@@ -59,7 +59,7 @@ return {config:request,status:200,statusText:'OK',headers:{},data:{code:0,data}}
 };
 window.preview=mount(View,{attachTo:'#app',global:{plugins:[pinia,i18n],stubs:{
 AppLayout:{setup(_, {slots}){return()=>h('main',{class:'min-h-screen bg-gray-50 p-6 text-gray-900'},slots.default?.())}},
-UsageStatsCards:true,ModelDistributionChart:true,GroupDistributionChart:true,EndpointDistributionChart:true,TokenUsageTrend:true,TrafficPanel:true,UsageTable:true
+UsageStatsCards:true,ModelDistributionChart:true,GroupDistributionChart:true,EndpointDistributionChart:true,TokenUsageTrend:true,UsageTable:true
 }}});
 `, { flag: 'wx' })
   process.chdir(root)
