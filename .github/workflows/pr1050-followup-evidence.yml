@@ -170,8 +170,42 @@ jobs:
           set -euo pipefail
           npm install --prefix "$RUNNER_TEMP/pr1050-browser" --no-save --ignore-scripts playwright@1.56.1 2>&1 | tee "$EVIDENCE_DIR/browser-install.log"
           "$RUNNER_TEMP/pr1050-browser/node_modules/.bin/playwright" install --with-deps chromium 2>&1 | tee "$EVIDENCE_DIR/chromium-install.log"
-          sudo apt-get update > "$EVIDENCE_DIR/font-package-update.log" 2>&1
-          sudo apt-get install -y fonts-noto-cjk > "$EVIDENCE_DIR/font-package-install.log" 2>&1
+          # Keep APT signature verification; change only this package's download transport.
+          sudo timeout 180s apt-get -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 \
+            -o Acquire::Retries=2 -o APT::Update::Error-Mode=any \
+            -o Acquire::AllowInsecureRepositories=false -o APT::Get::AllowUnauthenticated=false \
+            update > "$EVIDENCE_DIR/font-package-update.log" 2>&1
+          python3 .github/scripts/pr1050-font-metadata.py
+          source "$EVIDENCE_DIR/font-package.env"
+          font_deb="$RUNNER_TEMP/pr1050-fonts-noto-cjk.deb"
+          font_downloaded=false
+          for font_mirror in https://archive.ubuntu.com/ubuntu https://mirrors.edge.kernel.org/ubuntu; do
+            printf 'Download: %s/%s\n' "$font_mirror" "$FONT_FILENAME" >> "$EVIDENCE_DIR/font-package-download.log"
+            if timeout 180s curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+              --retry 2 --retry-delay 2 --retry-max-time 120 --connect-timeout 10 --max-time 60 \
+              --output "$font_deb" "$font_mirror/$FONT_FILENAME" >> "$EVIDENCE_DIR/font-package-download.log" 2>&1; then
+              font_downloaded=true
+              break
+            fi
+          done
+          test "$font_downloaded" = true
+          printf '%s  %s\n' "$FONT_SHA256" "$font_deb" | sha256sum --check | tee "$EVIDENCE_DIR/font-package-integrity.log"
+          test "$(stat --format=%s "$font_deb")" = "$FONT_SIZE"
+          test "$(dpkg-deb --field "$font_deb" Package)" = fonts-noto-cjk
+          test "$(dpkg-deb --field "$font_deb" Version)" = "$FONT_VERSION"
+          test "$(dpkg-deb --field "$font_deb" Architecture)" = "$FONT_ARCHITECTURE"
+          sudo timeout 120s dpkg --install "$font_deb" > "$EVIDENCE_DIR/font-package-install.log" 2>&1
+          test "$(dpkg-query --show --showformat='${Status}' fonts-noto-cjk)" = 'install ok installed'
+          test "$(dpkg-query --show --showformat='${Version}' fonts-noto-cjk)" = "$FONT_VERSION"
+          timeout 60s fc-cache --force > "$EVIDENCE_DIR/font-cache.log" 2>&1
+          font_pattern='Noto Sans CJK SC:lang=zh-cn'
+          font_family="$(fc-match --format='%{family}' "$font_pattern")"
+          font_file="$(fc-match --format='%{file}' "$font_pattern")"
+          printf 'family=%s\nfile=%s\n' "$font_family" "$font_file" > "$EVIDENCE_DIR/font-verification.txt"
+          test "$font_family" = 'Noto Sans CJK SC'
+          test -s "$font_file"
+          dpkg-query --listfiles fonts-noto-cjk | grep -Fx -- "$font_file" >> "$EVIDENCE_DIR/font-verification.txt"
+          fc-list ':family=Noto Sans CJK SC:lang=zh-cn' --format='%{file}\n' | grep -Fx -- "$font_file" >> "$EVIDENCE_DIR/font-verification.txt"
       - name: Capture actual before and after components and interactions
         run: |
           set -euo pipefail
