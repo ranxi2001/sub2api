@@ -7545,6 +7545,9 @@ const handleSubmit = async () => {
     const costExtra: Record<string, unknown> = {
       ...((updatePayload.extra as Record<string, unknown>) || editingAccount.value.extra || {})
     }
+    // This API-only setting has no editor control. Omit the loaded value so
+    // the repository keeps the latest basis, including a concurrent clear.
+    delete costExtra.token_procurement_basis
     const originalPrices = readImagePrices(editingAccount.value.extra)
     if (purchaseTiers.some(tier => String(imagePurchasePrices.value[tier]) !== String(originalPrices[tier]))) {
       const prices: Record<string, number> = {}

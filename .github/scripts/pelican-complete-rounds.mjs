@@ -6,11 +6,96 @@ import { nextDifferentNominal, questionAt, bankVersion } from './pelican-nominal
 const unwrap = value => value?.data ?? value
 const pause = () => new Promise(resolve => setTimeout(resolve, 250))
 
+// Metadata only: no routing, browser evaluation, timers, bodies or headers.
+// Scope is the observed auth request plus this fixture's document routes.
+export function createBrowserLifecycleMetadata(page, readContext, { now = () => performance.now() } = {}) {
+  const paths = new Set(['/login', '/admin/accounts', '/admin/pelican-tests', '/api/v1/auth/me'])
+  const stages = new Set(['browser-startup', 'normal-authentication', 'manual-same-round-a-b-two-samples',
+    'manual-next-round-identity', 'manual-localstorage-reload-history-dom', 'disabled-group-plan-real-ui-api-pg',
+    'account-scheduled-ui-create-a-b', 'account-scheduled-nominal-time-and-real-claim',
+    'account-scheduled-pg-provider-reconciliation', 'account-scheduled-history-detail-dom',
+    'group-scheduled-ui-enable', 'group-scheduled-due-and-real-claim',
+    'group-scheduled-pg-provider-reconciliation', 'group-scheduled-list-detail-dom',
+    'complete-scheduled-rounds', 'post-bootstrap-browser-and-provider-error-lists'])
+  const gates = new Set(['second-nominal-account', 'second-nominal-group', 'deterministic-refusal-account',
+    'deterministic-refusal-group', 'after-refusal-valid-round-account', 'after-refusal-valid-round-group',
+    'ui-edit-account-custom', 'ui-edit-account-random', 'ui-edit-group-custom', 'ui-edit-group-random', 'edited-old-snapshots'])
+  const safePath = raw => {
+    try {
+      const url = new URL(raw)
+      return url.origin === 'http://app:8080' && paths.has(url.pathname) ? url.pathname : null
+    } catch { return null }
+  }
+  const requests = new WeakMap()
+  const events = []
+  const maxEvents = 8192
+  const started = now()
+  const time = () => Math.round((now() - started) * 1000) / 1000
+  let sequence = 0, requestID = 0, navigationID = 0, documentID = 0, nextDocumentID = 0, dropped = 0
+  let documentRequest
+  const scope = () => {
+    const { stage, active_gate } = readContext()
+    return { stage: stages.has(stage) ? stage : 'unlisted', active_gate: gates.has(active_gate) ? active_gate : null }
+  }
+  const record = (event, fields, at = time()) => {
+    if (events.length === maxEvents) { events.shift(); dropped++ }
+    events.push({ sequence: ++sequence, at_ms: at, event, ...scope(), ...fields })
+  }
+  page.on('request', request => {
+    const path = safePath(request.url())
+    if (!path) return
+    const method = request.method()
+    let mainFrame = null
+    // Playwright may not have attached a frame yet for an early document
+    // request. Unknown metadata must not interrupt the original scenario.
+    try { mainFrame = request.frame() === page.mainFrame() } catch { /* keep unknown */ }
+    const documentNavigation = mainFrame === true && request.isNavigationRequest()
+    const context = scope()
+    const data = { request_id: ++requestID, method: ['GET', 'POST'].includes(method) ? method : 'unlisted', path,
+      main_frame: mainFrame, is_navigation_request: documentNavigation, navigation_id: navigationID,
+      document_id: documentID, requested_document_id: documentNavigation ? ++nextDocumentID : null,
+      start_ms: time(), start_stage: context.stage, start_gate: context.active_gate }
+    requests.set(request, data)
+    if (documentNavigation) documentRequest = data
+    record('request-start', data, data.start_ms)
+  })
+  const complete = (request, event) => {
+    const data = requests.get(request)
+    if (!data || data.end_ms !== undefined) return
+    Object.assign(data, { end_ms: time(), end_event: event, end_document_id: documentID, end_navigation_id: navigationID })
+    record(event, { ...data }, data.end_ms)
+    if (event === 'request-failed' && documentRequest === data) documentRequest = undefined
+  }
+  page.on('requestfinished', request => complete(request, 'request-finished'))
+  page.on('requestfailed', request => complete(request, 'request-failed'))
+  page.on('framenavigated', frame => {
+    if (frame !== page.mainFrame()) return
+    const path = safePath(frame.url())
+    if (!path) return
+    // Same-document router navigation also emits framenavigated. Only a
+    // matching main-document request establishes a new document identity.
+    const committed = documentRequest?.path === path ? documentRequest : undefined
+    if (committed) { documentID = committed.requested_document_id; documentRequest = undefined }
+    record(committed ? 'document-commit' : 'frame-navigation', { path, document_id: documentID,
+      navigation_id: navigationID, request_id: committed?.request_id ?? null })
+  })
+  return {
+    navigationIntent(action, url) {
+      const path = safePath(url)
+      if (!['goto', 'reload'].includes(action) || !path) return
+      record('navigation-intent', { action, path, navigation_id: ++navigationID, document_id: documentID })
+    },
+    requestMetadata(request) { const data = requests.get(request); return data ? { ...data } : null },
+    snapshot() { return { version: 1, clock: 'harness monotonic milliseconds since collector start',
+      max_events: maxEvents, dropped_events: dropped, paths: [...paths], events: events.map(event => ({ ...event })) } },
+  }
+}
+
 // Track real request completion across repeated document navigations. A
 // previously reached lifecycle state alone cannot prevent a later auth/settings
 // request from being aborted by the harness. Failures remain in the caller's
 // strict requestfailed inventory; this barrier never filters or retries them.
-export function createPageNavigation(page, { waitForBootstrap = () => Promise.resolve() } = {}) {
+export function createPageNavigation(page, { waitForBootstrap = () => Promise.resolve(), lifecycle } = {}) {
   const pending = new Set()
   const waiters = new Set()
   let activity = 0
@@ -53,12 +138,14 @@ export function createPageNavigation(page, { waitForBootstrap = () => Promise.re
     async goto(url, beforeNavigate = () => {}) {
       await settle()
       beforeNavigate()
+      lifecycle?.navigationIntent('goto', url)
       await Promise.all([waitForBootstrap(url), page.goto(url, { waitUntil: 'load' })])
       await settle()
     },
     async reload(beforeNavigate = () => {}) {
       await settle()
       beforeNavigate()
+      lifecycle?.navigationIntent('reload', page.url?.())
       await Promise.all([waitForBootstrap(page.url?.()), page.reload({ waitUntil: 'load' })])
       await settle()
     },
