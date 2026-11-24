@@ -1371,6 +1371,37 @@ func TestUpstreamBillingProbeLeaderLockCoversStaggeredInstancesInCadenceWindow(t
 	require.Equal(t, int64(1), upstream.calls.Load(), "a staggered instance must not start a second batch inside the cadence window")
 }
 
+type upstreamBillingGroupSyncHTTPStub struct {
+	billingBody     string
+	billingRequests []*http.Request
+	balanceRequests []*http.Request
+	unexpectedPaths []string
+}
+
+func (u *upstreamBillingGroupSyncHTTPStub) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	var body io.ReadCloser
+	switch req.URL.Path {
+	case "/v1/sub2api/billing":
+		u.billingRequests = append(u.billingRequests, req)
+		body = io.NopCloser(strings.NewReader(u.billingBody))
+	case "/v1/usage":
+		u.balanceRequests = append(u.balanceRequests, req)
+		body = upstreamBalanceProbeWalletBody()
+	default:
+		u.unexpectedPaths = append(u.unexpectedPaths, req.URL.Path)
+		return nil, fmt.Errorf("unexpected probe path: %s", req.URL.Path)
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       body,
+	}, nil
+}
+
+func (u *upstreamBillingGroupSyncHTTPStub) DoWithTLS(req *http.Request, proxy string, id int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	return u.Do(req, proxy, id, concurrency)
+}
+
 func TestUpstreamBillingGroupSyncSharesOneProbeAndPreservesLocalFields(t *testing.T) {
 	for _, tt := range []struct {
 		name                        string
@@ -1408,14 +1439,21 @@ func TestUpstreamBillingGroupSyncSharesOneProbeAndPreservesLocalFields(t *testin
 				},
 			}
 			body := `{"object":"sub2api.key_billing","schema_version":1,"billing_scope":"token","group_rate_multiplier":0.5,"resolved_rate_multiplier":0.5,"effective_rate_multiplier":0.5,"peak_rate_enabled":false,"observed_at":"2026-07-13T01:00:00Z",` + tt.fields + "}"
-			upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}}
+			upstream := &upstreamBillingGroupSyncHTTPStub{billingBody: body}
 			repo := &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{account.ID: account}}
 			svc := newUpstreamBillingProbeTestService(repo, upstream, &upstreamBillingProbeSettingRepo{})
 			snapshot, err := svc.probeScheduledAccount(context.Background(), account.ID, 30)
 			require.NoError(t, err)
+			require.Empty(t, upstream.unexpectedPaths)
+			// Group and rate sync share one billing request; balance is fetched separately.
+			require.Len(t, upstream.billingRequests, 1)
+			require.Len(t, upstream.balanceRequests, 1)
+			require.Equal(t, tt.groupSync, upstream.billingRequests[0].URL.Query().Get("include") == "group")
+			require.NotNil(t, snapshot)
 			require.Equal(t, UpstreamBillingProbeStatusOK, snapshot.Status)
-			require.Len(t, upstream.requests, 1)
-			require.Equal(t, tt.groupSync, upstream.lastReq.URL.Query().Get("include") == "group")
+			require.NotNil(t, snapshot.Balance)
+			require.Equal(t, UpstreamBillingProbeStatusOK, snapshot.Balance.Status)
+			require.Equal(t, 12.34, snapshot.Balance.Data["wallet_balance"])
 			require.Equal(t, tt.wantName, account.Name)
 			require.Equal(t, tt.wantNotes, *account.Notes)
 			require.Equal(t, tt.wantRate, *account.RateMultiplier)
