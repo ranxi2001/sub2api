@@ -1,6 +1,8 @@
 package service
 
 import (
+	"strings"
+
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -44,25 +46,40 @@ func normalizeQwenRequestEffort(account *Account, body []byte, defaultModel stri
 	if !qwenEffortModel(model) {
 		return body
 	}
-	// OpenAI-compatible clients may put the Responses spelling on a Chat
-	// request or the flat Chat alias on a Responses request.
+	// Accept either OpenAI spelling, with nested effort winning conflicts just
+	// as requested-effort capture does. Write only the field understood by the
+	// request's protocol (and its converters), retaining reasoning siblings.
+	sourcePath := path
 	if path != "output_config.effort" {
-		path = "reasoning.effort"
-		if !gjson.GetBytes(body, path).Exists() {
-			path = "reasoning_effort"
+		sourcePath = "reasoning.effort"
+		if nested := gjson.GetBytes(body, sourcePath); nested.Type != gjson.String || strings.TrimSpace(nested.Str) == "" {
+			sourcePath = "reasoning_effort"
 		}
 	}
-	effort := gjson.GetBytes(body, path)
-	if effort.Type != gjson.String {
+	effort := gjson.GetBytes(body, sourcePath)
+	if effort.Type != gjson.String || strings.TrimSpace(effort.Str) == "" {
 		return body
 	}
-	target := qwenEffectiveEffort(model, effort.Str)
-	if target != effort.Str {
-		if updated, err := sjson.SetBytes(body, path, target); err == nil {
-			return updated
+	updated, err := sjson.SetBytes(body, path, qwenEffectiveEffort(model, strings.TrimSpace(effort.Str)))
+	if err != nil {
+		return body
+	}
+	if path != "output_config.effort" {
+		alias := "reasoning_effort"
+		if path == "reasoning_effort" {
+			alias = "reasoning.effort"
+		}
+		updated, err = sjson.DeleteBytes(updated, alias)
+		if err != nil {
+			return body
+		}
+		if reasoning := gjson.GetBytes(updated, "reasoning"); reasoning.IsObject() && len(reasoning.Map()) == 0 {
+			if updated, err = sjson.DeleteBytes(updated, "reasoning"); err != nil {
+				return body
+			}
 		}
 	}
-	return body
+	return updated
 }
 
 // The generic OpenAI-to-Anthropic bridge emits Claude's max and synthesizes a
