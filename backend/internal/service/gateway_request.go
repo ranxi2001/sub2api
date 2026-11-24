@@ -857,7 +857,13 @@ func FilterThinkingBlocksForRetry(body []byte, mappedModel string) []byte {
 	}
 
 	var messages []any
-	if err := json.Unmarshal(sliceRawFromBody(body, msgsRes), &messages); err != nil {
+	messagesJSON := sliceRawFromBody(body, msgsRes)
+	if !json.Valid(messagesJSON) {
+		return body
+	}
+	decoder := json.NewDecoder(bytes.NewReader(messagesJSON))
+	decoder.UseNumber() // Preserve tool arguments when rewriting the message history.
+	if err := decoder.Decode(&messages); err != nil {
 		return body
 	}
 
@@ -1350,7 +1356,12 @@ func FilterSignatureSensitiveBlocksForRetry(body []byte, mappedModel string) []b
 	}
 
 	var req map[string]any
-	if err := json.Unmarshal(body, &req); err != nil {
+	if !json.Valid(body) {
+		return body
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber() // json.Marshal also preserves these numbers in downgraded tool text.
+	if err := decoder.Decode(&req); err != nil {
 		return body
 	}
 

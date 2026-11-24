@@ -1,0 +1,71 @@
+name: Claude rectifier settings UI evidence
+
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - '.github/scripts/claude-rectifier-settings-screenshot.mjs'
+      - '.github/workflows/claude-rectifier-settings-ui.yml'
+      - 'frontend/src/views/admin/SettingsView.vue'
+      - 'frontend/src/components/common/Toggle.vue'
+      - 'frontend/src/components/layout/**'
+      - 'frontend/src/api/admin/settings.ts'
+      - 'frontend/src/api/client.ts'
+      - 'frontend/src/style.css'
+      - 'frontend/src/styles/**'
+      - 'frontend/tailwind.config.js'
+      - 'frontend/postcss.config.js'
+      - 'frontend/package.json'
+      - 'frontend/pnpm-lock.yaml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: claude-rectifier-ui-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  screenshots:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+      NODE_OPTIONS: --max-old-space-size=6144
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Assert exact candidate before browser installation
+        run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Install isolated Chromium for remote loopback rendering
+        run: |
+          npm install --prefix "$RUNNER_TEMP/claude-rectifier-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/claude-rectifier-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Capture real SettingsView CSS and synthetic settings lifecycle
+        env:
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/claude-rectifier-browser/node_modules/playwright
+          SCREENSHOT_DIR: ${{ runner.temp }}/claude-rectifier-ui
+        run: |
+          set -euo pipefail
+          mkdir -p "$SCREENSHOT_DIR"
+          node .github/scripts/claude-rectifier-settings-screenshot.mjs 2>&1 | tee "$SCREENSHOT_DIR/render.log"
+          test -s "$SCREENSHOT_DIR/manifest.json"
+          test -z "$(git status --porcelain)"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: claude-rectifier-ui-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/claude-rectifier-ui
+          if-no-files-found: error
