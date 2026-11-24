@@ -152,6 +152,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		return nil, admissionErr
 	}
 	account = latest
+	body = normalizeQwenRequestEffort(account, body, defaultMappedModel, "reasoning_effort")
 	proxyCtx, releaseProxy, proxyErr := s.beginOpenAIRequestProxy(ctx, c, account)
 	if proxyErr != nil {
 		return nil, proxyErr
