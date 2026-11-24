@@ -31,7 +31,7 @@ func (u qwenEffortHTTPUpstream) DoWithTLS(req *http.Request, p string, a int64, 
 func TestQwenEffortAliasesForwardWireAndResult(t *testing.T) {
 	for _, route := range []struct {
 		name, ingress, protocol string
-		responsesShape         bool
+		responsesShape          bool
 	}{
 		{"native-responses", "/v1/responses", APIProtocolResponses, true},
 		{"responses-to-chat", "/v1/responses", APIProtocolChatCompletions, true},
