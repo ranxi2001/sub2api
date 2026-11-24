@@ -71,7 +71,10 @@ func TestQwenEffortAliasesForwardWireAndResult(t *testing.T) {
 					response := `{"id":"resp_effort","object":"response","status":"completed","model":"qwen4-max","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}`
 					if r.URL.Path == "/v1/chat/completions" {
 						response = `{"id":"chatcmpl_effort","object":"chat.completion","model":"qwen4-max","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`
-					} else if gjson.GetBytes(wire, "stream").Bool() {
+					} else if gjson.GetBytes(wire, "stream").Bool() || route.name == "responses-shaped-chat-to-responses" {
+						// Responses-shaped Chat uses the existing buffered SSE reader
+						// even with stream:false. Match that reader's fixture contract;
+						// this does not assert real provider behavior for stream:false.
 						w.Header().Set("Content-Type", "text/event-stream")
 						response = "data: {\"type\":\"response.completed\",\"response\":" + response + "}\n\n"
 					}
