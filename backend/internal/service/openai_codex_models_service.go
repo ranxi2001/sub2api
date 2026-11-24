@@ -1832,7 +1832,7 @@ func (s *OpenAIGatewayService) fetchNativeCodexModelsManifestWithPolicy(ctx cont
 	headers := make(http.Header)
 	if useAPIKeyUpstream {
 		headers.Set("Authorization", "Bearer "+authToken)
-		credAccount.ApplyHeaderOverrides(headers)
+		credAccount.ApplyHeaderOverrides(ctx, headers)
 	} else {
 		authHeaders, authErr := s.buildOpenAIAuthenticationHeaders(ctx, credAccount, authToken)
 		if authErr != nil {
