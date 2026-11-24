@@ -403,7 +403,9 @@ func TestOpenAIGatewayService_APIKeyPassthrough_NestedErrorCodePreservesProtocol
 						stop := StartOpenAICompactSSEKeepalive(c, time.Hour)
 						defer stop()
 						// Commit a real keepalive synchronously; no scheduler-dependent sleep.
-						require.True(t, c.MustGet(openAICompactSSEKeepaliveKey).(*openAICompactSSEKeepalive).beat())
+						keepalive, ok := c.MustGet(openAICompactSSEKeepaliveKey).(*openAICompactSSEKeepalive)
+						require.True(t, ok)
+						require.True(t, keepalive.beat())
 					}
 					if !tc.classified {
 						ruleSvc := &ErrorPassthroughService{}
@@ -719,7 +721,9 @@ func TestOpenAIGatewayService_APIKeyPassthrough_HeaderOverrideSecrets(t *testing
 						MarkOpenAICompactClientStream(c)
 						stop := StartOpenAICompactSSEKeepalive(c, time.Hour)
 						defer stop()
-						require.True(t, c.MustGet(openAICompactSSEKeepaliveKey).(*openAICompactSSEKeepalive).beat())
+						keepalive, ok := c.MustGet(openAICompactSSEKeepaliveKey).(*openAICompactSSEKeepalive)
+						require.True(t, ok)
+						require.True(t, keepalive.beat())
 					}
 					c.Request = c.Request.WithContext(WithHeaderOverrideRequestScope(c.Request.Context(), 42, 84, nil))
 					code, wantCode := "invalid_encrypted_content", "invalid_encrypted_content"
@@ -781,7 +785,9 @@ func TestOpenAIGatewayService_APIKeyPassthrough_ProtocolCodeWhitespaceAndSecretC
 							MarkOpenAICompactClientStream(c)
 							stop := StartOpenAICompactSSEKeepalive(c, time.Hour)
 							defer stop()
-							require.True(t, c.MustGet(openAICompactSSEKeepaliveKey).(*openAICompactSSEKeepalive).beat())
+							keepalive, ok := c.MustGet(openAICompactSSEKeepaliveKey).(*openAICompactSSEKeepalive)
+							require.True(t, ok)
+							require.True(t, keepalive.beat())
 						}
 						fields := map[string]any{"code": " \t" + code + " ", "message": "The encrypted content gAAAAA_fake could not be verified."}
 						if nested {

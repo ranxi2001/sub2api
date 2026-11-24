@@ -1450,7 +1450,11 @@ func TestUpstreamBillingGroupQueryPreservesExistingParameters(t *testing.T) {
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					if strings.HasSuffix(r.URL.Path, "/usage") {
 						body := upstreamBalanceProbeWalletBody()
-						defer body.Close()
+						defer func() {
+							if err := body.Close(); err != nil {
+								t.Errorf("close upstream balance fixture body: %v", err)
+							}
+						}()
 						_, _ = io.Copy(w, body)
 						return
 					}

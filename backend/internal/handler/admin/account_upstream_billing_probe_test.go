@@ -116,6 +116,10 @@ func TestAccountHandlerUpstreamGroupPreviewBindsGuardAndUpdatePassesIt(t *testin
 	handler.SetUpstreamBillingProbeService(service.NewUpstreamBillingProbeService(nil, transport, nil))
 	router := gin.New()
 	router.POST("/preview", handler.PreviewUpstreamGroup)
+	// Register parameterized routes before the first pooled context is allocated.
+	stub := newStubAdminService()
+	updater := NewAccountHandler(stub, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	router.PUT("/accounts/:id", updater.Update)
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/preview", strings.NewReader(`{"account_id":7}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -134,9 +138,6 @@ func TestAccountHandlerUpstreamGroupPreviewBindsGuardAndUpdatePassesIt(t *testin
 	require.Equal(t, want, result.Data.Guard)
 	require.Equal(t, "Remote group", result.Data.Name)
 
-	stub := newStubAdminService()
-	updater := NewAccountHandler(stub, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
-	router.PUT("/accounts/:id", updater.Update)
 	body, err := json.Marshal(map[string]any{"name": result.Data.Name, "upstream_group_guard": result.Data.Guard})
 	require.NoError(t, err)
 	w = httptest.NewRecorder()
