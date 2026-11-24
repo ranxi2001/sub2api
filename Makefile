@@ -82,6 +82,8 @@ FRONTEND_CRITICAL_VITEST := \
 	src/stores/__tests__/supportTickets.spec.ts \
 	src/views/admin/__tests__/ChannelMonitorView.modeSwitch.spec.ts \
 	src/views/admin/__tests__/AccountQualityView.spec.ts \
+	src/views/admin/__tests__/AccountsView.lite.spec.ts \
+	src/api/__tests__/admin.accounts.upstreamBillingProbe.spec.ts \
 	src/views/admin/__tests__/AccountsView.bulkEdit.spec.ts \
 	src/views/admin/__tests__/AccountsView.declarationRefresh.spec.ts \
 	src/views/admin/__tests__/AccountsView.newAPIConfig.spec.ts \
