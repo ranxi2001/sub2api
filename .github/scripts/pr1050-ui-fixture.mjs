@@ -42,6 +42,10 @@ apiClient.defaults.adapter = async request => {
     data = { concurrency_upgrade_enabled: false }
   } else if (method === 'get' && path === '/admin/tls-fingerprint-profiles') {
     data = []
+  } else if (method === 'get' && path === '/admin/accounts/openai-request-timezones') {
+    data = { default: 'Asia/Singapore', timezones: ['Asia/Singapore', 'UTC'] }
+  } else if (method === 'get' && path === '/admin/accounts/antigravity/default-model-mapping') {
+    data = { 'fixture-antigravity-source': 'fixture-antigravity-target' }
   } else if (method === 'post' && path === '/admin/accounts/upstream-billing-probe/group-preview') {
     const body = typeof request.data === 'string' ? JSON.parse(request.data) : request.data
     const byID = Object.keys(body).length === 1 && body.account_id === 1050
