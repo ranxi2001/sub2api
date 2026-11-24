@@ -2235,7 +2235,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	applyOpenCodeUpstreamUserAgent(account, targetURL, req.Header)
 
 	// 账号级请求头覆写（仅 openai api_key 账号启用时生效；OAuth 路径 no-op）
-	account.ApplyHeaderOverrides(req.Context(), req.Header)
+	account.ApplyHeaderOverridesWithContext(req.Context(), req.Header)
 	if account.QwenSessionCacheEnabled() {
 		req.Header.Set("x-dashscope-session-cache", "enable")
 	}

@@ -202,7 +202,7 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 	applyOpenAIAPIKeyIdentityHeaders(headers, account, s.codexIdentityOverrideUA(account))
 	// 握手头是连接级的：按连接作用域解析变量（不含 request_id），连接池再按
 	// 上报身份分桶（见 normalizeOpenAIWSHandshakeCompatibility）。
-	account.ApplyHeaderOverrides(withHeaderOverrideConnectionScope(ctx), headers)
+	account.ApplyHeaderOverridesWithContext(withHeaderOverrideConnectionScope(ctx), headers)
 	setOpenAICodexRoutingHint(headers, account, routingModel, routingServiceTier)
 	logOpenAIRoutingDiagnostics(
 		ctx,

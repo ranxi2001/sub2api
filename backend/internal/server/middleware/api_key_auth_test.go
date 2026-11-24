@@ -399,7 +399,7 @@ func TestAPIKeyAuthSetsGroupContext(t *testing.T) {
 			},
 		}
 		upstreamHeaders := http.Header{}
-		account.ApplyHeaderOverrides(c.Request.Context(), upstreamHeaders)
+		account.ApplyHeaderOverridesWithContext(c.Request.Context(), upstreamHeaders)
 		if got := upstreamHeaders["x-identity"]; len(got) != 1 || got[0] != "7/100/101" {
 			c.JSON(http.StatusInternalServerError, gin.H{"ok": false, "identity": got})
 			return

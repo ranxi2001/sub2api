@@ -225,7 +225,7 @@ func modelProtocolCatalogHeaders(account *Account, url string) http.Header {
 	}
 	applyOpenCodeUpstreamUserAgent(account, url, headers)
 	// 目录是账号级共享缓存，由后台刷新：不携带任何用户身份，含变量的覆写头不发送。
-	account.ApplyHeaderOverrides(context.Background(), headers)
+	account.ApplyHeaderOverridesWithContext(context.Background(), headers)
 	return headers
 }
 

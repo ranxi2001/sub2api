@@ -182,7 +182,12 @@ func (a *Account) HeaderOverrideValue(lowerName string) (string, bool) {
 // 覆写值含变量（{{user_id}} 等）时用 ctx 中的入站请求身份替换；规则见
 // account_header_override_vars.go：非 api_key 账号、或变量取不到值时，该请求头
 // 整条不发送（既有同名头照样删除，客户端无法伪造上报头）。
-func (a *Account) ApplyHeaderOverrides(ctx context.Context, h http.Header) {
+func (a *Account) ApplyHeaderOverrides(h http.Header) {
+	a.ApplyHeaderOverridesWithContext(context.Background(), h)
+}
+
+// ApplyHeaderOverridesWithContext expands identity variables only for authenticated requests.
+func (a *Account) ApplyHeaderOverridesWithContext(ctx context.Context, h http.Header) {
 	if h == nil {
 		return
 	}

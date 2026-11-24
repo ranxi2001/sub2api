@@ -42,7 +42,7 @@ func TestApplyHeaderOverridesExpandsVariables(t *testing.T) {
 	h := http.Header{}
 	h.Set("X-End-User", "spoofed-by-client")
 
-	acc.ApplyHeaderOverrides(ctx, h)
+	acc.ApplyHeaderOverridesWithContext(ctx, h)
 
 	require.Equal(t, []string{"7"}, h["x-end-user"])
 	require.Equal(t, []string{"u=7;k=31;g=9;r=req-abc"}, h["x-trace"])
@@ -68,7 +68,7 @@ func TestApplyHeaderOverridesNeverExpandsForOAuth(t *testing.T) {
 	h := http.Header{}
 	h.Set("X-End-User", "spoofed-by-client")
 
-	acc.ApplyHeaderOverrides(ctx, h)
+	acc.ApplyHeaderOverridesWithContext(ctx, h)
 
 	require.Empty(t, headerValuesFold(h, "x-end-user"))
 	require.Equal(t, []string{"plain"}, h["x-static"])
@@ -80,7 +80,7 @@ func TestApplyHeaderOverridesNeverExpandsForOAuth(t *testing.T) {
 		"x-end-user": "{{user_id}}",
 	})
 	h = http.Header{}
-	anthropicOAuth.ApplyHeaderOverrides(ctx, h)
+	anthropicOAuth.ApplyHeaderOverridesWithContext(ctx, h)
 	require.Empty(t, h)
 }
 
@@ -97,14 +97,14 @@ func TestApplyHeaderOverridesOmitsUnresolvedVariables(t *testing.T) {
 		ctx := context.WithValue(context.Background(), ctxkey.RequestID, "admin-req")
 		h := http.Header{}
 		h.Set("X-End-User", "spoofed-by-client")
-		acc.ApplyHeaderOverrides(ctx, h)
+		acc.ApplyHeaderOverridesWithContext(ctx, h)
 		require.Equal(t, http.Header{"x-static": []string{"plain"}}, h)
 	})
 
 	t.Run("key without group", func(t *testing.T) {
 		ctx := WithHeaderOverrideRequestScope(context.Background(), 7, 31, nil)
 		h := http.Header{}
-		acc.ApplyHeaderOverrides(ctx, h)
+		acc.ApplyHeaderOverridesWithContext(ctx, h)
 		require.Equal(t, []string{"7"}, h["x-end-user"])
 		require.Empty(t, headerValuesFold(h, "x-group"))
 		require.Empty(t, headerValuesFold(h, "x-request"))
@@ -113,7 +113,7 @@ func TestApplyHeaderOverridesOmitsUnresolvedVariables(t *testing.T) {
 	t.Run("connection scope drops request_id only", func(t *testing.T) {
 		ctx := withHeaderOverrideConnectionScope(headerOverrideUserContext())
 		h := http.Header{}
-		acc.ApplyHeaderOverrides(ctx, h)
+		acc.ApplyHeaderOverridesWithContext(ctx, h)
 		require.Equal(t, []string{"7"}, h["x-end-user"])
 		require.Equal(t, []string{"9"}, h["x-group"])
 		require.Empty(t, headerValuesFold(h, "x-request"))
@@ -128,7 +128,7 @@ func TestApplyHeaderOverridesOmitsUnresolvedVariables(t *testing.T) {
 		h := http.Header{}
 		h.Set("X-Legacy", "spoofed-by-client")
 		h.Set("X-Open", "spoofed-by-client")
-		legacy.ApplyHeaderOverrides(headerOverrideUserContext(), h)
+		legacy.ApplyHeaderOverridesWithContext(headerOverrideUserContext(), h)
 		require.Empty(t, h)
 	})
 }
@@ -141,7 +141,7 @@ func TestHeaderOverrideSharedFetchCarriesNoIdentity(t *testing.T) {
 	userCtx := headerOverrideUserContext()
 	h := http.Header{}
 	h.Set("X-End-User", "spoofed-by-client")
-	acc.ApplyHeaderOverrides(withoutHeaderOverrideRequestScope(userCtx), h)
+	acc.ApplyHeaderOverridesWithContext(withoutHeaderOverrideRequestScope(userCtx), h)
 	require.Equal(t, http.Header{"x-static": []string{"plain"}}, h)
 	require.Nil(t, headerOverrideReportedHeaders(userCtx, acc.ID))
 
@@ -158,7 +158,7 @@ func TestHeaderOverrideReportedHeadersRedactLiterals(t *testing.T) {
 	})
 	ctx := headerOverrideUserContext()
 	h := http.Header{}
-	acc.ApplyHeaderOverrides(ctx, h)
+	acc.ApplyHeaderOverridesWithContext(ctx, h)
 
 	require.Equal(t, []string{"sk-relay-secret-7"}, h["x-relay-auth"], "upstream still gets the full value")
 	require.Equal(t, map[string]string{
@@ -186,7 +186,7 @@ func TestHeaderOverrideRequestIDIsClientControlledAndSanitized(t *testing.T) {
 			ctx := context.WithValue(context.Background(), ctxkey.RequestID, tc.requestID)
 			ctx = WithHeaderOverrideRequestScope(ctx, 7, 31, nil)
 			h := http.Header{}
-			acc.ApplyHeaderOverrides(ctx, h)
+			acc.ApplyHeaderOverridesWithContext(ctx, h)
 			require.Equal(t, []string{tc.want}, h["x-trace"])
 		})
 	}
@@ -194,7 +194,7 @@ func TestHeaderOverrideRequestIDIsClientControlledAndSanitized(t *testing.T) {
 	// 没有请求 ID 时仍按"取不到值"处理
 	ctx := WithHeaderOverrideRequestScope(context.Background(), 7, 31, nil)
 	h := http.Header{}
-	acc.ApplyHeaderOverrides(ctx, h)
+	acc.ApplyHeaderOverridesWithContext(ctx, h)
 	require.Empty(t, h)
 }
 
@@ -257,7 +257,7 @@ func TestOpenAIWSHandshakeCompatibilitySeparatesReportedIdentity(t *testing.T) {
 	})
 	build := func(ctx context.Context) openAIWSHandshakeCompatibilityKey {
 		h := http.Header{}
-		acc.ApplyHeaderOverrides(withHeaderOverrideConnectionScope(ctx), h)
+		acc.ApplyHeaderOverridesWithContext(withHeaderOverrideConnectionScope(ctx), h)
 		return normalizeOpenAIWSHandshakeCompatibility(acc, h)
 	}
 	userA := build(WithHeaderOverrideRequestScope(context.Background(), 7, 31, nil))
@@ -285,7 +285,7 @@ func TestAppendOpsUpstreamErrorCapturesReportedHeaders(t *testing.T) {
 
 	upstreamReq, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, "https://upstream.example/v1/responses", nil)
 	require.NoError(t, err)
-	acc.ApplyHeaderOverrides(upstreamReq.Context(), upstreamReq.Header)
+	acc.ApplyHeaderOverridesWithContext(upstreamReq.Context(), upstreamReq.Header)
 
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{AccountID: acc.ID, UpstreamStatusCode: 400, Kind: "http_error"})
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{AccountID: acc.ID + 1, UpstreamStatusCode: 500, Kind: "http_error"})
