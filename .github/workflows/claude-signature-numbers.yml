@@ -1,0 +1,123 @@
+name: Claude signature number oracle
+
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/internal/service/claude_apikey_signature_numbers_test.go'
+      - 'backend/internal/service/claude_apikey_signature_retry_test.go'
+      - 'backend/internal/service/gateway_request.go'
+      - 'backend/internal/service/gateway_forward.go'
+      - 'backend/internal/service/settings_view.go'
+      - 'backend/go.mod'
+      - 'backend/go.sum'
+      - '.github/scripts/claude-signature-numbers-oracle.py'
+      - '.github/workflows/claude-signature-numbers.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: claude-signature-numbers-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  numbers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+      BASELINE_SHA: f6017ad5f3d3caf8d2a1e32f7aede5bcaa045e28
+      GOFLAGS: -mod=readonly
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Freeze candidate fixtures and restore only the defective filter source
+        id: prepare
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/claude-signature-numbers"
+          red="$RUNNER_TEMP/claude-signature-numbers-red"
+          mkdir -p "$evidence"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test -z "$(git status --porcelain)"
+          printf 'candidate=%s\nbaseline=%s\n' "$CANDIDATE_SHA" "$BASELINE_SHA" > "$evidence/identity.txt"
+          git rev-parse HEAD HEAD^{tree} >> "$evidence/identity.txt"
+          git worktree add --detach "$red" "$CANDIDATE_SHA"
+          test "$(git -C "$red" rev-parse HEAD)" = "$CANDIDATE_SHA"
+          production=backend/internal/service/gateway_request.go
+          baseline_blob="$(git rev-parse "$BASELINE_SHA:$production")"
+          candidate_blob="$(git rev-parse "$CANDIDATE_SHA:$production")"
+          test "$(git hash-object "$production")" = "$candidate_blob"
+          git show "$BASELINE_SHA:$production" > "$red/$production"
+          test "$(git -C "$red" hash-object "$production")" = "$baseline_blob"
+          printf '%s %s\n' "$baseline_blob" "$production" > "$evidence/baseline-blobs.txt"
+          printf '%s %s\n' "$candidate_blob" "$production" > "$evidence/candidate-blobs.txt"
+          if [ "$candidate_blob" = "$baseline_blob" ]; then
+            test -z "$(git -C "$red" diff --name-only)"
+            echo 'repaired=false' >> "$GITHUB_OUTPUT"
+            echo 'RED checkpoint: candidate filter source is still the defective baseline; GREEN remains pending.' > "$evidence/green-pending.txt"
+          else
+            test "$(git -C "$red" diff --name-only)" = "$production"
+            echo 'repaired=true' >> "$GITHUB_OUTPUT"
+          fi
+          test -z "$(git -C "$red" ls-files --others --exclude-standard)"
+          git -C "$red" diff -- "$production" > "$evidence/red-production.diff"
+          fixtures=(backend/internal/service/claude_apikey_signature_numbers_test.go backend/internal/service/claude_apikey_signature_retry_test.go backend/go.mod backend/go.sum .github/scripts/claude-signature-numbers-oracle.py .github/workflows/claude-signature-numbers.yml)
+          for path in "${fixtures[@]}"; do
+            blob="$(git rev-parse "$CANDIDATE_SHA:$path")"
+            test "$(git hash-object "$path")" = "$blob"
+            test "$(git -C "$red" hash-object "$path")" = "$blob"
+            printf '%s %s\n' "$blob" "$path" >> "$evidence/fixture-blobs.txt"
+            sha256sum "$path" >> "$evidence/fixture-sha256.txt"
+          done
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: RED requires both real numeric assertion failures
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/claude-signature-numbers"
+          go version > "$evidence/go-version.txt"
+          set +e
+          (cd "$RUNNER_TEMP/claude-signature-numbers-red/backend" && go test -p=2 -tags=unit ./internal/service -run '^TestClaudeAPIKeySignatureRetryPreservesNumbers$' -count=1 -json -timeout=8m) > "$evidence/red.jsonl" 2> "$evidence/red.stderr"
+          status=$?
+          set -e
+          printf '%s\n' "$status" > "$evidence/red.exitcode"
+          cat "$evidence/red.jsonl" "$evidence/red.stderr"
+          python3 .github/scripts/claude-signature-numbers-oracle.py red "$evidence/red.exitcode" "$evidence/red.jsonl" "$evidence/red.stderr" | tee "$evidence/red-verdict.txt"
+      - name: GREEN requires clean candidate and all preserved controls
+        if: steps.prepare.outputs.repaired == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/claude-signature-numbers"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test -z "$(git status --porcelain)"
+          while read -r blob path; do
+            test "$(git hash-object "$path")" = "$blob"
+            test "$(git -C "$RUNNER_TEMP/claude-signature-numbers-red" hash-object "$path")" = "$blob"
+          done < "$evidence/fixture-blobs.txt"
+          set +e
+          (cd backend && go test -p=2 -tags=unit ./internal/service -run '^TestClaudeAPIKeySignatureRetry(PreservesNumbers|Defaults)$' -count=1 -json -timeout=8m) > "$evidence/green.jsonl" 2> "$evidence/green.stderr"
+          status=$?
+          set -e
+          printf '%s\n' "$status" > "$evidence/green.exitcode"
+          cat "$evidence/green.jsonl" "$evidence/green.stderr"
+          python3 .github/scripts/claude-signature-numbers-oracle.py green "$evidence/green.exitcode" "$evidence/green.jsonl" "$evidence/green.stderr" | tee "$evidence/green-verdict.txt"
+          test -z "$(git status --porcelain)"
+      - name: Report the tests-first checkpoint explicitly
+        if: steps.prepare.outputs.repaired == 'false'
+        run: cat "$RUNNER_TEMP/claude-signature-numbers/green-pending.txt" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: claude-signature-numbers-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/claude-signature-numbers
+          if-no-files-found: error

@@ -19,14 +19,16 @@ func TestClaudeAPIKeySignatureRetryDefaults(t *testing.T) {
 	const history = `{"model":"claude-opus-5-5","max_tokens":100,"messages":[{"role":"user","content":"first"},{"role":"assistant","content":[{"type":"thinking","thinking":"fixture","signature":"fixture-signature"},{"type":"text","text":"first answer"}]},{"role":"user","content":"continue"}]}`
 
 	for _, tc := range []struct {
-		name     string
-		settings string
-		retry    bool
+		name        string
+		settings    string
+		retry       bool
+		passthrough bool
 	}{
-		{"unconfigured", "", true},
-		{"explicitly disabled", `{"enabled":true,"apikey_signature_enabled":false}`, false},
-		{"disabled globally", `{"enabled":false,"apikey_signature_enabled":true}`, false},
-		{"saved before API key setting existed", `{"enabled":true,"thinking_signature_enabled":true}`, false},
+		{"unconfigured", "", true, false},
+		{"explicitly disabled", `{"enabled":true,"apikey_signature_enabled":false}`, false, false},
+		{"disabled globally", `{"enabled":false,"apikey_signature_enabled":true}`, false, false},
+		{"saved before API key setting existed", `{"enabled":true,"thinking_signature_enabled":true}`, false, false},
+		{"explicit passthrough", "", false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			values := make(map[string]string)
@@ -50,7 +52,9 @@ func TestClaudeAPIKeySignatureRetryDefaults(t *testing.T) {
 			c, _ := gin.CreateTestContext(rec)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 			account := newAnthropicAPIKeyAccountForTest()
-			delete(account.Extra, "anthropic_passthrough")
+			if !tc.passthrough {
+				delete(account.Extra, "anthropic_passthrough")
+			}
 			parsed, err := ParseGatewayRequest(NewRequestBodyRef([]byte(history)), PlatformAnthropic)
 			require.NoError(t, err)
 			result, err := svc.Forward(c.Request.Context(), c, account, parsed)
