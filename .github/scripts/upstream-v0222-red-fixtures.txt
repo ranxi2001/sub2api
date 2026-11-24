@@ -218,3 +218,6 @@ backend/internal/handler/model_plaza_currency_test.go
 # Frozen candidate blobs: eb860ff6bb7a0900ed1243d29d58c7ae4ae0eb83 / a69b0b585c25073321953af8630d64c743db2893.
 backend/internal/handler/gateway_anthropic_media_test.go
 backend/internal/handler/gateway_anthropic_tool_media_test.go
+
+# Usage record pagination and CSV tests require the consolidated usage handler.
+backend/internal/handler/usage_records_test.go
