@@ -2450,8 +2450,8 @@ func normalizeOpenAIWSBetaFeatures(headers http.Header) string {
 func normalizeOpenAIWSHandshakeCompatibility(account *Account, headers http.Header) openAIWSHandshakeCompatibilityKey {
 	key := openAIWSHandshakeCompatibilityKey{
 		reportedIdentity: account.headerOverrideReportedIdentity(headers),
-		betaFeatures:    normalizeOpenAIWSBetaFeatures(headers),
-		timezoneHeaders: [3]string{headers.Get("Oai-Client-Timezone"), headers.Get("X-Openai-Timezone"), headers.Get("X-Timezone")},
+		betaFeatures:     normalizeOpenAIWSBetaFeatures(headers),
+		timezoneHeaders:  [3]string{headers.Get("Oai-Client-Timezone"), headers.Get("X-Openai-Timezone"), headers.Get("X-Timezone")},
 	}
 	if account != nil && account.Type == AccountTypeAPIKey {
 		for i, name := range [...]string{"session-id", "session_id", "thread-id", "thread_id", "conversation_id", "conversation-id"} {

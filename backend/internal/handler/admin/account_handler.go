@@ -190,7 +190,7 @@ type UpdateAccountRequest struct {
 	ProbeEnabled            *bool              `json:"upstream_billing_probe_enabled"`
 	RateSyncEnabled         *bool              `json:"upstream_billing_rate_sync_enabled"`
 	ConfirmMixedChannelRisk *bool              `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
-	GroupSyncEnabled        *bool          `json:"upstream_billing_group_sync_enabled"`
+	GroupSyncEnabled        *bool              `json:"upstream_billing_group_sync_enabled"`
 }
 
 // BulkUpdateAccountsRequest represents the payload for bulk editing accounts

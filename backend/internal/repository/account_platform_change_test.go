@@ -27,7 +27,7 @@ func TestPlatformChangeDropsLockedProviderMetadataAndKeepsCurrentQuota(t *testin
 	account := &service.Account{ID: 27, Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey,
 		Credentials: map[string]any{"api_key": "fixture-key"},
 		Extra:       map[string]any{"quota_used": 12.0, "anthropic_mimic_claude_code": true}}
-	got, err := lockAndMergeAccountProbeExtra(service.WithAccountPlatformChange(context.Background()), client, account, nil, nil)
+	got, err := lockAndMergeAccountProbeExtra(service.WithAccountPlatformChange(context.Background()), client, account, service.AccountBillingSettingsUpdate{})
 	require.NoError(t, err)
 	require.Equal(t, map[string]any{"quota_used": 42.0, "cost_multiplier": 0.5, "anthropic_mimic_claude_code": true}, got)
 	require.NoError(t, mock.ExpectationsWereMet())

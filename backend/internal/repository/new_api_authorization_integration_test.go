@@ -120,7 +120,7 @@ func TestNewAPIIntegrationLegacyProbeCannotOverwriteConfiguredBinding(t *testing
 	r := NewNewAPIAuthorizationRepository(integrationDB)
 	require.NoError(t, r.Save(ctx, &service.NewAPISiteAuthorization{SiteURL: site, UserID: 7, Ciphertext: "test-cipher"}, []service.NewAPIBindingSave{{Account: legacy, TokenID: 3, Group: "vip"}}))
 	snap := &service.UpstreamBillingProbeSnapshot{Status: "ok", LastAttemptAt: time.Now(), Data: map[string]any{"billing_scope": "token", "resolved_rate_multiplier": 4.0, "effective_rate_multiplier": 4.0, "peak_rate_enabled": false}}
-	require.ErrorIs(t, ar.UpdateUpstreamBillingProbeSnapshot(ctx, legacy, snap, nil), service.ErrUpstreamBillingProbeIdentityChanged)
+	require.ErrorIs(t, ar.UpdateUpstreamBillingProbeSnapshot(ctx, legacy, snap, nil, service.BillingGroupInfo{}), service.ErrUpstreamBillingProbeIdentityChanged)
 	current, e := ar.GetByID(ctx, a.ID)
 	require.NoError(t, e)
 	require.NotContains(t, current.Extra, service.UpstreamBillingProbeExtraKey)

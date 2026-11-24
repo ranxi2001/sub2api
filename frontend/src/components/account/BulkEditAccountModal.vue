@@ -852,6 +852,8 @@
             </p>
 
             <HeaderOverrideEditor
+
+              :user-id="authStore.user?.id"
               :rows="headerOverrideRows"
               :allow-variables="headerOverrideAllowVariables"
               @update:rows="headerOverrideRows = $event"

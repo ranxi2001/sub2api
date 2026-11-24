@@ -10,6 +10,7 @@
       <Icon name="refresh" size="xs" :class="{ 'animate-spin': loading }" />
       {{ t('admin.accounts.upstreamBilling.syncGroup') }}
     </button>
+      <NewFeatureBadge v-if="userId != null" :notice-id="NEW_FEATURE_NOTICES.upstreamBillingGroupSync" :user-id="userId" />
     <label v-if="allowAuto" class="inline-flex items-center gap-2 text-xs text-gray-700 dark:text-gray-200"
       :title="t('admin.accounts.upstreamBilling.autoSyncGroupHint')">
       {{ t('admin.accounts.upstreamBilling.autoSyncGroup') }}
@@ -20,6 +21,8 @@
 </template>
 
 <script setup lang="ts">
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
@@ -28,7 +31,7 @@ import Icon from '@/components/icons/Icon.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import { useAppStore } from '@/stores/app'
 
-const props = defineProps<{ source: UpstreamGroupSource | null; allowAuto?: boolean }>()
+const props = defineProps<{ source: UpstreamGroupSource | null; allowAuto?: boolean; userId?: number }>()
 const auto = defineModel<boolean>('auto', { default: false })
 const name = defineModel<string>('name', { required: true })
 const notes = defineModel<string>('notes', { required: true })

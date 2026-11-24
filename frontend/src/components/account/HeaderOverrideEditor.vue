@@ -100,6 +100,7 @@
       <span class="text-sm font-medium text-gray-800 dark:text-gray-100">
         {{ t('admin.accounts.headerOverride.variablesTitle') }}
       </span>
+      <NewFeatureBadge v-if="userId != null" :notice-id="NEW_FEATURE_NOTICES.headerOverrideVariables" :user-id="userId" />
     </div>
     <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
       {{ t('admin.accounts.headerOverride.variablesHint') }}
@@ -160,6 +161,8 @@
 </template>
 
 <script setup lang="ts">
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import { computed, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { createStableObjectKeyResolver } from '@/utils/stableObjectKey'
@@ -178,6 +181,7 @@ import {
 
 const props = withDefaults(
   defineProps<{
+    userId?: number
     rows: HeaderOverrideRow[]
     /** 账号是否允许使用身份上报变量（仅 api_key 账号） */
     allowVariables?: boolean

@@ -110,7 +110,7 @@ func TestOpenAIOAuthStaleSettingsEditCannotClearConcurrentAuthError(t *testing.T
 			require.NoError(t, repo.SetError(ctx, a.ID, "401 authentication failed"))
 			edit.Name = "unrelated-settings-change"
 			editCtx := service.WithPreservedAccountStatus(accounttimer.WithPreservedSchedulable(ctx))
-			require.NoError(t, repo.UpdateWithAccountBillingSettings(editCtx, edit, nil, nil, nil))
+			require.NoError(t, repo.UpdateWithAccountBillingSettings(editCtx, edit, service.AccountBillingSettingsUpdate{SetName: true, SetNotes: true}))
 			current, err := repo.GetByID(ctx, a.ID)
 			require.NoError(t, err)
 			require.Equal(t, edit.Name, current.Name)

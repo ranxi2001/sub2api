@@ -297,6 +297,7 @@
                 >
                   <Icon name="refresh" size="xs" :class="{ 'animate-spin': syncingUpstreamGroup.has(row.id) }" />
                 </button>
+                <NewFeatureBadge v-if="authStore.user?.id != null && (row.type === 'apikey' || (row.platform === 'antigravity' && row.type === 'upstream'))" :notice-id="NEW_FEATURE_NOTICES.upstreamBillingGroupSync" :user-id="authStore.user.id" compact />
               </div>
               <span
                 v-if="accountDisplayEmail(row)"

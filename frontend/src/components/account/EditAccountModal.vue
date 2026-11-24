@@ -56,6 +56,7 @@
         <div class="mb-1 flex flex-wrap items-center justify-between gap-2">
           <label class="input-label mb-0">{{ t('common.name') }}</label>
           <UpstreamGroupSyncButton
+            :user-id="authStore.user?.id"
             v-if="account.type === 'apikey' || (account.platform === 'antigravity' && account.type === 'upstream')"
             v-model:name="form.name"
             v-model:notes="form.notes"
@@ -979,6 +980,8 @@
           </div>
 
           <HeaderOverrideEditor
+
+            :user-id="authStore.user?.id"
             :rows="headerOverrideRows"
             :allow-variables="headerOverrideAllowVariables"
             @update:rows="headerOverrideRows = $event"

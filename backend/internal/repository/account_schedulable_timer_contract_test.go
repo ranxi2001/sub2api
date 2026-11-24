@@ -61,7 +61,7 @@ func TestAccountTimerRepositoryOrdinaryEditDoesNotWriteSchedulingBit(t *testing.
 			m.ExpectCommit()
 			stale := &service.Account{ID: 7, Name: "after", Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey, Status: status, Schedulable: false, Credentials: map[string]any{}, Extra: map[string]any{}, Concurrency: 1, Priority: 1}
 			ctx := accounttimer.WithPreservedSchedulable(context.Background())
-			require.NoError(t, repo.UpdateWithAccountBillingSettings(ctx, stale, nil, nil, nil))
+			require.NoError(t, repo.UpdateWithAccountBillingSettings(ctx, stale, service.AccountBillingSettingsUpdate{SetName: true, SetNotes: true}))
 			require.Equal(t, storedScheduling, stale.Schedulable, "response must reflect the locked database result")
 		})
 	}

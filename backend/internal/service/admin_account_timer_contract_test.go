@@ -34,7 +34,7 @@ func (r *accountTimerEditContractRepo) Update(ctx context.Context, a *Account) e
 
 type accountTimerBillingEditContractRepo struct{ *accountTimerEditContractRepo }
 
-func (r *accountTimerBillingEditContractRepo) UpdateWithAccountBillingSettings(ctx context.Context, a *Account, _ *bool, _ *bool, _ *float64) error {
+func (r *accountTimerBillingEditContractRepo) UpdateWithAccountBillingSettings(ctx context.Context, a *Account, _ AccountBillingSettingsUpdate) error {
 	return r.Update(ctx, a)
 }
 

@@ -89,14 +89,14 @@ type quality152GatedRepo struct {
 	resume  chan struct{}
 }
 
-func (r *quality152GatedRepo) UpdateWithAccountBillingSettings(ctx context.Context, a *service.Account, probe, rate *bool, multiplier *float64) error {
+func (r *quality152GatedRepo) UpdateWithAccountBillingSettings(ctx context.Context, a *service.Account, settings service.AccountBillingSettingsUpdate) error {
 	close(r.entered)
 	select {
 	case <-r.resume:
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	return r.AdminAccountRepository.UpdateWithAccountBillingSettings(ctx, a, probe, rate, multiplier)
+	return r.AdminAccountRepository.UpdateWithAccountBillingSettings(ctx, a, settings)
 }
 func TestQuality152AdminUpdateServiceReadBeforeLock(t *testing.T) {
 	for _, remove := range []bool{false, true} {
