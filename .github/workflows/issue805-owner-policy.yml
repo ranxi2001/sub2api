@@ -77,6 +77,17 @@ jobs:
           git diff --exit-code "$baseline" -- 'backend/**/*.go' ':!backend/**/*_test.go'
           git diff --exit-code "$EXPECTED_HEAD_SHA" -- 'backend/**/*_test.go'
           bash "$GITHUB_WORKSPACE/.github/scripts/exclude-later-http2-red-fixtures.sh" "$baseline" . "$EXPECTED_HEAD_SHA" | tee "$RUNNER_TEMP/issue805-evidence/http2-exclusions.txt"
+          # The HTTP2 helper calls prepare-upstream-v0222-red-fixtures.py via
+          # prepare-free-fast-red-fixtures.sh. That shared owner alone removes
+          # usage_records_test.go; verify its deletion without removing it again.
+          target=backend/internal/handler/usage_records_test.go
+          if git cat-file -e "$baseline:$target" 2>/dev/null; then exit 1; fi
+          candidate_blob=$(git rev-parse "$EXPECTED_HEAD_SHA:$target")
+          test "$(git cat-file -t "$candidate_blob")" = blob
+          test ! -e "$target"
+          test ! -L "$target"
+          test "$(git diff --name-only --diff-filter=D "$EXPECTED_HEAD_SHA" -- "$target")" = "$target"
+          echo "$target owner=shared baseline=absent candidate=$candidate_blob actual=absent" >> "$RUNNER_TEMP/issue805-evidence/red-blobs.txt"
           # These unrelated context-policy tests require newer production symbols.
           # Use their baseline versions only in this disposable RED checkout so
           # compilation can reach the unchanged Issue805 business assertions.
@@ -88,10 +99,10 @@ jobs:
             test "$expected" = "$actual"
           done
           # The later omission fixtures require a Beta setting absent from this
-          # baseline. The readable/task-rebuild fixtures import its settings and
-          # usage helpers. Exclude this exact dependency set only in the old
+          # baseline. The readable/task-rebuild fixtures import its settings.
+          # Exclude this exact dependency set only in the old
           # Issue805 RED; GREEN and each feature's own TDD job retain them.
-          for omission_test in backend/internal/handler/openai_409_omit_history_test.go backend/internal/handler/openai_409_readable_continuation_test.go backend/internal/handler/openai_409_http_rebuild_test.go backend/internal/handler/openai_409_shadow_http_test.go backend/internal/handler/openai_409_shadow_race_test.go backend/internal/handler/openai_409_ws_rebuild_test.go backend/internal/handler/openai_409_ws_oracle_test.go backend/internal/handler/openai_400_omit_history_test.go backend/internal/handler/openai_issue854_continuation_test.go backend/internal/handler/openai_issue854_upstream_test.go backend/internal/handler/openai_issue854_postgres_test.go backend/internal/handler/usage_records_test.go; do
+          for omission_test in backend/internal/handler/openai_409_omit_history_test.go backend/internal/handler/openai_409_readable_continuation_test.go backend/internal/handler/openai_409_http_rebuild_test.go backend/internal/handler/openai_409_shadow_http_test.go backend/internal/handler/openai_409_shadow_race_test.go backend/internal/handler/openai_409_ws_rebuild_test.go backend/internal/handler/openai_409_ws_oracle_test.go backend/internal/handler/openai_400_omit_history_test.go backend/internal/handler/openai_issue854_continuation_test.go backend/internal/handler/openai_issue854_upstream_test.go backend/internal/handler/openai_issue854_postgres_test.go; do
             git cat-file -e "$EXPECTED_HEAD_SHA:$omission_test"
             rm -- "$omission_test"
             test ! -e "$omission_test"
