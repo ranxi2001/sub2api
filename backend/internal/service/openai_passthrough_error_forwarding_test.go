@@ -746,7 +746,7 @@ func TestOpenAIGatewayService_APIKeyPassthrough_HeaderOverrideSecrets(t *testing
 					payload, path := rec.Body.String(), "error"
 					if mode == "compact_committed" {
 						require.Equal(t, 200, rec.Code)
-						events := parseSSEEvents(rec.Body.String())
+						events := parseCompactBridgeSSE(t, stripKeepaliveComments(rec.Body.String()))
 						require.Len(t, events, 1)
 						require.Equal(t, "response.failed", events[0][0])
 						payload, path = events[0][1], "response.error"
@@ -801,7 +801,7 @@ func TestOpenAIGatewayService_APIKeyPassthrough_ProtocolCodeWhitespaceAndSecretC
 						forwardOpenAIPassthroughErrorForTest(t, c, 400, string(body), credentials)
 						payload, path := rec.Body.String(), "error"
 						if compact {
-							events := parseSSEEvents(payload)
+							events := parseCompactBridgeSSE(t, stripKeepaliveComments(payload))
 							require.Len(t, events, 1)
 							payload, path = events[0][1], "response.error"
 						}
