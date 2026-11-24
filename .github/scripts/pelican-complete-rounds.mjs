@@ -80,6 +80,10 @@ export function createBrowserLifecycleMetadata(page, readContext, { now = () => 
       navigation_id: navigationID, request_id: committed?.request_id ?? null })
   })
   return {
+    documentIntervalsRetired(count) {
+      assert.ok(Number.isSafeInteger(count) && count >= 0)
+      record('document-intervals-retired', { document_id: documentID, navigation_id: navigationID, intervals: count })
+    },
     navigationIntent(action, url) {
       const path = safePath(url)
       if (!['goto', 'reload'].includes(action) || !path) return
@@ -89,6 +93,50 @@ export function createBrowserLifecycleMetadata(page, readContext, { now = () => 
     snapshot() { return { version: 1, clock: 'harness monotonic milliseconds since collector start',
       max_events: maxEvents, dropped_events: dropped, paths: [...paths], events: events.map(event => ({ ...event })) } },
   }
+}
+
+// Serialized by Playwright into each main document before application scripts.
+// Stop future recurring work only when the harness is about to discard that
+// document. Native callbacks, existing fetch/XHR, timeouts and their errors are
+// untouched. A fresh document gets a fresh registry with normal scheduling.
+function installDocumentIntervals() {
+  if (globalThis.top && globalThis.top !== globalThis) return
+  if (Object.hasOwn(globalThis, '__pelicanDocumentIntervals')) return
+  const intervals = new Set()
+  const nativeSet = globalThis.setInterval
+  const nativeClear = globalThis.clearInterval
+  const nativeClearTimeout = globalThis.clearTimeout
+  let retired = false
+  globalThis.setInterval = function (...args) {
+    const id = Reflect.apply(nativeSet, globalThis, args)
+    if (retired) Reflect.apply(nativeClear, globalThis, [id])
+    else intervals.add(id)
+    return id
+  }
+  globalThis.clearInterval = function (id) {
+    intervals.delete(id)
+    return Reflect.apply(nativeClear, globalThis, [id])
+  }
+  // Browser timer IDs share a pool: clearTimeout can cancel an interval too.
+  globalThis.clearTimeout = function (id) {
+    intervals.delete(id)
+    return Reflect.apply(nativeClearTimeout, globalThis, [id])
+  }
+  Object.defineProperty(globalThis, '__pelicanDocumentIntervals', { value: Object.freeze({
+    retire() {
+      if (retired) throw new Error('cannot reuse a retired document for navigation')
+      retired = true
+      const count = intervals.size
+      for (const id of intervals) Reflect.apply(nativeClear, globalThis, [id])
+      intervals.clear()
+      return count
+    },
+  }) })
+}
+
+function retireDocumentIntervals() {
+  if (!Object.hasOwn(globalThis, '__pelicanDocumentIntervals')) throw new Error('document interval boundary was not installed')
+  return globalThis.__pelicanDocumentIntervals.retire()
 }
 
 // Track real request completion across repeated document navigations. A
@@ -107,13 +155,40 @@ export function createPageNavigation(page, { waitForBootstrap = () => Promise.re
   }
   page.on('requestfinished', completed)
   page.on('requestfailed', completed)
-  const settle = async () => {
+  let installed
+  const install = () => installed ??= (async () => {
+    await page.addInitScript(installDocumentIntervals)
+    // The initial about:blank document predates addInitScript.
+    await page.evaluate(installDocumentIntervals)
+  })()
+  const settle = async (retire = false) => {
     const deadline = Date.now() + 20_000
+    const remaining = () => {
+      const ms = deadline - Date.now()
+      if (ms <= 0) throw new Error('browser requests did not finish before navigation')
+      return ms
+    }
+    const bounded = async operation => {
+      const ms = remaining()
+      let timer
+      try {
+        return await Promise.race([operation(), new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error('browser requests did not finish before navigation')), ms)
+        })])
+      } finally { clearTimeout(timer) }
+    }
+    if (retire) await bounded(install)
     // A completed background fetch followed by a srcdoc preview lifecycle can
     // remove networkidle without restarting its timer (Playwright 1.56.1).
     // Document load + our real completion inventory does not depend on that
     // stale frame flag. Keep one 20s deadline, including document readiness.
-    await page.waitForLoadState('load', { timeout: 20_000 })
+    await page.waitForLoadState('load', { timeout: remaining() })
+    if (retire) {
+      // Atomic in the old document: an interval either ran before this fence
+      // (its requests must drain below), or cannot fire in the intent/commit gap.
+      const count = await bounded(() => page.evaluate(retireDocumentIntervals))
+      lifecycle?.documentIntervalsRetired?.(count)
+    }
     for (;;) {
       while (pending.size) await new Promise((resolve, reject) => {
         const done = () => { clearTimeout(timer); waiters.delete(done); resolve() }
@@ -126,24 +201,23 @@ export function createPageNavigation(page, { waitForBootstrap = () => Promise.re
       // load can fire before Vue schedules its auth refresh. Observe a quiet
       // interval after draining, so that deferred requests cannot be aborted
       // by the next document navigation. Keep the original total deadline.
-      const remaining = deadline - Date.now()
-      if (remaining <= 0) throw new Error('browser requests did not finish before navigation')
+      const ms = remaining()
       const observed = activity
-      await new Promise(resolve => setTimeout(resolve, Math.min(250, remaining)))
+      await new Promise(resolve => setTimeout(resolve, Math.min(250, ms)))
       if (!pending.size && activity === observed) return
     }
   }
   return {
-    settle,
+    settle: () => settle(),
     async goto(url, beforeNavigate = () => {}) {
-      await settle()
+      await settle(true)
       beforeNavigate()
       lifecycle?.navigationIntent('goto', url)
       await Promise.all([waitForBootstrap(url), page.goto(url, { waitUntil: 'load' })])
       await settle()
     },
     async reload(beforeNavigate = () => {}) {
-      await settle()
+      await settle(true)
       beforeNavigate()
       lifecycle?.navigationIntent('reload', page.url?.())
       await Promise.all([waitForBootstrap(page.url?.()), page.reload({ waitUntil: 'load' })])

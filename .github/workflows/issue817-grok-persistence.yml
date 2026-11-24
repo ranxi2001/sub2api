@@ -26,6 +26,7 @@ on:
       - 'backend/internal/repository/grok_scheduled_persistence_integration_test.go'
       - '.github/workflows/issue817-grok-persistence.yml'
       - '.github/scripts/issue817-race-gate.sh'
+      - '.github/scripts/issue817-billing-adapter.go.txt'
 
 permissions:
   contents: read
@@ -135,6 +136,12 @@ jobs:
               routing=2c69cefb93828e2bdefc413b4df058f3a342c7e1
               git diff "$routing^" "$routing" -- "$source" > evidence/routing-field.patch
               git apply evidence/routing-field.patch
+              # Adapt only the billing API signatures. The Grok rate-limit and
+              # stale-edit behavior under test comes from the pinned repository.
+              sed -i -e 's/UpdateWithAccountBillingSettings(/historicalUpdateWithAccountBillingSettings(/g' \
+                -e 's/UpdateUpstreamBillingProbeSnapshot(/historicalUpdateUpstreamBillingProbeSnapshot(/g' \
+                -e 's/lockAndMergeAccountProbeExtra(/historicalLockAndMergeAccountProbeExtra(/g' "$source"
+              cp .github/scripts/issue817-billing-adapter.go.txt backend/internal/repository/issue817_billing_compat.go
             fi
             git diff "$original" -- "$source" > evidence/red-compile-compatibility.diff
             git diff --stat > evidence/red-source-diff.txt

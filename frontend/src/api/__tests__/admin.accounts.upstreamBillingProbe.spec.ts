@@ -17,6 +17,7 @@ import {
   saveNewAPIUpstreamConfig,
   deleteNewAPIUpstreamConfig,
   getUpstreamBillingProbeSettings,
+  previewUpstreamGroup,
   probeUpstreamBilling,
   probeUpstreamBillingBatch,
   setUpstreamBillingProbeEnabled,
@@ -73,5 +74,17 @@ describe('admin account upstream billing probe API', () => {
     expect(put).toHaveBeenCalledWith('/admin/accounts/7/upstream-billing-probe', { enabled: true })
     expect(post).toHaveBeenNthCalledWith(1, '/admin/accounts/7/upstream-billing-probe', undefined, { timeout: 45_000 })
     expect(post).toHaveBeenNthCalledWith(2, '/admin/accounts/upstream-billing-probe/batch', { account_ids: [7] }, { timeout: 225_000 })
+  })
+
+  it('maps upstream group text to editable fields and skips empty values', async () => {
+    const source = { account_id: 7 }
+    post.mockResolvedValueOnce({ data: { group_name: '标准组', group_description: '共享账号' } })
+    await expect(previewUpstreamGroup(source)).resolves.toEqual({ name: '标准组', notes: '共享账号' })
+    post.mockResolvedValueOnce({ data: { group_name: '标准组', group_description: '' } })
+    await expect(previewUpstreamGroup(source)).resolves.toEqual({ name: '标准组' })
+    const guard = { source: 'synthetic-source', name: 'Original', notes: null }
+    post.mockResolvedValueOnce({ data: { group_name: 'New', sync_guard: guard } })
+    await expect(previewUpstreamGroup(source)).resolves.toEqual({ name: 'New', upstream_group_guard: guard })
+    expect(post).toHaveBeenCalledWith('/admin/accounts/upstream-billing-probe/group-preview', source, { signal: undefined })
   })
 })

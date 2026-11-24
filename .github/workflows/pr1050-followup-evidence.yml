@@ -1,0 +1,219 @@
+name: PR1050 follow-up regression and UI evidence
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [production]
+    paths:
+      - '.github/workflows/pr1050-followup-evidence.yml'
+      - '.github/scripts/pr1050-*.py'
+      - '.github/scripts/pr1050-*.mjs'
+      - 'backend/go.mod'
+      - 'backend/go.sum'
+      - 'backend/internal/service/openai*'
+      - 'backend/internal/service/*header_override*'
+      - 'backend/internal/service/*upstream*group*'
+      - 'backend/internal/service/*upstream_billing*'
+      - 'backend/internal/service/admin*.go'
+      - 'backend/internal/handler/admin/account*.go'
+      - 'backend/internal/repository/account_repo*.go'
+      - 'backend/internal/repository/*upstream_billing*'
+      - 'backend/internal/repository/integration_harness_test.go'
+      - 'frontend/package.json'
+      - 'frontend/pnpm-lock.yaml'
+      - 'frontend/vitest.config.ts'
+      - 'frontend/tailwind.config.js'
+      - 'frontend/src/style.css'
+      - 'frontend/src/components/account/**'
+      - 'frontend/src/components/common/BaseDialog.vue'
+      - 'frontend/src/components/common/NewFeatureBadge.vue'
+      - 'frontend/src/components/common/__tests__/NewFeatureBadge.spec.ts'
+      - 'frontend/src/stores/newFeatureNotices.ts'
+      - 'frontend/src/stores/__tests__/newFeatureNotices.spec.ts'
+      - 'frontend/src/views/admin/AccountsView.vue'
+      - 'frontend/src/views/admin/__tests__/AccountsView.lite.spec.ts'
+      - 'frontend/src/views/admin/__tests__/AccountsView.sparkShadow.spec.ts'
+      - 'frontend/src/api/admin/accounts.ts'
+      - 'frontend/src/api/__tests__/admin.accounts.upstreamBillingProbe.spec.ts'
+      - 'frontend/src/i18n/**'
+permissions:
+  contents: read
+concurrency:
+  group: pr1050-followup-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+env:
+  EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  CI: 'true'
+  TZ: UTC
+jobs:
+  named-regressions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:18.1-alpine3.23
+        env:
+          POSTGRES_USER: fixture
+          POSTGRES_PASSWORD: fixture
+          POSTGRES_DB: sub2api_test
+        ports: ['15432:5432']
+        options: >-
+          --health-cmd "pg_isready -U fixture -d sub2api_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+      redis:
+        image: redis:8.4-alpine
+        ports: ['16379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      SUB2API_TEST_POSTGRES_DSN: postgres://fixture:fixture@127.0.0.1:15432/sub2api_test?sslmode=disable
+      SUB2API_TEST_REDIS_URL: redis://127.0.0.1:16379/0
+      GOMAXPROCS: '2'
+      GOFLAGS: '-p=2'
+      NODE_OPTIONS: --max-old-space-size=6144
+    steps:
+      - name: Initialize evidence paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          EVIDENCE_DIR="$RUNNER_TEMP/pr1050-regressions"
+          printf 'EVIDENCE_DIR=%s\n' "$EVIDENCE_DIR" >> "$GITHUB_ENV"
+          mkdir -p "$EVIDENCE_DIR"
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.EXPECTED_HEAD_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install locked frontend dependencies
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVIDENCE_DIR"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          test -z "$(git status --porcelain)"
+          go version > "$EVIDENCE_DIR/toolchain.txt"
+          node --version >> "$EVIDENCE_DIR/toolchain.txt"
+          pnpm --version >> "$EVIDENCE_DIR/toolchain.txt"
+          pnpm --dir frontend install --frozen-lockfile 2>&1 | tee "$EVIDENCE_DIR/install.log"
+      - name: Named race JSON and mounted API component gates
+        run: python3 .github/scripts/pr1050-acceptance.py
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: pr1050-regressions-${{ env.EXPECTED_HEAD_SHA }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pr1050-regressions
+          if-no-files-found: error
+  real-component-before-after:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      SOURCE_BASE: c3f5cbde082f8785aaa9eae59ce9e6bc2542706c
+      NODE_OPTIONS: --max-old-space-size=6144
+    steps:
+      - name: Initialize evidence paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASELINE_ROOT="$RUNNER_TEMP/pr1050-before/frontend"
+          CANDIDATE_ROOT="$RUNNER_TEMP/pr1050-after/frontend"
+          EVIDENCE_DIR="$RUNNER_TEMP/pr1050-ui-evidence"
+          PLAYWRIGHT_ROOT="$RUNNER_TEMP/pr1050-browser/node_modules/playwright"
+          printf 'BASELINE_ROOT=%s\n' "$BASELINE_ROOT" >> "$GITHUB_ENV"
+          printf 'CANDIDATE_ROOT=%s\n' "$CANDIDATE_ROOT" >> "$GITHUB_ENV"
+          printf 'EVIDENCE_DIR=%s\n' "$EVIDENCE_DIR" >> "$GITHUB_ENV"
+          printf 'PLAYWRIGHT_ROOT=%s\n' "$PLAYWRIGHT_ROOT" >> "$GITHUB_ENV"
+          mkdir -p "$EVIDENCE_DIR"
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.EXPECTED_HEAD_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Archive complete original trees and prepare each locked toolchain
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVIDENCE_DIR" "$RUNNER_TEMP/pr1050-before" "$RUNNER_TEMP/pr1050-after"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          test -z "$(git status --porcelain)"
+          git archive "$SOURCE_BASE" | tar -x -C "$RUNNER_TEMP/pr1050-before"
+          git archive "$EXPECTED_HEAD_SHA" | tar -x -C "$RUNNER_TEMP/pr1050-after"
+          git rev-parse HEAD > "$EVIDENCE_DIR/capture-sha.txt"
+          printf '%s\n' "$SOURCE_BASE" > "$EVIDENCE_DIR/base-sha.txt"
+          node --version > "$EVIDENCE_DIR/toolchain.txt"
+          pnpm --version >> "$EVIDENCE_DIR/toolchain.txt"
+          pnpm --dir "$CANDIDATE_ROOT" install --frozen-lockfile 2>&1 | tee "$EVIDENCE_DIR/candidate-install.log"
+          # Reuse only when both dependency inputs match byte-for-byte.
+          if cmp -s "$BASELINE_ROOT/package.json" "$CANDIDATE_ROOT/package.json" && cmp -s "$BASELINE_ROOT/pnpm-lock.yaml" "$CANDIDATE_ROOT/pnpm-lock.yaml"; then
+            ln -s "$CANDIDATE_ROOT/node_modules" "$BASELINE_ROOT/node_modules"
+            printf '%s\n' 'Identical package.json and pnpm-lock.yaml; shared candidate node_modules' > "$EVIDENCE_DIR/baseline-dependencies.txt"
+          else
+            pnpm --dir "$BASELINE_ROOT" install --frozen-lockfile 2>&1 | tee "$EVIDENCE_DIR/baseline-install.log"
+            printf '%s\n' 'Different dependency inputs; baseline installed from its own frozen lockfile' > "$EVIDENCE_DIR/baseline-dependencies.txt"
+          fi
+      - name: Install isolated browser and CJK screenshot fonts
+        run: |
+          set -euo pipefail
+          npm install --prefix "$RUNNER_TEMP/pr1050-browser" --no-save --ignore-scripts playwright@1.56.1 2>&1 | tee "$EVIDENCE_DIR/browser-install.log"
+          "$RUNNER_TEMP/pr1050-browser/node_modules/.bin/playwright" install --with-deps chromium 2>&1 | tee "$EVIDENCE_DIR/chromium-install.log"
+          # Keep APT signature verification; change only this package's download transport.
+          sudo timeout 180s apt-get -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 \
+            -o Acquire::Retries=2 -o APT::Update::Error-Mode=any \
+            -o Acquire::AllowInsecureRepositories=false -o APT::Get::AllowUnauthenticated=false \
+            update > "$EVIDENCE_DIR/font-package-update.log" 2>&1
+          python3 .github/scripts/pr1050-font-metadata.py
+          source "$EVIDENCE_DIR/font-package.env"
+          font_deb="$RUNNER_TEMP/pr1050-fonts-noto-cjk.deb"
+          font_downloaded=false
+          for font_mirror in https://archive.ubuntu.com/ubuntu https://mirrors.edge.kernel.org/ubuntu; do
+            printf 'Download: %s/%s\n' "$font_mirror" "$FONT_FILENAME" >> "$EVIDENCE_DIR/font-package-download.log"
+            if timeout 180s curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+              --retry 2 --retry-delay 2 --retry-max-time 120 --connect-timeout 10 --max-time 60 \
+              --output "$font_deb" "$font_mirror/$FONT_FILENAME" >> "$EVIDENCE_DIR/font-package-download.log" 2>&1; then
+              font_downloaded=true
+              break
+            fi
+          done
+          test "$font_downloaded" = true
+          printf '%s  %s\n' "$FONT_SHA256" "$font_deb" | sha256sum --check | tee "$EVIDENCE_DIR/font-package-integrity.log"
+          test "$(stat --format=%s "$font_deb")" = "$FONT_SIZE"
+          test "$(dpkg-deb --field "$font_deb" Package)" = fonts-noto-cjk
+          test "$(dpkg-deb --field "$font_deb" Version)" = "$FONT_VERSION"
+          test "$(dpkg-deb --field "$font_deb" Architecture)" = "$FONT_ARCHITECTURE"
+          sudo timeout 120s dpkg --install "$font_deb" > "$EVIDENCE_DIR/font-package-install.log" 2>&1
+          test "$(dpkg-query --show --showformat='${Status}' fonts-noto-cjk)" = 'install ok installed'
+          test "$(dpkg-query --show --showformat='${Version}' fonts-noto-cjk)" = "$FONT_VERSION"
+          timeout 60s fc-cache --force > "$EVIDENCE_DIR/font-cache.log" 2>&1
+          font_pattern='Noto Sans CJK SC:lang=zh-cn'
+          font_family="$(fc-match --format='%{family}' "$font_pattern")"
+          font_file="$(fc-match --format='%{file}' "$font_pattern")"
+          printf 'family=%s\nfile=%s\n' "$font_family" "$font_file" > "$EVIDENCE_DIR/font-verification.txt"
+          test "$font_family" = 'Noto Sans CJK SC'
+          test -s "$font_file"
+          dpkg-query --listfiles fonts-noto-cjk | grep -Fx -- "$font_file" >> "$EVIDENCE_DIR/font-verification.txt"
+          fc-list ':family=Noto Sans CJK SC:lang=zh-cn' --format='%{file}\n' | grep -Fx -- "$font_file" >> "$EVIDENCE_DIR/font-verification.txt"
+      - name: Capture actual before and after components and interactions
+        run: |
+          set -euo pipefail
+          node .github/scripts/pr1050-ui-evidence.mjs 2>&1 | tee "$EVIDENCE_DIR/render.log"
+          test -z "$(git status --porcelain)"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: pr1050-ui-${{ env.EXPECTED_HEAD_SHA }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pr1050-ui-evidence
+          if-no-files-found: error

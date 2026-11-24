@@ -251,7 +251,7 @@ func (s *OpenAIGatewayService) forwardWanVideo(ctx context.Context, c *gin.Conte
 	if err != nil {
 		return nil, nil, err
 	}
-	account.ApplyHeaderOverrides(req.Header)
+	account.ApplyHeaderOverridesWithContext(req.Context(), req.Header)
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/json")
 	if method == http.MethodPost {

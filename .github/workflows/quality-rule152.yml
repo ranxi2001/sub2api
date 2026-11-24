@@ -44,6 +44,24 @@ jobs:
             cp "$oracle" "$red_dir/$oracle"
           done
           (cd "$red_dir" && sha256sum -c "$GITHUB_WORKSPACE/evidence/test-input.sha256")
+          # The gate delegates to the pinned repository's positional billing API.
+          # Adapt only its signature and delegate call after verifying the identical oracle.
+          python3 - "$red_dir/backend/internal/repository/quality_rule152_integration_test.go" <<'PYTHON'
+          from pathlib import Path
+          import sys
+          path = Path(sys.argv[1])
+          source = path.read_text()
+          for current, historical in [
+              ("a *service.Account, settings service.AccountBillingSettingsUpdate) error {",
+               "a *service.Account, probe, rate *bool, multiplier *float64) error {"),
+              ("r.AdminAccountRepository.UpdateWithAccountBillingSettings(ctx, a, settings)",
+               "r.AdminAccountRepository.UpdateWithAccountBillingSettings(ctx, a, probe, rate, multiplier)"),
+          ]:
+              if source.count(current) != 1:
+                  raise SystemExit("unexpected billing gate signature or delegate")
+              source = source.replace(current, historical)
+          path.write_text(source)
+          PYTHON
           set +e
           (cd "$red_dir/backend" && go test -tags=integration ./internal/repository -run '^TestQuality152' -count=1 -v) > evidence/red.log 2>&1
           result=$?

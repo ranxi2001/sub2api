@@ -267,24 +267,38 @@
           <template #cell-name="{ row, value }">
             <a v-if="row.upstream_channel_binding" href="/admin/upstream-channels" class="block text-xs text-primary-600" data-testid="account-current-upstream">{{ row.upstream_channel_binding.channel ? `${row.upstream_channel_binding.channel.name} · ${row.upstream_channel_binding.channel.code}` : t('upstreamEntities.unbound') }}</a>
             <div class="flex flex-col">
-              <HelpTooltip
-                v-if="accountHomepageUrl(row)"
-                :content="accountHomepageUrl(row)"
-                width-class="w-max max-w-sm break-all"
-                class="-ml-1 self-start"
-              >
-                <template #trigger>
-                  <a
-                    :href="accountHomepageUrl(row)"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="border-b border-dotted border-gray-300 font-medium text-gray-900 dark:border-dark-600 dark:text-white"
-                  >
-                    {{ value }}
-                  </a>
-                </template>
-              </HelpTooltip>
-              <span v-else class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
+              <div class="flex items-center gap-1">
+                <HelpTooltip
+                  v-if="accountHomepageUrl(row)"
+                  :content="accountHomepageUrl(row)"
+                  width-class="w-max max-w-sm break-all"
+                  class="-ml-1 self-start"
+                >
+                  <template #trigger>
+                    <a
+                      :href="accountHomepageUrl(row)"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="border-b border-dotted border-gray-300 font-medium text-gray-900 dark:border-dark-600 dark:text-white"
+                    >
+                      {{ value }}
+                    </a>
+                  </template>
+                </HelpTooltip>
+                <span v-else class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
+                <button
+                  v-if="row.type === 'apikey' || (row.platform === 'antigravity' && row.type === 'upstream')"
+                  type="button"
+                  class="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:text-blue-400 dark:hover:bg-blue-900/30"
+                  :title="t('admin.accounts.upstreamBilling.saveGroup')"
+                  :aria-label="t('admin.accounts.upstreamBilling.saveGroup')"
+                  :disabled="syncingUpstreamGroup.has(row.id)"
+                  @click.stop="syncUpstreamGroup(row)"
+                >
+                  <Icon name="refresh" size="xs" :class="{ 'animate-spin': syncingUpstreamGroup.has(row.id) }" />
+                </button>
+                <NewFeatureBadge v-if="authStore.user?.id != null && (row.type === 'apikey' || (row.platform === 'antigravity' && row.type === 'upstream'))" :notice-id="NEW_FEATURE_NOTICES.upstreamBillingGroupSync" :user-id="authStore.user.id" compact />
+              </div>
               <span
                 v-if="accountDisplayEmail(row)"
                 class="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[200px]"
@@ -750,6 +764,7 @@ const togglingSchedulableIds = reactive(new Set<number>())
 const menu = reactive<{show:boolean, acc:Account|null, anchorRect:DOMRect|null}>({ show: false, acc: null, anchorRect: null })
 const exportingData = ref(false)
 const probingUpstreamBilling = reactive(new Set<number>())
+const syncingUpstreamGroup = reactive(new Set<number>())
 const upstreamBillingProbeGloballyEnabled = ref<boolean | undefined>(undefined)
 const upstreamBillingNow = ref(Date.now())
 const upstreamBillingRateETag = ref<string | null>(null)
@@ -2673,6 +2688,45 @@ const handleProbeUpstreamBilling = async (account: Account) => {
 const handleAccountUpdated = (updatedAccount: Account) => {
   patchAccountInList(updatedAccount)
   enterAutoRefreshSilentWindow()
+}
+// Only compare connection settings here. The server guard also covers secrets
+// omitted from lite rows and checks the row version inside the write transaction.
+const upstreamGroupSource = (account: AccountListItem) => JSON.stringify({
+  platform: account.platform, type: account.type, proxy_id: account.proxy_id ?? null,
+  credentials: account.credentials
+})
+const syncUpstreamGroup = async (account: AccountListItem) => {
+  if (syncingUpstreamGroup.has(account.id)) return
+  const original = { name: account.name, notes: account.notes, source: upstreamGroupSource(account) }
+  const contextVersion = accountListContextVersion
+  syncingUpstreamGroup.add(account.id)
+  try {
+    const fields = await adminAPI.accounts.previewUpstreamGroup({ account_id: account.id })
+    const current = accounts.value.find(item => item.id === account.id)
+    if (accountViewDisposed || contextVersion !== accountListContextVersion || !current || upstreamGroupSource(current) !== original.source) return
+    if (!fields.name && !fields.notes) {
+      appStore.showInfo(t('admin.accounts.upstreamBilling.groupUnavailable'))
+      return
+    }
+    if (current.name !== original.name || fields.name === current.name) delete fields.name
+    if (current.notes !== original.notes || fields.notes === current.notes) delete fields.notes
+    if (fields.name || fields.notes) {
+      // An older server cannot provide concurrency protection; never fall back
+      // to the unconditional PATCH that caused delayed previews to overwrite edits.
+      if (!fields.upstream_group_guard) {
+        appStore.showError(t('admin.accounts.upstreamBilling.groupFailed'))
+        return
+      }
+      const updated = await adminAPI.accounts.update(account.id, fields)
+      if (accountViewDisposed || contextVersion !== accountListContextVersion) return
+      if (accounts.value.find(item => item.id === account.id) === current) handleAccountUpdated(updated)
+    }
+    appStore.showSuccess(t('admin.accounts.upstreamBilling.groupSynced'))
+  } catch (error) {
+    if (!accountViewDisposed && contextVersion === accountListContextVersion) appStore.showError(extractApiErrorMessage(error, t('admin.accounts.upstreamBilling.groupFailed')))
+  } finally {
+    syncingUpstreamGroup.delete(account.id)
+  }
 }
 const formatExportTimestamp = () => {
   const now = new Date()

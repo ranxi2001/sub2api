@@ -4,6 +4,8 @@
  * browser; use a new ID to announce the feature again in a later release.
  */
 export const NEW_FEATURE_NOTICES = {
+  upstreamBillingGroupSync: 'upstream-billing-group-sync',
+  headerOverrideVariables: 'header-override-identity-variables',
   domesticRouteAutoSchedule: 'domestic-route-auto-schedule',
   modelPlazaCurrency: 'model-plaza-display-currency-20261121',
   exaSearch: 'exa-search-provider',

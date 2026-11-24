@@ -50,7 +50,19 @@
       class="space-y-5"
     >
       <div>
-        <label class="input-label">{{ t('admin.accounts.accountName') }}</label>
+        <div class="mb-1 flex flex-wrap items-center justify-between gap-2">
+          <label class="input-label mb-0">{{ t('admin.accounts.accountName') }}</label>
+          <UpstreamGroupSyncButton
+            :user-id="authStore.user?.id"
+            v-if="form.type === 'apikey'"
+            v-model:name="form.name"
+            v-model:notes="form.notes"
+            :source="upstreamGroupSource"
+            allow-auto
+            :auto="upstreamGroupSyncEnabled"
+            @update:auto="setUpstreamGroupSync"
+          />
+        </div>
         <input
           v-model="form.name"
           type="text"
@@ -59,6 +71,9 @@
           :placeholder="t('admin.accounts.enterAccountName')"
           data-tour="account-form-name"
         />
+        <p v-if="form.type === 'apikey' && upstreamGroupSyncEnabled" class="input-hint">
+          {{ t('admin.accounts.upstreamBilling.autoSyncGroupHint') }}
+        </p>
       </div>
       <div>
         <label class="input-label">{{ t('admin.accounts.notes') }}</label>
@@ -2077,6 +2092,8 @@
             </div>
 
             <HeaderOverrideEditor
+
+              :user-id="authStore.user?.id"
               :rows="headerOverrideRows"
               @update:rows="headerOverrideRows = $event"
             />
@@ -2532,7 +2549,10 @@
           </div>
 
           <HeaderOverrideEditor
+
+            :user-id="authStore.user?.id"
             :rows="headerOverrideRows"
+            :allow-variables="false"
             @update:rows="headerOverrideRows = $event"
           />
         </div>
@@ -4445,6 +4465,7 @@ import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
 import OpenAIProxySettings from '@/components/account/OpenAIProxySettings.vue'
 import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import UpstreamRequestIdHeaderField from '@/components/account/UpstreamRequestIdHeaderField.vue'
+import UpstreamGroupSyncButton from '@/components/account/UpstreamGroupSyncButton.vue'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ProxySelector from '@/components/common/ProxySelector.vue'
@@ -4765,7 +4786,15 @@ const addMethod = ref<AddMethod>('oauth') // For oauth-based: 'oauth' or 'setup-
 const apiKeyBaseUrl = ref('https://api.anthropic.com')
 const providerImportMode = ref(false), providerSelection = ref<ProviderSelection | null>(null)
 const apiKeyValue = ref('')
+const upstreamGroupSyncEnabled = ref(false)
+function setUpstreamGroupSync(enabled: boolean) {
+  upstreamGroupSyncEnabled.value = enabled
+  if (enabled) upstreamBillingAutoProbeEnabled.value = true
+}
 const upstreamBillingAutoProbeEnabled = ref(true)
+watch(upstreamBillingAutoProbeEnabled, (enabled) => {
+  if (!enabled) upstreamGroupSyncEnabled.value = false
+})
 
 // ── 国产供应商（Kimi / Zhipu / DeepSeek）账号类型、API 协议与端点 ──
 // 多协议供应商（国产厂商与走通用表单的供应商）的接入模式；OpenCode 用 openCodeAccountMode。
@@ -4973,11 +5002,23 @@ function onCnPresetSelect(preset: { mode: CnAccountMode; protocol: CnApiProtocol
   apiKeyBaseUrl.value = preset.url
 }
 
-const syncPreviewCredentials = computed(() => {
-  if (!apiKeyValue.value.trim()) return undefined
-  const baseUrl = isMultiProtocolPlatform.value && apiProtocol.value === 'adaptive'
+const previewBaseUrl = computed(() =>
+  isMultiProtocolPlatform.value && apiProtocol.value === 'adaptive'
     ? adaptiveBaseUrls.value.chat_completions.trim() || apiKeyBaseUrl.value.trim()
     : apiKeyBaseUrl.value.trim()
+)
+
+const upstreamGroupSource = computed(() => {
+  const antigravity = form.platform === 'antigravity'
+  const baseURL = antigravity ? upstreamBaseUrl.value.trim() : previewBaseUrl.value
+  const apiKey = (antigravity ? upstreamApiKey.value : apiKeyValue.value).trim()
+  return baseURL && apiKey
+    ? { platform: form.platform, base_url: baseURL, api_key: apiKey, proxy_id: form.proxy_id }
+    : null
+})
+
+const syncPreviewCredentials = computed(() => {
+  if (!apiKeyValue.value.trim()) return undefined
   const modelMapping = buildModelMappingObject(
     modelRestrictionMode.value,
     allowedModels.value,
@@ -4986,7 +5027,7 @@ const syncPreviewCredentials = computed(() => {
   return {
     platform: form.platform,
     type: form.type,
-    base_url: baseUrl || undefined,
+    base_url: previewBaseUrl.value || undefined,
     api_key: apiKeyValue.value.trim(),
     proxy_id: authStore.isObserver ? undefined : form.proxy_id ?? undefined,
     ...(modelMapping ? { model_mapping: modelMapping } : {})
@@ -5068,7 +5109,9 @@ const validateGrokOAuthUpstreamConfig = (): boolean => {
     }
   }
   if (headerOverrideEnabled.value) {
-    const headerError = validateHeaderOverrideRows(headerOverrideRows.value)
+    const headerError = validateHeaderOverrideRows(headerOverrideRows.value, {
+      allowVariables: false
+    })
     if (headerError) {
       appStore.showError(t(`admin.accounts.headerOverride.${headerError}`))
       return false
@@ -6184,6 +6227,7 @@ const resetForm = () => {
   apiKeyValue.value = ''
   upstreamRequestIdHeader.value = ''
   upstreamBillingAutoProbeEnabled.value = true
+  upstreamGroupSyncEnabled.value = false
   editQuotaLimit.value = null
   editQuotaDailyLimit.value = null
   editQuotaWeeklyLimit.value = null
@@ -6870,6 +6914,7 @@ const handleSubmit = async () => {
     group_ids: form.group_ids,
     extra: withAccountExtraSettings(extra),
     upstream_billing_probe_enabled: upstreamBillingAutoProbeEnabled.value,
+    upstream_billing_group_sync_enabled: upstreamGroupSyncEnabled.value,
     auto_pause_on_expired: autoPauseOnExpired.value
   })
 }
@@ -7017,6 +7062,7 @@ const createAccountAndFinish = async (
     // 上游倍率探测对全部 API-key 平台开放（antigravity upstream 走本 helper）；
     // 非 apikey 类型（bedrock/oauth）不传，后端不动作。
     upstream_billing_probe_enabled: type === 'apikey' || (type === 'gateway' && gatewayKind.value === 'sub2api') ? upstreamBillingAutoProbeEnabled.value : undefined,
+    upstream_billing_group_sync_enabled: type === 'apikey' ? upstreamGroupSyncEnabled.value : undefined,
     auto_pause_on_expired: autoPauseOnExpired.value
   })
 }

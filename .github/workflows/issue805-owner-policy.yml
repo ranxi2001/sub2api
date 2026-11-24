@@ -7,6 +7,8 @@ on:
       - 'backend/**'
       - '.github/scripts/prepare-moderation-red-fixtures.sh'
       - '.github/scripts/prepare-replay-red-fixtures.sh'
+      - '.github/scripts/prepare-upstream-v0222-red-fixtures.py'
+      - '.github/scripts/upstream-v0222-red-fixtures.txt'
       - '.github/workflows/issue805-owner-policy.yml'
   workflow_dispatch:
 
@@ -76,6 +78,41 @@ jobs:
           done < <(git diff --no-renames --name-only "$baseline" "$EXPECTED_HEAD_SHA" -- 'backend/**/*.go')
           git diff --exit-code "$baseline" -- 'backend/**/*.go' ':!backend/**/*_test.go'
           git diff --exit-code "$EXPECTED_HEAD_SHA" -- 'backend/**/*_test.go'
+          baseline_tests=(
+            backend/internal/handler/api_key_long_context_admission_test.go
+            backend/internal/handler/api_key_long_context_ws_test.go
+            backend/internal/handler/api_key_model_policy_write_permissions_test.go
+            backend/internal/handler/gemini_cached_contents_billing_test.go
+          )
+          omission_tests=(
+            backend/internal/handler/openai_409_omit_history_test.go
+            backend/internal/handler/openai_409_readable_continuation_test.go
+            backend/internal/handler/openai_409_http_rebuild_test.go
+            backend/internal/handler/openai_409_shadow_http_test.go
+            backend/internal/handler/openai_409_shadow_race_test.go
+            backend/internal/handler/openai_409_ws_rebuild_test.go
+            backend/internal/handler/openai_409_ws_oracle_test.go
+            backend/internal/handler/openai_400_omit_history_test.go
+            backend/internal/handler/openai_issue854_continuation_test.go
+            backend/internal/handler/openai_issue854_upstream_test.go
+            backend/internal/handler/openai_issue854_postgres_test.go
+          )
+          # Each fixture has one restoration owner. Fail if the shared manifest
+          # grows to overlap either local list, before any fixture is modified.
+          python3 - "$GITHUB_WORKSPACE/.github/scripts/upstream-v0222-red-fixtures.txt" "${baseline_tests[@]}" "${omission_tests[@]}" <<'PY'
+          from pathlib import Path
+          import sys
+          shared = [p for p in Path(sys.argv[1]).read_text().splitlines() if p and not p.startswith('#')]
+          local = sys.argv[2:]
+          if len(shared) != len(set(shared)) or len(local) != len(set(local)):
+              raise SystemExit('duplicate historical fixture owner')
+          overlap = sorted(set(shared) & set(local))
+          if overlap:
+              raise SystemExit(f'shared/local fixture ownership overlap: {overlap}')
+          if 'backend/internal/handler/usage_records_test.go' not in shared:
+              raise SystemExit('usage_records fixture must retain its shared restoration owner')
+          print(f'fixture ownership: shared={len(shared)} local={len(local)} intersection=empty')
+          PY
           bash "$GITHUB_WORKSPACE/.github/scripts/exclude-later-http2-red-fixtures.sh" "$baseline" . "$EXPECTED_HEAD_SHA" | tee "$RUNNER_TEMP/issue805-evidence/http2-exclusions.txt"
           # The HTTP2 helper calls prepare-upstream-v0222-red-fixtures.py via
           # prepare-free-fast-red-fixtures.sh. That shared owner alone removes
@@ -91,22 +128,26 @@ jobs:
           # These unrelated context-policy tests require newer production symbols.
           # Use their baseline versions only in this disposable RED checkout so
           # compilation can reach the unchanged Issue805 business assertions.
-          for target in backend/internal/handler/api_key_long_context_admission_test.go backend/internal/handler/api_key_long_context_ws_test.go backend/internal/handler/api_key_model_policy_write_permissions_test.go backend/internal/handler/gemini_cached_contents_billing_test.go; do
-            git show "$baseline:$target" > "$target"
+          for target in "${baseline_tests[@]}"; do
+            candidate_blob=$(git rev-parse "$EXPECTED_HEAD_SHA:$target")
+            test "$(git hash-object "$target")" = "$candidate_blob"
             expected=$(git rev-parse "$baseline:$target")
+            git show "$baseline:$target" > "$target"
             actual=$(git hash-object "$target")
-            echo "$target test=baseline expected=$expected actual=$actual" >> "$RUNNER_TEMP/issue805-evidence/red-blobs.txt"
+            echo "$target owner=local test=baseline candidate=$candidate_blob expected=$expected actual=$actual" >> "$RUNNER_TEMP/issue805-evidence/red-blobs.txt"
             test "$expected" = "$actual"
           done
           # The later omission fixtures require a Beta setting absent from this
           # baseline. The readable/task-rebuild fixtures import its settings.
           # Exclude this exact dependency set only in the old
           # Issue805 RED; GREEN and each feature's own TDD job retain them.
-          for omission_test in backend/internal/handler/openai_409_omit_history_test.go backend/internal/handler/openai_409_readable_continuation_test.go backend/internal/handler/openai_409_http_rebuild_test.go backend/internal/handler/openai_409_shadow_http_test.go backend/internal/handler/openai_409_shadow_race_test.go backend/internal/handler/openai_409_ws_rebuild_test.go backend/internal/handler/openai_409_ws_oracle_test.go backend/internal/handler/openai_400_omit_history_test.go backend/internal/handler/openai_issue854_continuation_test.go backend/internal/handler/openai_issue854_upstream_test.go backend/internal/handler/openai_issue854_postgres_test.go; do
-            git cat-file -e "$EXPECTED_HEAD_SHA:$omission_test"
+          for omission_test in "${omission_tests[@]}"; do
+            if git cat-file -e "$baseline:$omission_test" 2>/dev/null; then exit 1; fi
+            candidate_blob=$(git rev-parse "$EXPECTED_HEAD_SHA:$omission_test")
+            test "$(git hash-object "$omission_test")" = "$candidate_blob"
             rm -- "$omission_test"
             test ! -e "$omission_test"
-            echo "$omission_test test=candidate-only actual=absent" >> "$RUNNER_TEMP/issue805-evidence/red-blobs.txt"
+            echo "$omission_test owner=local baseline=absent candidate=$candidate_blob actual=absent" >> "$RUNNER_TEMP/issue805-evidence/red-blobs.txt"
           done
           # The pinned HTTP2 exclusion helper above already handles the handler
           # fixture absent from this baseline; do not remove it a second time.

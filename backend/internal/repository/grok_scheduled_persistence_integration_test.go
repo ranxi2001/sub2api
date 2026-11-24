@@ -422,7 +422,7 @@ func TestIssue817GrokNegativePreservesAdaptiveCooldown(t *testing.T) {
 				require.False(t, cleared, "a positive that observed G1 cannot clear G2 after a name edit")
 				// The admin path normally uses the billing-settings capability.
 				staleBillingEdit.Name = "stale billing-settings name edit"
-				require.NoError(t, accounts.(service.AccountBillingSettingsRepository).UpdateWithAccountBillingSettings(ctx, staleBillingEdit, nil, nil, nil))
+				require.NoError(t, accounts.(service.AccountBillingSettingsRepository).UpdateWithAccountBillingSettings(ctx, staleBillingEdit, service.AccountBillingSettingsUpdate{SetName: true, SetNotes: true}))
 				account, err = accounts.GetByID(ctx, id)
 				require.NoError(t, err)
 				require.True(t, generation.Equal(*account.RateLimitedAt))

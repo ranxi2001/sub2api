@@ -20,6 +20,8 @@ const {
   getAllProxies,
   getAllGroups,
   refreshCredentials,
+  previewUpstreamGroup,
+  updateAccount,
   showError,
   showWarning
 } = vi.hoisted(() => ({
@@ -36,6 +38,8 @@ const {
   getAllProxies: vi.fn(),
   getAllGroups: vi.fn(),
   refreshCredentials: vi.fn(),
+  previewUpstreamGroup: vi.fn(),
+  updateAccount: vi.fn(),
   showError: vi.fn(),
   showWarning: vi.fn()
 }))
@@ -57,7 +61,9 @@ vi.mock('@/api/admin', () => ({
       batchClearError: vi.fn(),
       batchRefresh: vi.fn(),
       toggleSchedulable: vi.fn(),
-      refreshCredentials
+      refreshCredentials,
+      previewUpstreamGroup,
+      update: updateAccount
     },
     proxies: { getAll: getAllProxies },
     groups: { getAll: getAllGroups }
@@ -83,6 +89,7 @@ const DataTableStub = defineComponent({
   template: `
     <div>
       <template v-if="!loading"><div v-for="row in data" :key="row.id" :data-account-name="row.name">
+        <slot name="cell-name" :row="row" :value="row.name" />
         <slot name="cell-groups" :row="row" />
         <slot name="cell-capacity" :row="row" />
         <slot name="cell-performance" :row="row" />
@@ -193,6 +200,8 @@ describe('admin AccountsView lite account list', () => {
     getAllGroups.mockReset().mockResolvedValue([{ id: 7, name: 'codex', platform: 'openai' }])
     getUpstreamBillingRatesWithEtag.mockReset().mockResolvedValue({ notModified: true, data: null })
     probeUpstreamBilling.mockReset()
+    previewUpstreamGroup.mockReset()
+    updateAccount.mockReset()
     refreshCredentials.mockReset()
     showError.mockReset()
     showWarning.mockReset()
@@ -232,6 +241,92 @@ describe('admin AccountsView lite account list', () => {
     expect(getPerformance).toHaveBeenCalledTimes(1)
     expect(getPerformance).toHaveBeenCalledWith([42], expect.any(AbortSignal))
     wrapper.unmount()
+  })
+
+  it('syncs the selected row without clearing notes missing from the upstream', async () => {
+    const account = { ...listRow, type: 'apikey', notes: 'local notes' }
+    listAccounts.mockResolvedValue({ items: [account], total: 1, page: 1, page_size: 20, pages: 1 })
+    const guard = { source: 'synthetic-source', name: account.name, notes: account.notes }
+    previewUpstreamGroup.mockResolvedValueOnce({}).mockResolvedValueOnce({ name: 'New group', upstream_group_guard: guard })
+    updateAccount.mockReset().mockResolvedValue({ ...account, name: 'New group' })
+    const wrapper = mountView()
+    await flushPromises()
+    const sync = wrapper.get('button[aria-label="admin.accounts.upstreamBilling.saveGroup"]')
+    await sync.trigger('click')
+    await flushPromises()
+    expect(updateAccount).not.toHaveBeenCalled()
+    await sync.trigger('click')
+    await flushPromises()
+    expect(previewUpstreamGroup).toHaveBeenLastCalledWith({ account_id: account.id })
+    expect(updateAccount).toHaveBeenCalledWith(account.id, { name: 'New group', upstream_group_guard: guard })
+    expect(wrapper.find('[data-account-name="New group"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it.each([
+    { label: 'name', edit: { name: 'Manual name' }, expected: { notes: 'Remote notes' } },
+    { label: 'notes', edit: { notes: 'Manual notes' }, expected: { name: 'Remote name' } },
+    { label: 'both text fields', edit: { name: 'Manual name', notes: 'Manual notes' }, expected: null },
+    { label: 'credentials', edit: { credentials: { api_key: 'synthetic-replacement' } }, expected: null },
+    { label: 'URL', edit: { credentials: { base_url: 'https://different.example/v1' } }, expected: null },
+    { label: 'protocol URL', edit: { credentials: { api_base_urls: { chat_completions: 'https://different.example/v1' } } }, expected: null },
+    { label: 'proxy', edit: { proxy_id: 9 }, expected: null },
+    { label: 'platform', edit: { platform: 'gemini' }, expected: null },
+    { label: 'unrelated priority', edit: { priority: 8 }, expected: { name: 'Remote name', notes: 'Remote notes' } },
+    { label: 'unchanged', edit: {}, expected: { name: 'Remote name', notes: 'Remote notes' } }
+  ])('protects a completed $label edit from a delayed group preview', async ({ edit, expected }) => {
+    const account = { ...listRow, type: 'apikey', notes: 'Local notes' }
+    const guard = { source: 'synthetic-source', name: account.name, notes: account.notes }
+    listAccounts.mockResolvedValue({ items: [account], total: 1, page: 1, page_size: 20, pages: 1 })
+    let resolvePreview!: (fields: Record<string, unknown>) => void
+    previewUpstreamGroup.mockReturnValue(new Promise(resolve => { resolvePreview = resolve }))
+    const current = { ...account, ...edit }
+    updateAccount.mockImplementation(async (_id, fields) => ({ ...current, ...fields }))
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('button[aria-label="admin.accounts.upstreamBilling.saveGroup"]').trigger('click')
+    // The real view's editor event replaces the list row, reproducing the stale reference.
+    wrapper.findComponent(EditAccountModalStub).vm.$emit('updated', current)
+    await flushPromises()
+    resolvePreview({ name: 'Remote name', notes: 'Remote notes', upstream_group_guard: guard })
+    await flushPromises()
+    if (expected) {
+      expect(updateAccount).toHaveBeenCalledTimes(1)
+      expect(updateAccount).toHaveBeenCalledWith(account.id, { ...expected, upstream_group_guard: guard })
+    } else {
+      expect(updateAccount).not.toHaveBeenCalled()
+    }
+    const displayed = wrapper.findComponent(UpstreamBillingRateCell).props('account')
+    expect(displayed.name).toBe(expected?.name ?? current.name)
+    expect(displayed.notes).toBe(expected?.notes ?? current.notes)
+    expect(displayed.priority).toBe(current.priority)
+    wrapper.unmount()
+  })
+
+  it.each(['preview failure', 'patch conflict', 'missing guard', 'unmounted'])('keeps local text on %s', async (scenario) => {
+    const account = { ...listRow, type: 'apikey', notes: 'Local notes' }
+    listAccounts.mockResolvedValue({ items: [account], total: 1, page: 1, page_size: 20, pages: 1 })
+    let resolvePreview!: (fields: Record<string, unknown>) => void
+    let rejectPreview!: (error: Error) => void
+    previewUpstreamGroup.mockReturnValue(new Promise((resolve, reject) => { resolvePreview = resolve; rejectPreview = reject }))
+    updateAccount.mockRejectedValue({ response: { status: 409, data: { message: 'Account changed' } } })
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('button[aria-label="admin.accounts.upstreamBilling.saveGroup"]').trigger('click')
+    if (scenario === 'unmounted') wrapper.unmount()
+    if (scenario === 'preview failure') rejectPreview(new Error('Preview failed'))
+    else resolvePreview({ name: 'Remote name', ...(scenario === 'missing guard' ? {} : {
+      upstream_group_guard: { source: 'synthetic-source', name: account.name, notes: account.notes }
+    }) })
+    await flushPromises()
+    if (scenario === 'patch conflict') expect(updateAccount).toHaveBeenCalledTimes(1)
+    else expect(updateAccount).not.toHaveBeenCalled()
+    if (scenario !== 'unmounted') {
+      expect(wrapper.findComponent(UpstreamBillingRateCell).props('account').name).toBe(account.name)
+      expect(showError).toHaveBeenCalled()
+      expect(wrapper.get('button[aria-label="admin.accounts.upstreamBilling.saveGroup"]').attributes('disabled')).toBeUndefined()
+      wrapper.unmount()
+    }
   })
 
   it.each([

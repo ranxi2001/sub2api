@@ -22,15 +22,14 @@ type accountBillingSettingsAdminRepo struct {
 	*upstreamBillingProbeAccountRepo
 	concurrentRate   *float64
 	lastExplicitRate *float64
+	lastSettings     AccountBillingSettingsUpdate
 	updateCalls      int
 }
 
 func (r *accountBillingSettingsAdminRepo) UpdateWithAccountBillingSettings(
 	_ context.Context,
 	account *Account,
-	probeEnabled *bool,
-	rateSyncEnabled *bool,
-	rateMultiplier *float64,
+	settings AccountBillingSettingsUpdate,
 ) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -39,21 +38,31 @@ func (r *accountBillingSettingsAdminRepo) UpdateWithAccountBillingSettings(
 	if current == nil {
 		return ErrAccountNotFound
 	}
+	if settings.ExpectedUpdatedAt != nil && !current.UpdatedAt.Equal(*settings.ExpectedUpdatedAt) {
+		return ErrAccountUpdateConflict
+	}
+	r.lastSettings = settings
 	updated := *account
+	if !settings.SetName {
+		updated.Name = current.Name
+	}
+	if !settings.SetNotes {
+		updated.Notes = current.Notes
+	}
 	updated.Credentials = mergeMap(nil, account.Credentials)
 	updated.Extra = mergeMap(nil, account.Extra)
 	if updated.Extra == nil {
 		updated.Extra = make(map[string]any)
 	}
-	if probeEnabled != nil {
-		updated.Extra[UpstreamBillingProbeEnabledExtraKey] = *probeEnabled
+	if settings.ProbeEnabled != nil {
+		updated.Extra[UpstreamBillingProbeEnabledExtraKey] = *settings.ProbeEnabled
 	}
-	if rateSyncEnabled != nil {
-		updated.Extra[UpstreamBillingRateSyncEnabledExtraKey] = *rateSyncEnabled
+	if settings.RateSyncEnabled != nil {
+		updated.Extra[UpstreamBillingRateSyncEnabledExtraKey] = *settings.RateSyncEnabled
 	}
 	switch {
-	case rateMultiplier != nil:
-		value := *rateMultiplier
+	case settings.RateMultiplier != nil:
+		value := *settings.RateMultiplier
 		updated.RateMultiplier = &value
 		r.lastExplicitRate = &value
 	case r.concurrentRate != nil:
@@ -930,4 +939,101 @@ func TestCreateAccountDropsOpenCodeGoManagedKeys(t *testing.T) {
 	require.NotContains(t, created.Extra, OpenCodeGoUsageAutoRefreshExtraKey)
 	require.NotContains(t, created.Extra, OpenCodeGoUsageSnapshotExtraKey)
 	require.Equal(t, "value", created.Extra["custom"])
+}
+
+func TestCreateAccountGroupSyncIsExplicitAndEnablesOnlyTheProbe(t *testing.T) {
+	enabled, disabled := true, false
+	input := &CreateAccountInput{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	account, err := buildAccountForCreate(input, map[string]any{UpstreamBillingGroupSyncEnabledExtraKey: true})
+	require.NoError(t, err)
+	require.NotContains(t, account.Extra, UpstreamBillingGroupSyncEnabledExtraKey)
+	input.GroupSyncEnabled = &enabled
+	account, err = buildAccountForCreate(input, nil)
+	require.NoError(t, err)
+	require.True(t, upstreamBillingProbeEnabled(account))
+	require.Equal(t, true, account.Extra[UpstreamBillingGroupSyncEnabledExtraKey])
+	require.False(t, upstreamBillingRateSyncEnabled(account))
+	copyExtra, err := duplicateAccountExtra(account.Extra)
+	require.NoError(t, err)
+	require.NotContains(t, copyExtra, UpstreamBillingGroupSyncEnabledExtraKey)
+	input.ProbeEnabled = &disabled
+	_, err = buildAccountForCreate(input, nil)
+	require.ErrorIs(t, err, ErrUpstreamBillingGroupSyncRequiresProbe)
+}
+
+func TestUpdateAccountUpstreamGroupGuardPreservesConcurrentEdits(t *testing.T) {
+	for _, change := range []string{"none", "name", "notes", "both", "priority", "api_key", "base_url", "api_base_urls", "header_overrides", "proxy", "platform"} {
+		t.Run(change, func(t *testing.T) {
+			notes := "Original notes"
+			original := &Account{ID: 83, Name: "Original name", Notes: &notes, Platform: PlatformOpenAI,
+				Type: AccountTypeAPIKey, Status: StatusActive, UpdatedAt: time.Date(2026, 11, 24, 1, 0, 0, 0, time.UTC),
+				Credentials: map[string]any{"api_key": "synthetic-key", "base_url": "https://relay.example/v1"}}
+			guard, err := NewUpstreamGroupSyncGuard(original)
+			require.NoError(t, err)
+			current := *original
+			current.Credentials = mergeMap(nil, original.Credentials)
+			current.UpdatedAt = current.UpdatedAt.Add(time.Second)
+			manualNotes := "Manual notes"
+			switch change {
+			case "name":
+				current.Name = "Manual name"
+			case "notes":
+				current.Notes = &manualNotes
+			case "both":
+				current.Name, current.Notes = "Manual name", &manualNotes
+			case "priority":
+				current.Priority = 8
+			case "api_key", "base_url":
+				current.Credentials[change] = "synthetic-replacement"
+			case "api_base_urls":
+				current.Credentials[change] = map[string]any{APIProtocolChatCompletions: "https://different.example/v1"}
+			case "header_overrides":
+				current.Credentials[change] = map[string]any{"x-relay-auth": "synthetic-relay-key"}
+			case "proxy":
+				id := int64(9)
+				current.ProxyID = &id
+			case "platform":
+				current.Platform = PlatformGemini
+			}
+			repo := &accountBillingSettingsAdminRepo{upstreamBillingProbeAccountRepo: &upstreamBillingProbeAccountRepo{
+				accounts: map[int64]*Account{original.ID: &current},
+			}}
+			svc := &adminServiceImpl{accountRepo: repo}
+			remoteNotes := "Remote notes"
+			input := &UpdateAccountInput{Name: "Remote name", Notes: &remoteNotes, UpstreamGroupGuard: guard}
+			got, err := svc.UpdateAccount(context.Background(), original.ID, input)
+			switch change {
+			case "api_key", "base_url", "api_base_urls", "header_overrides", "proxy", "platform":
+				require.ErrorIs(t, err, ErrAccountUpdateConflict)
+				require.Zero(t, repo.updateCalls)
+			default:
+				require.NoError(t, err)
+				require.NotNil(t, repo.lastSettings.ExpectedUpdatedAt)
+				require.True(t, current.UpdatedAt.Equal(*repo.lastSettings.ExpectedUpdatedAt))
+				wantName, wantNotes := "Remote name", "Remote notes"
+				if change == "name" || change == "both" {
+					wantName = "Manual name"
+				}
+				if change == "notes" || change == "both" {
+					wantNotes = "Manual notes"
+				}
+				require.Equal(t, wantName, got.Name)
+				require.Equal(t, wantNotes, *got.Notes)
+				require.Equal(t, current.Priority, got.Priority)
+			}
+			require.Equal(t, "Remote name", input.Name)
+			require.Equal(t, "Remote notes", *input.Notes)
+		})
+	}
+}
+
+func TestUpdateAccountUpstreamGroupGuardRequiresAtomicRepository(t *testing.T) {
+	account := &Account{ID: 81, Name: "Original", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive}
+	repo := &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{account.ID: account}}
+	guard, err := NewUpstreamGroupSyncGuard(account)
+	require.NoError(t, err)
+	svc := &adminServiceImpl{accountRepo: repo}
+	_, err = svc.UpdateAccount(context.Background(), account.ID, &UpdateAccountInput{Name: "Remote", UpstreamGroupGuard: guard})
+	require.ErrorIs(t, err, ErrAccountUpdateConflict)
+	require.Equal(t, "Original", repo.accounts[account.ID].Name)
 }

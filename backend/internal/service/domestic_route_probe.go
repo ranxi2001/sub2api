@@ -150,7 +150,7 @@ func (s *AccountTestService) probeDomesticRoute(ctx context.Context, a *Account,
 		req.Header.Set("Authorization", "Bearer "+key)
 		applyOpenAIAPIKeyIdentityHeaders(req.Header, a, a.GetOpenAIUserAgent())
 	}
-	a.ApplyHeaderOverrides(req.Header)
+	a.ApplyHeaderOverridesWithContext(withoutHeaderOverrideRequestScope(req.Context()), req.Header)
 	start := time.Now()
 	resp, err := s.doCNProviderAdaptiveRequest(req, a)
 	if err != nil {

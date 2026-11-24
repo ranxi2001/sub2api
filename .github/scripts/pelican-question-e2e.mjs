@@ -204,6 +204,7 @@ async function browser() {
       }
     })
     page = await context.newPage()
+    assert.equal(page.url(), 'about:blank', 'install the navigation boundary before any application timers exist')
     lifecycle = createBrowserLifecycleMetadata(page, () => ({ stage, active_gate: state.active_gate }))
     const navigation = createPageNavigation(page, {
       lifecycle,

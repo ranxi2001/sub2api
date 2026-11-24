@@ -1,0 +1,21 @@
+package repository
+
+import (
+	"context"
+
+	dbent "github.com/Wei-Shaw/sub2api/ent"
+	"github.com/Wei-Shaw/sub2api/internal/service"
+)
+
+// Used only with the pinned pre-group-sync repositories in issue817-grok-persistence.
+func (r *accountRepository) UpdateWithAccountBillingSettings(ctx context.Context, account *service.Account, settings service.AccountBillingSettingsUpdate) error {
+	return r.historicalUpdateWithAccountBillingSettings(ctx, account, settings.ProbeEnabled, settings.RateSyncEnabled, settings.RateMultiplier)
+}
+
+func (r *accountRepository) UpdateUpstreamBillingProbeSnapshot(ctx context.Context, account *service.Account, snapshot *service.UpstreamBillingProbeSnapshot, rate *float64, _ service.BillingGroupInfo) error {
+	return r.historicalUpdateUpstreamBillingProbeSnapshot(ctx, account, snapshot, rate)
+}
+
+func lockAndMergeAccountProbeExtra(ctx context.Context, client *dbent.Client, account *service.Account, settings service.AccountBillingSettingsUpdate) (map[string]any, error) {
+	return historicalLockAndMergeAccountProbeExtra(ctx, client, account, settings.ProbeEnabled, settings.RateSyncEnabled)
+}

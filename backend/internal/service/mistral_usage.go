@@ -146,7 +146,7 @@ func (c *mistralUsageClient) get(ctx context.Context, path string, out any) erro
 	}
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	req.Header.Set("Accept", "application/json")
-	c.account.ApplyHeaderOverrides(req.Header)
+	c.account.ApplyHeaderOverridesWithContext(withoutHeaderOverrideRequestScope(req.Context()), req.Header)
 
 	resp, err := c.httpUpstream.Do(req, c.proxyURL, c.account.ID, maxInt(c.account.Concurrency, 1))
 	if err != nil {

@@ -134,7 +134,7 @@ func (s *UpstreamBillingProbeService) newAPIRequest(ctx context.Context, a *Acco
 	// which some upstream gateways reject on token inventory routes.
 	// Explicit account overrides still take precedence.
 	req.Header.Set("User-Agent", "Sub2API-Upstream-Probe/1.0")
-	a.ApplyHeaderOverrides(req.Header)
+	a.ApplyHeaderOverridesWithContext(withoutHeaderOverrideRequestScope(req.Context()), req.Header)
 	for key := range req.Header {
 		if strings.EqualFold(key, "Authorization") || strings.EqualFold(key, "New-Api-User") || strings.EqualFold(key, "Cookie") {
 			delete(req.Header, key)
