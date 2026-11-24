@@ -3,11 +3,13 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/model"
@@ -334,6 +336,115 @@ func TestOpenAIGatewayService_APIKeyPassthrough_ContextWindowPreservesCodeAndCom
 		// 心跳已提交时 error.code 也必须保留，否则 compact 流上客户端仍无法识别该错误。
 		require.Equal(t, "invalid_encrypted_content", gjson.Get(events[0][1], "response.error.code").String())
 	})
+}
+
+func TestOpenAIGatewayService_APIKeyPassthrough_NestedErrorCodePreservesProtocolAndSanitization(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	credentials := map[string]any{
+		"api_key": "sk-test-secret-key", "base_url": "https://secret-upstream.example/v1",
+		"access_token": "fake-access-secret", "refresh_token": "fake-refresh-secret",
+	}
+	for _, tc := range []struct {
+		name       string
+		innerCode  any
+		wantCode   string
+		classified bool
+	}{
+		{"encrypted", "invalid_encrypted_content", "invalid_encrypted_content", true},
+		{"signature", "thinking_signature_invalid", "thinking_signature_invalid", true},
+		// Rules exercise the same envelope with ordinary/sensitive codes. Only
+		// the two exact protocol identifiers may bypass diagnostic redaction.
+		{"ordinary", "inner_code", "inner_code", false},
+		{"credential", "code:sk-test-secret-key", "code:[redacted]", false},
+		{"host_and_query", "code:secret-upstream.example?key=query-secret", "code:[upstream]?key=***", false},
+		{"encrypted_with_diagnostic", "invalid_encrypted_content sk-test-secret-key", openAIEncryptedErrorRedacted, false},
+		{"signature_with_diagnostic", "thinking_signature_invalid sk-test-secret-key", openAIEncryptedErrorRedacted, false},
+		{"oversized", strings.Repeat("x", openAIPassthroughClientErrorFieldMaxBytes+1), "", false},
+		{"object", map[string]any{"internal_token": "sk-test-secret-key"}, "", false},
+		{"array", []string{"sk-test-secret-key"}, "", false},
+	} {
+		for _, outer := range []struct {
+			name    string
+			present bool
+			code    any
+		}{
+			{"missing", false, nil},
+			{"null", true, nil},
+			{"empty", true, ""},
+			{"blank", true, " \t "},
+		} {
+			for _, mode := range []string{"json", "compact_committed"} {
+				t.Run(tc.name+"/"+outer.name+"/"+mode, func(t *testing.T) {
+					message := "Request rejected at secret-upstream.example?key=query-secret for sk-test-secret-key fake-access-secret fake-refresh-secret"
+					wantMessage := "Request rejected at [upstream]?key=*** for [redacted] [redacted] [redacted]"
+					if tc.classified {
+						message = "The encrypted content gAAAAA_fake could not be verified. " + message
+						wantMessage = openAIEncryptedErrorRedacted
+					}
+					inner, err := json.Marshal(map[string]any{"error": map[string]any{
+						"code": tc.innerCode, "message": message, "internal_token": "sk-test-secret-key",
+					}})
+					require.NoError(t, err)
+					errorFields := map[string]any{
+						"message": string(inner), "type": "invalid_request_error",
+						"param":          "input sk-test-secret-key secret-upstream.example?key=query-secret",
+						"internal_token": "sk-test-secret-key",
+					}
+					if outer.present {
+						errorFields["code"] = outer.code
+					}
+					body, err := json.Marshal(map[string]any{"error": errorFields, "debug": "sk-test-secret-key"})
+					require.NoError(t, err)
+					rec, c := newOpenAIPassthroughErrorTestContext()
+					if mode == "compact_committed" {
+						c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
+						MarkOpenAICompactClientStream(c)
+						stop := StartOpenAICompactSSEKeepalive(c, time.Hour)
+						defer stop()
+						// Commit a real keepalive synchronously; no scheduler-dependent sleep.
+						require.True(t, c.MustGet(openAICompactSSEKeepaliveKey).(*openAICompactSSEKeepalive).beat())
+					}
+					if !tc.classified {
+						ruleSvc := &ErrorPassthroughService{}
+						ruleSvc.setLocalCache([]*model.ErrorPassthroughRule{{
+							ID: 1, Name: "nested-error-body", Enabled: true, Priority: 1,
+							ErrorCodes: []int{http.StatusBadRequest}, MatchMode: model.MatchModeAny,
+							Platforms: []string{PlatformOpenAI}, PassthroughCode: true, PassthroughBody: true,
+						}})
+						BindErrorPassthroughService(c, ruleSvc)
+					}
+					// Forward runs the actual classifier and response writer, including
+					// the committed compact bridge; do not test only the code helper.
+					forwardOpenAIPassthroughErrorForTest(t, c, http.StatusBadRequest, string(body), credentials)
+					payload, errorPath, wantCode := rec.Body.String(), "error", tc.wantCode
+					if mode == "compact_committed" {
+						require.Equal(t, http.StatusOK, rec.Code)
+						require.Contains(t, rec.Result().Header.Get("Content-Type"), "text/event-stream")
+						events := parseCompactBridgeSSE(t, stripKeepaliveComments(payload))
+						require.Len(t, events, 1)
+						require.Equal(t, "response.failed", events[0][0])
+						payload, errorPath = events[0][1], "response.error"
+						if wantCode == "" {
+							wantCode = "upstream_error"
+						}
+					} else {
+						require.Equal(t, http.StatusBadRequest, rec.Code)
+						require.Equal(t, "invalid_request_error", gjson.Get(payload, "error.type").String())
+						require.Equal(t, "input [redacted] [upstream]?key=***", gjson.Get(payload, "error.param").String())
+					}
+					if wantCode == "" {
+						require.False(t, gjson.Get(payload, errorPath+".code").Exists())
+					} else {
+						require.Equal(t, wantCode, gjson.Get(payload, errorPath+".code").String())
+					}
+					require.Equal(t, wantMessage, gjson.Get(payload, errorPath+".message").String())
+					for _, secret := range []string{"gAAAAA_fake", "sk-test-secret-key", "secret-upstream.example", "query-secret", "fake-access-secret", "fake-refresh-secret", "internal_token", "debug"} {
+						require.NotContains(t, rec.Body.String(), secret)
+					}
+				})
+			}
+		}
+	}
 }
 
 // forwardOpenAIPassthroughErrorForTest 让透传账号收到给定的上游错误响应，返回写给客户端的结果。

@@ -91,7 +91,13 @@ func openAIPassthroughClientErrorCode(account *Account, body []byte) string {
 	if !blank {
 		return openAIPassthroughClientErrorField(account, code)
 	}
-	inner := sanitizeOpenAIPassthroughClientErrorText(account, extractUpstreamErrorCode(body))
+	inner := extractUpstreamErrorCode(body)
+	// Apply the same exact protocol-code exception to the classifier's nested
+	// message fallback. Diagnostic text and every other field stay sanitized.
+	if inner == "invalid_encrypted_content" || inner == "thinking_signature_invalid" {
+		return inner
+	}
+	inner = sanitizeOpenAIPassthroughClientErrorText(account, inner)
 	if len(inner) > openAIPassthroughClientErrorFieldMaxBytes || strings.HasPrefix(inner, "{") || strings.HasPrefix(inner, "[") {
 		return ""
 	}
