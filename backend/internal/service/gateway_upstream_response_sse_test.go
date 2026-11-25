@@ -27,25 +27,32 @@ func TestAnthropicModelNotFoundFailover(t *testing.T) {
 		{"unknown resource", `{"error":{"type":"not_found_error","message":"Resource not found"}}`, false},
 		{"unknown endpoint", "404 page not found", false},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			c, _ := gin.CreateTestContext(httptest.NewRecorder())
-			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
-			resp := &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(strings.NewReader(tc.body))}
-			acct := &Account{ID: 7, Platform: PlatformAnthropic}
-			failure := (&GatewayService{}).anthropicModelNotFoundFailover(c, acct, resp)
-			if tc.failover {
-				require.NotNil(t, failure)
-				require.Equal(t, AnthropicModelUnavailableReason, failure.Reason)
-				require.True(t, failure.ShouldRetryNextAccount())
-				require.False(t, failure.RetryableOnSameAccount)
-			} else {
-				require.Nil(t, failure)
-				body, err := io.ReadAll(resp.Body)
+		for _, passthrough := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/passthrough=%v", tc.name, passthrough), func(t *testing.T) {
+				c, _ := gin.CreateTestContext(httptest.NewRecorder())
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+				upstream := &anthropicHTTPUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusNotFound, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(tc.body))}}
+				account := newAnthropicOAuthAccountForPartialUsageTest()
+				if passthrough {
+					account = newAnthropicAPIKeyAccountForTest()
+				}
+				parsed, err := ParseGatewayRequest(NewRequestBodyRef([]byte(`{"model":"claude-3-5-sonnet-latest","messages":[{"role":"user","content":"test"}]}`)), PlatformAnthropic)
 				require.NoError(t, err)
-				require.Equal(t, tc.body, string(body))
-			}
-			require.False(t, c.Writer.Written())
-		})
+				_, err = newForwardPartialUsageServiceForTest(upstream).Forward(context.Background(), c, account, parsed)
+				require.Error(t, err)
+				var failure *UpstreamFailoverError
+				if tc.failover {
+					require.ErrorAs(t, err, &failure)
+					require.EqualValues(t, "anthropic_model_unavailable", failure.Reason)
+					require.True(t, failure.ShouldRetryNextAccount())
+					require.False(t, failure.RetryableOnSameAccount)
+					require.False(t, c.Writer.Written())
+				} else {
+					require.NotErrorAs(t, err, &failure)
+					require.Equal(t, http.StatusBadGateway, c.Writer.Status())
+				}
+			})
+		}
 	}
 }
 

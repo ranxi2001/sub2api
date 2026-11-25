@@ -22,7 +22,7 @@ func TestAnthropicModelNotFoundFailoverExhausted(t *testing.T) {
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 	failure := &service.UpstreamFailoverError{
 		StatusCode:   http.StatusNotFound,
-		Reason:       service.AnthropicModelUnavailableReason,
+		Reason:       "anthropic_model_unavailable",
 		ResponseBody: []byte(`{"error":{"code":"model_not_found","message":"private provider details"}}`),
 	}
 	(&GatewayHandler{}).handleFailoverExhausted(c, failure, service.PlatformAnthropic, false)
