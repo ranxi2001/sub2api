@@ -218,6 +218,7 @@ backend/internal/handler/model_plaza_currency_test.go
 backend/internal/handler/ops_context_rejection_test.go
 backend/internal/service/compat_context_rejection_test.go
 backend/internal/service/gateway_context_rejection_test.go
+backend/internal/service/openai_context_rejection_scheduler_test.go
 backend/internal/service/openai_ws_ops_failure_test.go
 backend/internal/repository/account_response_client_rejection_test.go
 
