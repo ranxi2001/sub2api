@@ -10,6 +10,8 @@ import type { OpenAIWSMode } from '@/utils/openaiWsMode'
 import type { OpenAIAPIKeyFallbackConfig, OpenAIAPIKeyFallbackStatus } from '@/utils/openaiAPIKeyFallback'
 export type OAuthInitialQualityRule = Pick<ScheduledTestPlan, 'model_id' | 'cron_expression' | 'enabled' | 'max_results' | 'pelican_config'>
 export interface AutoConfig {
+ json_import_auto_schedule?: Record<string, boolean>
+ two_fa_login_auto_schedule?: Record<string, boolean>
  apikey_disposition?: import('@/utils/oauthAPIKeyDisposition').OAuthAPIKeyDispositionConfig
  degradation_action?: import('@/utils/oauthDegradation').OAuthDegradationConfig
  openai_two_fa_admission?: OpenAITwoFAAdmissionConfig

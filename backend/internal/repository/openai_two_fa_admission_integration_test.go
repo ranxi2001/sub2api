@@ -209,3 +209,23 @@ func TestOpenAITwoFAAdmissionCustomerUpgradeStartsAfterPassAndStopsAfterIsolatio
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT concurrency FROM accounts WHERE id=$1`, f.account.ID).Scan(&concurrency))
 	require.Equal(t, 3, concurrency)
 }
+
+func TestOpenAITwoFAAdmissionKeepsImportScheduling(t *testing.T) {
+	for _, manualResume := range []bool{false, true} {
+		t.Run(fmt.Sprintf("manual_resume=%t", manualResume), func(t *testing.T) {
+			f := newAdmissionFixture(t)
+			ctx := t.Context()
+			_, err := integrationDB.ExecContext(ctx, `UPDATE accounts SET extra=jsonb_set(extra,'{openai_two_fa_admission,keep_scheduling_on_pass}','true'), schedulable=$2 WHERE id=$1`, f.account.ID, manualResume)
+			require.NoError(t, err)
+			for range f.policy.PassCount - 1 {
+				require.Equal(t, "observed", f.round("passed"))
+			}
+			require.Equal(t, "admission_passed", f.round("passed"))
+			var schedulable bool
+			var concurrency int
+			require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT schedulable,concurrency FROM accounts WHERE id=$1", f.account.ID).Scan(&schedulable, &concurrency))
+			require.Equal(t, manualResume, schedulable)
+			require.Equal(t, f.policy.PassedConcurrency, concurrency)
+		})
+	}
+}

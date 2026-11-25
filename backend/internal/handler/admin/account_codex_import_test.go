@@ -1159,7 +1159,11 @@ func TestImportCodexSessionsAdmissionSourceOnlyInitializesNewAccounts(t *testing
 		if err != nil || first.Created != 1 {
 			t.Fatal("initial import did not create an account")
 		}
-		if svc.createdAccounts[0].InitialOpenAITwoFA != source {
+		want := service.OAuthImportJSON
+		if source {
+			want = service.OAuthImportTwoFA
+		}
+		if svc.createdAccounts[0].OAuthImportSource != want {
 			t.Fatal("2FA source was not forwarded on create")
 		}
 		second, err := h.importCodexSessions(context.Background(), req, entries)
