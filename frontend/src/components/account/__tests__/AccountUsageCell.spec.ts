@@ -116,6 +116,27 @@ const cnUsageCellStubs = {
 }
 
 describe('AccountUsageCell', () => {
+  it('shows the standard API key usage row for a DeepSeek key', async () => {
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({ platform: 'deepseek', type: 'apikey', extra: {} }),
+        todayStatsLoading: true
+      },
+      global: { stubs: cnUsageCellStubs }
+    })
+
+    expect(wrapper.find('.animate-pulse').exists()).toBe(true)
+    await wrapper.setProps({
+      todayStatsLoading: false,
+      todayStats: { requests: 1200, tokens: 75_100_000, cost: 67.83, standard_cost: 67.83, user_cost: 15.63 }
+    })
+    expect(wrapper.findAll('span').map(badge => badge.text())).toEqual([
+      '1.2K req', '75.1M', 'A $67.83', 'U $15.63'
+    ])
+    expect(wrapper.find('[data-test="cn-balance-cell"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it.each([
     ['anthropic', 'oauth'], ['anthropic', 'setup-token'], ['gemini', 'oauth'], ['gemini', 'apikey']
   ] as const)('refreshes %s %s snapshots without forcing upstream reads and reuses the new cache', async (platform, type) => {

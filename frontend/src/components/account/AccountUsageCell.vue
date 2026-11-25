@@ -875,6 +875,8 @@ const showUsageWindows = computed(() => {
   // Gemini: we can always compute local usage windows from DB logs (simulated quotas).
   // 第三方上游 API Key 没有模拟配额，按普通 Key 账号展示今日统计与额度进度条。
   if (props.account.platform === 'gemini') return !isGeminiThirdPartyApiKey.value
+  // DeepSeek keys use the same local usage row as OpenAI keys.
+  if (props.account.platform === 'deepseek' && props.account.type === 'apikey') return false
   // 多协议 API Key 供应商：apikey 账号也有滚动用量窗口（coding plan / 订阅）或余额，
   // 由 CNProviderQuotaCell / CNProviderBalanceCell 自行探测与展示。
   if (isMultiProtocolApiKeyPlatform(props.account.platform)) {
