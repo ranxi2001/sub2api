@@ -65,7 +65,7 @@ func TestAdminFullAccessRegisteredRoutesPreserveFullHandlers(t *testing.T) {
 	}
 
 	// Exercise the real import handler with synthetic credentials and metadata.
-	body := `{"data":{"type":"sub2api-data","version":1,"accounts":[{"name":"fixture","platform":"openai","type":"oauth","credentials":{"access_token":"fixture-token","chatgpt_account_id":"fixture-id"},"extra":{"identity":"fixture"},"concurrency":3,"priority":50}]},"group_ids":[42]}`
+	body := `{"data":{"type":"sub2api-data","version":1,"proxies":[],"accounts":[{"name":"fixture","platform":"openai","type":"oauth","credentials":{"access_token":"fixture-token","chatgpt_account_id":"fixture-id"},"extra":{"identity":"fixture"},"concurrency":3,"priority":50}]},"group_ids":[42]}`
 	importRequest := func() *httptest.ResponseRecorder {
 		req := httptest.NewRequest("POST", "/api/v1/admin/accounts/data", strings.NewReader(body))
 		req.Header.Set("x-api-key", key)
