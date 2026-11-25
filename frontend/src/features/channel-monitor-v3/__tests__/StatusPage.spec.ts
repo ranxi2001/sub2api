@@ -29,7 +29,7 @@ function page(extra: Partial<MonitorV3StatusPage> = {}): MonitorV3StatusPage {
     availability_since: '2026-09-27T09:00:00Z', down_error_rate: 0.2, degraded_error_rate: 0.05, degraded_ttft_ms: 10000,
     min_requests: 3, data_through: '2026-10-04T09:30:00Z', footer_note: '',
     window: { start: '2026-10-04T09:15:00Z', end: '2026-10-04T09:35:00Z', latest: true, has_older: true },
-    featured: component(1, 'Claude Max', { multiplier: 0.9 }),
+    featured: component(1, 'Claude Max', { multiplier: 0.9, models: ['claude-opus-5-5', 'claude-sonnet-5-5'] }),
     categories: [
       { id: 1, name: 'GPT', description: 'OpenAI groups', availability: 88.6, components: [component(2, 'Codex'), component(3, 'Codex Plus', { multiplier: null, status: 'down' })] },
       { id: 2, name: 'Claude', availability: 80.66, components: [component(4, 'Kiro', { model: 'claude-opus-5-5' })] },
@@ -59,6 +59,7 @@ describe('V3 status page', () => {
     const wrapper = render(page())
     const featured = wrapper.get('[data-testid="monitor-v3-featured"]')
     expect(featured.text()).toContain('Claude Max')
+    expect(featured.text()).not.toContain('claude-opus-5-5')
     expect(featured.text()).toContain('×0.9')
     expect(featured.text()).toContain('channelMonitorV3.page.availabilityRange.r7d')
     expect(featured.get('[data-testid="monitor-v3-featured-availability"]').text()).toBe('97.46%')
@@ -75,6 +76,7 @@ describe('V3 status page', () => {
 
     const rows = wrapper.findAll('[data-testid="monitor-v3-component"]')
     expect(rows).toHaveLength(4)
+    expect(rows[2].text()).not.toContain('claude-opus-5-5')
     expect(rows[0].text()).toContain('×0.2')
     expect(rows[1].text()).not.toContain('×')
     expect(rows[1].get('[data-testid="monitor-v3-status-dot"]').attributes('data-status')).toBe('down')
