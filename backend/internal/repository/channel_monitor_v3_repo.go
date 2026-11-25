@@ -203,9 +203,9 @@ func (r *channelMonitorV3Repository) CreateComponent(ctx context.Context, input 
 func (r *channelMonitorV3Repository) UpdateComponent(ctx context.Context, id int64, input service.ChannelMonitorV3ComponentInput) (*service.ChannelMonitorV3Component, error) {
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE channel_monitor_v3_components
-		SET category_id = $2, name = $3, description = $4, group_id = $5, model = $6,
+		SET category_id = $2, name = $3, description = $4, group_id = $5, model = $6::text,
 		    degraded_ttft_ms = $7, show_multiplier = $8, visibility = $9, enabled = $10, updated_at = NOW(),
-		    models = COALESCE($11::text[], CASE WHEN group_id = $5 AND model = $6 THEN models ELSE '{}'::text[] END)
+		    models = COALESCE($11::text[], CASE WHEN group_id = $5 AND model = $6::text THEN models ELSE '{}'::text[] END)
 		WHERE id = $1`,
 		id, input.CategoryID, input.Name, input.Description, input.GroupID, input.Model,
 		input.DegradedTTFTMs, input.ShowMultiplier, input.Visibility, input.Enabled, pq.Array(input.Models))
