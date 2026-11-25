@@ -1046,7 +1046,9 @@ readLoop:
 			if reqStream && !clientDisconnected {
 				flushBufferedStreamEvents("error_event")
 				emitStreamMessage(message, true)
-				markOpenAIWSClientVisibleFailure(c, eventType, message)
+				if contextRejected {
+					markOpenAIWSClientVisibleFailure(c, eventType, message)
+				}
 			}
 			if !reqStream {
 				fields := gin.H{"type": "upstream_error", "message": errMsg}

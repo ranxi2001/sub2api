@@ -304,6 +304,9 @@ func openAIWSPayloadTransientStatus(payload []byte) int {
 	if status == 0 {
 		status = int(gjson.GetBytes(payload, "error.status").Int())
 	}
+	if IsUpstreamContextRejection(status, payload) {
+		return 0
+	}
 	if shouldCooldownOpenAITransientUpstreamError(status, payload) {
 		return status
 	}
@@ -382,6 +385,9 @@ func (s *OpenAIGatewayService) handleOpenAIWSErrorEventTransientFailure(ctx cont
 	if eventType != "error" {
 		return false
 	}
+	if IsUpstreamContextRejection(openAIStreamFailureStatus(payload, extractOpenAISSEErrorMessage(payload)), payload) {
+		return false
+	}
 	if openAIWSModelFailureStatus(account, payload) != 0 {
 		return s.handleOpenAIWSModelFailure(ctx, account, canonicalModel, payload)
 	}
@@ -403,6 +409,9 @@ func (s *OpenAIGatewayService) handleOpenAIWSErrorEventTransientFailure(ctx cont
 func (s *OpenAIGatewayService) handleOpenAIWSFailureAccountSideEffects(ctx context.Context, account *Account, canonicalModel string, headers http.Header, payload []byte) bool {
 	message := extractOpenAISSEErrorMessage(payload)
 	status := openAIStreamFailureStatus(payload, message)
+	if IsUpstreamContextRejection(status, payload) {
+		return false
+	}
 	if openAIWSModelFailureStatus(account, payload) != 0 {
 		return s.handleOpenAIWSModelFailure(ctx, account, canonicalModel, payload)
 	}

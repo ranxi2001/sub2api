@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"net/http"
 	"testing"
 
@@ -32,6 +33,11 @@ func TestMarkOpenAIWSClientVisibleFailure_ErrorAndSuccessBoundary(t *testing.T) 
 		require.True(t, got.RequestScoped)
 		require.False(t, got.CountTowardsSLA)
 		require.Equal(t, http.StatusBadRequest, openAIWSErrorHTTPStatusFromRaw("context_length_exceeded", ""))
+		payload := []byte(`{"type":"error","error":{"code":"context_length_exceeded","type":"server_error","status_code":502}}`)
+		require.Zero(t, openAIWSPayloadTransientStatus(payload))
+		svc := &OpenAIGatewayService{}
+		require.False(t, svc.handleOpenAIWSErrorEventTransientFailure(context.Background(), nil, "synthetic", nil, payload))
+		require.False(t, svc.handleOpenAIWSFailureAccountSideEffects(context.Background(), nil, "synthetic", nil, payload))
 	})
 	t.Run("error", func(t *testing.T) {
 		c, _ := gin.CreateTestContext(nil)
