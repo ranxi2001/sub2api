@@ -3241,6 +3241,11 @@ func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResult(account *Accoun
 	if account == nil {
 		return false
 	}
+	// A canonical context rejection belongs to the request. Do not penalize the
+	// account or report a successful recovery for this failed request.
+	if !success && len(observedErr) > 0 && errors.Is(observedErr[0], errGatewayContextRejection) {
+		return false
+	}
 	if !success && len(observedErr) > 0 && (isGrokRequestScopedFailure(observedErr[0]) || IsUpstreamModerationDenied(observedErr[0])) {
 		return false
 	}
