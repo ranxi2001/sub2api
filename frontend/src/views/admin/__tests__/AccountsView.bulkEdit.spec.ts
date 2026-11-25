@@ -319,7 +319,8 @@ describe('admin AccountsView bulk edit scope', () => {
       await flushPromises()
 
       expect(wrapper.find('[data-account-id="7"]').exists()).toBe(keep)
-      expect(wrapper.findComponent(PaginationStub).props('total')).toBe(keep ? 1 : 0)
+      expect(wrapper.findComponent(PaginationStub).exists()).toBe(keep)
+      if (keep) expect(wrapper.findComponent(PaginationStub).props('total')).toBe(1)
       expect(listAccounts).toHaveBeenCalledTimes(2)
     } finally {
       wrapper.unmount()
