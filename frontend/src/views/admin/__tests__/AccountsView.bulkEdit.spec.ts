@@ -119,6 +119,7 @@ const AccountBulkActionsBarStub = {
 }
 
 const PaginationStub = {
+  props: ['total'],
   emits: ['update:page'],
   template: '<button data-test="next-page" @click="$emit(\'update:page\', 2)">next</button>'
 }
@@ -277,6 +278,50 @@ describe('admin AccountsView bulk edit scope', () => {
       await vi.advanceTimersByTimeAsync(301)
       await flushPromises()
       expect(listAccounts).toHaveBeenCalledTimes(1)
+    } finally {
+      wrapper.unmount()
+      vi.useRealTimers()
+    }
+  })
+
+  it.each([
+    { label: 'error with a future rate limit', update: { status: 'error' }, keep: true },
+    { label: 'temporary block with a future rate limit', update: { temp_unschedulable_until: '2099-01-01T00:00:00Z' }, keep: true },
+    { label: 'disabled with a future rate limit', update: { status: 'disabled', schedulable: false }, keep: true },
+    { label: 'expired rate limit', update: { rate_limit_reset_at: '2000-01-01T00:00:00Z' }, keep: false },
+    { label: 'cleared rate limit', update: { rate_limit_reset_at: null }, keep: false },
+    { label: 'different platform', update: { platform: 'gemini' }, keep: false },
+    { label: 'different type', update: { type: 'apikey' }, keep: false },
+    { label: 'different group', update: { group_ids: [20] }, keep: false },
+    { label: 'different privacy mode', update: { extra: { privacy_mode: 'failed' } }, keep: false },
+    { label: 'different name', update: { name: 'other-account' }, keep: false }
+  ])('preserves rate-limit filter scope after editing: $label', async ({ update, keep }) => {
+    vi.useFakeTimers()
+    const filters = { platform: 'openai', type: 'oauth', status: 'rate_limited', group: '10', privacy_mode: 'training_off', search: 'account-7' }
+    localStorage.setItem('account-filter-values', JSON.stringify(filters))
+    const row = {
+      ...makeProbeAccount(7), type: 'oauth', group_ids: [10],
+      extra: { privacy_mode: 'training_off' }, rate_limit_reset_at: '2099-01-01T00:00:00Z'
+    }
+    listAccounts.mockResolvedValue({ ...probePage([7]), items: [row] })
+    const wrapper = mountProbeView()
+    try {
+      await flushPromises()
+      const filterComponent = wrapper.findComponent({ name: 'AccountTableFilters' })
+      filterComponent.vm.$emit('update:filters', filters)
+      filterComponent.vm.$emit('change')
+      await vi.advanceTimersByTimeAsync(301)
+      await flushPromises()
+      expect(listAccounts).toHaveBeenCalledWith(1, 20, expect.objectContaining(filters), expect.anything())
+      expect(wrapper.find('[data-account-id="7"]').exists()).toBe(true)
+
+      wrapper.findComponent({ name: 'EditAccountModal' }).vm.$emit('updated', { ...row, ...update })
+      await flushPromises()
+
+      expect(wrapper.find('[data-account-id="7"]').exists()).toBe(keep)
+      expect(wrapper.findComponent(PaginationStub).exists()).toBe(keep)
+      if (keep) expect(wrapper.findComponent(PaginationStub).props('total')).toBe(1)
+      expect(listAccounts).toHaveBeenCalledTimes(2)
     } finally {
       wrapper.unmount()
       vi.useRealTimers()
