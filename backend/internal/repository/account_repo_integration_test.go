@@ -534,7 +534,7 @@ func (s *AccountRepoSuite) TestListWithFilters() {
 			},
 		},
 		{
-			name: "filter_by_status_rate_limited_excludes_temp_unschedulable",
+			name: "filter_by_status_rate_limited_includes_overlapping_states",
 			setup: func(client *dbent.Client) {
 				rateLimited := mustCreateAccount(s.T(), client, &service.Account{Name: "active-rate-limited", Status: service.StatusActive})
 				err := client.Account.UpdateOneID(rateLimited.ID).
@@ -547,11 +547,14 @@ func (s *AccountRepoSuite) TestListWithFilters() {
 					SetTempUnschedulableUntil(time.Now().Add(15 * time.Minute)).
 					Exec(context.Background())
 				s.Require().NoError(err)
+				resetAt := time.Now().Add(10 * time.Minute)
+				mustCreateAccount(s.T(), client, &service.Account{Name: "error-rate-limited", Status: service.StatusError, RateLimitResetAt: &resetAt})
 			},
 			status:    "rate_limited",
-			wantCount: 1,
+			wantCount: 3,
 			validate: func(accounts []service.Account) {
-				s.Require().Equal("active-rate-limited", accounts[0].Name)
+				names := []string{accounts[0].Name, accounts[1].Name, accounts[2].Name}
+				s.Require().ElementsMatch([]string{"active-rate-limited", "active-temp-unsched", "error-rate-limited"}, names)
 			},
 		},
 		{

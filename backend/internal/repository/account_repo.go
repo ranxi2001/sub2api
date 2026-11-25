@@ -1436,7 +1436,7 @@ func (r *accountRepository) List(ctx context.Context, params pagination.Paginati
 
 // accountStatusFilterPredicate 把列表的 status 筛选换成查询条件。质量运维等场景
 // 需要一次筛多个状态（如「正常+限流中」），因此支持逗号分隔的多个值，任一命中即可；
-// 单个值的行为与原先完全一致。
+// 单个值与组合值共用同一状态口径。
 func accountStatusFilterPredicate(status string) dbpredicate.Account {
 	var predicates []dbpredicate.Account
 	for _, value := range strings.Split(status, ",") {
@@ -1454,8 +1454,8 @@ func accountStatusFilterPredicate(status string) dbpredicate.Account {
 }
 
 // accountStatusPredicate 是单个状态值的查询条件。除数据库里的真实状态外，还有几个
-// 派生状态：正常 = active 且可调度且不在限流/临时不可调度中；限流中 / 临时不可调度 /
-// 不可调度分别取对应的一段。
+// 派生状态：正常 = active 且可调度且不在限流/临时不可调度中；限流中仅取未来的
+// 限流截止时间，与列表标记一致，允许和错误、禁用或临时不可调度状态重叠。
 func accountStatusPredicate(status string) dbpredicate.Account {
 	notTempUnschedulable := dbpredicate.Account(func(s *entsql.Selector) {
 		col := s.C("temp_unschedulable_until")
@@ -1476,11 +1476,7 @@ func accountStatusPredicate(status string) dbpredicate.Account {
 			notTempUnschedulable,
 		)
 	case "rate_limited":
-		return dbaccount.And(
-			dbaccount.StatusEQ(service.StatusActive),
-			dbaccount.RateLimitResetAtGT(time.Now()),
-			notTempUnschedulable,
-		)
+		return dbaccount.RateLimitResetAtGT(time.Now())
 	case "temp_unschedulable":
 		return dbaccount.And(
 			dbaccount.StatusEQ(service.StatusActive),
