@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"net/http"
 	"testing"
 
@@ -14,7 +15,8 @@ func TestMarkOpenAIWSClientVisibleFailure_ResponseFailedNestedError(t *testing.T
 
 	got, ok := GetOpsStreamError(c)
 	require.True(t, ok)
-	require.True(t, got.CountTowardsSLA)
+	require.False(t, got.CountTowardsSLA)
+	require.True(t, got.RequestScoped)
 	require.Equal(t, http.StatusBadRequest, got.IntendedStatus)
 	require.Equal(t, "invalid_request_error", got.ErrType)
 	require.Equal(t, "context_length_exceeded", got.Code)
@@ -22,6 +24,23 @@ func TestMarkOpenAIWSClientVisibleFailure_ResponseFailedNestedError(t *testing.T
 }
 
 func TestMarkOpenAIWSClientVisibleFailure_ErrorAndSuccessBoundary(t *testing.T) {
+	t.Run("wrapped context with no error type", func(t *testing.T) {
+		c, _ := gin.CreateTestContext(nil)
+		markOpenAIWSClientVisibleFailure(c, "error", []byte(`{"type":"error","error":{"code":"context_length_exceeded","status_code":502,"message":"too long"}}`))
+		got, ok := GetOpsStreamError(c)
+		require.True(t, ok)
+		require.Equal(t, http.StatusBadRequest, got.IntendedStatus)
+		require.True(t, got.RequestScoped)
+		require.False(t, got.CountTowardsSLA)
+		require.Equal(t, http.StatusBadRequest, openAIWSErrorHTTPStatusFromRaw("context_length_exceeded", ""))
+		payload := []byte(`{"type":"error","error":{"code":"context_length_exceeded","type":"server_error","status_code":502}}`)
+		require.Zero(t, openAIWSPayloadTransientStatus(payload))
+		svc := &OpenAIGatewayService{}
+		// Keep this invocation compatible with historical overlays where the
+		// helper returned no value. A policy call on this empty service fails.
+		svc.handleOpenAIWSErrorEventTransientFailure(context.Background(), nil, "synthetic", nil, payload)
+		require.False(t, svc.handleOpenAIWSFailureAccountSideEffects(context.Background(), nil, "synthetic", nil, payload))
+	})
 	t.Run("error", func(t *testing.T) {
 		c, _ := gin.CreateTestContext(nil)
 		markOpenAIWSClientVisibleFailure(c, "error", []byte(`{"type":"error","error":{"type":"rate_limit_error","code":"rate_limit_exceeded","message":"slow down"}}`))

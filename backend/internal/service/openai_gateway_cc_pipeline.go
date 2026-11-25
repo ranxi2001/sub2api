@@ -136,6 +136,9 @@ func (s *OpenAIGatewayService) failoverOpenAIUpstreamHTTPError(
 	upstreamMsg string,
 	upstreamModel string,
 ) *UpstreamFailoverError {
+	if IsUpstreamContextRejection(resp.StatusCode, respBody) {
+		return nil
+	}
 	if isDeepSeekInputContentResponse(account, resp.StatusCode, respBody) {
 		return nil
 	}

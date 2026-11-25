@@ -213,6 +213,14 @@ backend/internal/service/model_plaza_currency_test.go
 backend/internal/service/model_plaza_currency_update_test.go
 backend/internal/handler/model_plaza_currency_test.go
 
+# Context-rejection attribution tests require the candidate's native WS failure
+# marker. Historical RED overlays predate that field; candidate GREEN keeps it.
+backend/internal/handler/ops_context_rejection_test.go
+backend/internal/service/compat_context_rejection_test.go
+backend/internal/service/gateway_context_rejection_test.go
+backend/internal/service/openai_ws_ops_failure_test.go
+backend/internal/repository/account_response_client_rejection_test.go
+
 # Anthropic media fixtures share compatEffortPolicyUpstream, absent in historical RED.
 # Current candidate/GREEN retains both files and the complete media assertions.
 # Frozen candidate blobs: eb860ff6bb7a0900ed1243d29d58c7ae4ae0eb83 / a69b0b585c25073321953af8630d64c743db2893.

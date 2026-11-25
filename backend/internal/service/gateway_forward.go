@@ -468,6 +468,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		if isAnthropicRequestTooLarge(account, resp) {
 			return handleAnthropicRequestTooLarge(c, resp)
 		}
+		if s.interceptAnthropicContextRejection(c, account, resp) {
+			return nil, errGatewayContextRejection
+		}
 
 		if resp.StatusCode == http.StatusUnauthorized && !retriedRotatedToken &&
 			attempt < maxRetryAttempts && time.Since(retryStart) < maxRetryElapsed {
@@ -756,6 +759,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	// retry-exhausted and account-policy paths, regardless of custom error codes.
 	if isAnthropicRequestTooLarge(account, resp) {
 		return handleAnthropicRequestTooLarge(c, resp)
+	}
+	if s.interceptAnthropicContextRejection(c, account, resp) {
+		return nil, errGatewayContextRejection
 	}
 	if resp == nil || resp.Body == nil {
 		return nil, errors.New("upstream request failed: empty response")

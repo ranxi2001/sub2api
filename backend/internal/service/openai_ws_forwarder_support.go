@@ -276,13 +276,17 @@ func markOpenAIWSClientVisibleFailure(c *gin.Context, eventType string, payload 
 	if message == "" {
 		message = "upstream websocket request failed"
 	}
+	requestScoped := IsUpstreamContextRejection(status, payload)
+	if requestScoped {
+		status, errType, code = http.StatusBadRequest, "invalid_request_error", "context_length_exceeded"
+	}
 	var origin *OpsUpstreamWSFailure
 	if len(upstream) > 0 {
 		origin = upstream[0]
 	}
 	MarkOpsStreamErrorValue(c, OpsStreamError{
 		ErrType: errType, Code: code, Message: message, IntendedStatus: status,
-		CountTowardsSLA: true, UpstreamWSFailure: origin,
+		CountTowardsSLA: !requestScoped, RequestScoped: requestScoped, UpstreamWSFailure: origin,
 	})
 }
 
@@ -299,6 +303,9 @@ func openAIWSPayloadTransientStatus(payload []byte) int {
 	}
 	if status == 0 {
 		status = int(gjson.GetBytes(payload, "error.status").Int())
+	}
+	if IsUpstreamContextRejection(status, payload) {
+		return 0
 	}
 	if shouldCooldownOpenAITransientUpstreamError(status, payload) {
 		return status
@@ -378,6 +385,9 @@ func (s *OpenAIGatewayService) handleOpenAIWSErrorEventTransientFailure(ctx cont
 	if eventType != "error" {
 		return false
 	}
+	if IsUpstreamContextRejection(openAIStreamFailureStatus(payload, extractOpenAISSEErrorMessage(payload)), payload) {
+		return false
+	}
 	if openAIWSModelFailureStatus(account, payload) != 0 {
 		return s.handleOpenAIWSModelFailure(ctx, account, canonicalModel, payload)
 	}
@@ -399,6 +409,9 @@ func (s *OpenAIGatewayService) handleOpenAIWSErrorEventTransientFailure(ctx cont
 func (s *OpenAIGatewayService) handleOpenAIWSFailureAccountSideEffects(ctx context.Context, account *Account, canonicalModel string, headers http.Header, payload []byte) bool {
 	message := extractOpenAISSEErrorMessage(payload)
 	status := openAIStreamFailureStatus(payload, message)
+	if IsUpstreamContextRejection(status, payload) {
+		return false
+	}
 	if openAIWSModelFailureStatus(account, payload) != 0 {
 		return s.handleOpenAIWSModelFailure(ctx, account, canonicalModel, payload)
 	}
@@ -887,6 +900,8 @@ func openAIWSErrorHTTPStatusFromRaw(codeRaw, errTypeRaw string) int {
 		return http.StatusForbidden
 	case isOpenAIWSRateLimitError(codeRaw, errTypeRaw, ""):
 		return http.StatusTooManyRequests
+	case code == "context_length_exceeded", code == "context_too_large":
+		return http.StatusBadRequest
 	default:
 		return http.StatusBadGateway
 	}
