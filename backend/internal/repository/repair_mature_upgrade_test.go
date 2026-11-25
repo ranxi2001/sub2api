@@ -80,9 +80,11 @@ func TestRepairMatureProductionUpgradeAndRollbackBoundary(t *testing.T) {
 			require.NoError(t, db.QueryRowContext(ctx, `INSERT INTO users(email,password_hash,balance) VALUES('upgrade@example.invalid','synthetic',17.25) RETURNING id`).Scan(&userID))
 			_, err = db.ExecContext(ctx, `INSERT INTO channels(name,description) VALUES('retained-canonical','original'); INSERT INTO accounts(name,platform,type,credentials,extra) VALUES('retained-account','openai','apikey','{"api_key":"synthetic-old"}','{"cost_multiplier":0.8}'); INSERT INTO settings(key,value) VALUES('account_ops_notifications_v1','{"enabled":false,"marker":"retained"}');`)
 			require.NoError(t, err)
+			// The old schema has no probe timestamp. Treat it as NULL so the
+			// snapshot still detects a timestamp written to a retained account.
 			snapshot := func() string {
 				var raw string
-				require.NoError(t, db.QueryRowContext(ctx, `SELECT jsonb_build_object('user',(SELECT to_jsonb(u) FROM users u WHERE id=$1),'channels',(SELECT jsonb_agg(to_jsonb(c) ORDER BY id) FROM channels c),'accounts',(SELECT jsonb_agg(to_jsonb(a) ORDER BY id) FROM accounts a),'ops',(SELECT value FROM settings WHERE key='account_ops_notifications_v1'))::text`, userID).Scan(&raw))
+				require.NoError(t, db.QueryRowContext(ctx, `SELECT jsonb_build_object('user',(SELECT to_jsonb(u) FROM users u WHERE id=$1),'channels',(SELECT jsonb_agg(to_jsonb(c) ORDER BY id) FROM channels c),'accounts',(SELECT jsonb_agg(jsonb_build_object('domestic_route_probe_at', NULL) || to_jsonb(a) ORDER BY id) FROM accounts a),'ops',(SELECT value FROM settings WHERE key='account_ops_notifications_v1'))::text`, userID).Scan(&raw))
 				return raw
 			}
 			before := snapshot()

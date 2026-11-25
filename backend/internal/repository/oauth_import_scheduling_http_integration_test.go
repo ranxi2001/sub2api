@@ -27,7 +27,7 @@ func TestOAuthImportSchedulingHTTP(t *testing.T) {
 	accounts := repository.NewAdminAccountRepository(client, db, nil)
 	svc := service.NewAdminService(cfg, nil, groups, accounts, nil, nil, nil, nil, nil, nil, nil, nil, nil, client, service.NewSettingService(settings, cfg), nil, nil, nil, nil, nil, nil, nil, nil)
 	ah := admin.NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
-	ops := service.ProvideAccountOpsService(settings, nil, nil, nil, groups, cfg, nil, nil, nil, nil, nil)
+	ops := service.ProvideAccountOpsService(settings, repository.NewAccountOpsRepository(db), nil, nil, groups, cfg, nil, nil, nil, nil, nil)
 	t.Cleanup(ops.Stop)
 	oh := admin.NewAccountOpsHandler(ops, nil)
 	router := gin.New()

@@ -37,7 +37,9 @@ func TestOAuthImportScheduling(t *testing.T) {
 				input := &CreateAccountInput{Platform: PlatformOpenAI, Type: AccountTypeOAuth, OAuthImportSource: OAuthImportTwoFA, Credentials: map[string]any{"access_token": "fixture"}}
 				require.NoError(t, svc.ApplyOAuthAutoConfig(t.Context(), input))
 				require.NoError(t, svc.applyOpenAITwoFAAdmission(t.Context(), input))
-				require.Equal(t, !twoFAOn, input.Extra[OpenAITwoFAAdmissionExtraKey].(OpenAITwoFAAdmissionState).KeepSchedulingOnPass)
+				state, ok := input.Extra[OpenAITwoFAAdmissionExtraKey].(OpenAITwoFAAdmissionState)
+				require.True(t, ok)
+				require.Equal(t, !twoFAOn, state.KeepSchedulingOnPass)
 				account, err := buildAccountForCreate(input, input.Extra)
 				require.NoError(t, err)
 				require.False(t, account.Schedulable, "admission starts pending even when auto scheduling is enabled")
