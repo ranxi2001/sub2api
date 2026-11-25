@@ -36,20 +36,9 @@ func TestOAuth429CompactGlobalForwardAndAdmission(t *testing.T) {
 				require.Equal(t, "gpt-6-luna", s.upstream.lastReq.Context().Value(oauth429CompactModelKey{}))
 				require.Equal(t, target, ResolveOAuth429TargetModel(s.account, "alias-one", "/responses/compact", "gpt-6-luna"))
 				require.True(t, OAuth429RequestModelSupported(s.account, "alias-one", "/responses/compact", "gpt-6-luna"))
-				// Passthrough's normal route retains the public input; this remains
-				// a different wire model from the compact override.
-				normal := ResolveOAuth429TargetModel(s.account, "alias-one", "/responses", "gpt-6-luna")
-				if normal != target {
-					s.account.Extra[OAuth429ModelBlocksKey] = map[string]any{target: map[string]any{}}
-					require.True(t, OAuth429RequestModelSupported(s.account, "alias-one", "/responses", "gpt-6-luna"))
-					require.False(t, OAuth429RequestModelSupported(s.account, "alias-one", "/responses/compact", "gpt-6-luna"))
-					require.True(t, s.svc.isOpenAIAccountRequestRuntimeBlocked(s.account, "alias-one", true))
-					require.False(t, s.svc.isOpenAIAccountRequestRuntimeBlocked(s.account, "alias-one", false))
-					s.account.Extra[OAuth429ModelBlocksKey] = map[string]any{normal: map[string]any{}}
-					require.True(t, OAuth429RequestModelSupported(s.account, "alias-one", "/responses/compact", "gpt-6-luna"))
-					require.False(t, OAuth429RequestModelSupported(s.account, "alias-one", "/responses", "gpt-6-luna"))
-					require.False(t, s.svc.isOpenAIAccountRequestRuntimeBlocked(s.account, "alias-one", true))
-				}
+				s.account.Extra["oauth_429_model_blocks"] = map[string]any{target: map[string]any{}}
+				require.True(t, OAuth429RequestModelSupported(s.account, "alias-one", "/responses/compact", "gpt-6-luna"))
+				require.False(t, s.svc.isOpenAIAccountRequestRuntimeBlocked(s.account, "alias-one", true))
 				// Passthrough defaults may intentionally bypass the ordinary mapping
 				// allowlist, so enable its existing strict filter for this negative.
 				s.account.Extra["openai_passthrough_model_filter"] = true

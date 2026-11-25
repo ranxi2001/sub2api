@@ -328,17 +328,5 @@ func (a *Account) IsQualityModelIsolated(model string) bool {
 // Only trusted internal account tests may probe through their own isolation.
 // Normal scheduler selection and every later WebSocket turn share this gate.
 func (a *Account) qualityModelBlocked(ctx context.Context, model string) bool {
-	blocked := a.IsOAuth429ModelBlocked(model)
-	if route, ok := ctx.Value(oauth429RequestRouteKey{}).(oauth429RequestRoute); ok {
-		endpoint := ""
-		if route.Compact {
-			endpoint = "/responses/compact"
-		}
-		target := ResolveOAuth429TargetModel(a, route.Model, endpoint, oauth429CompactModel(ctx))
-		if model == route.Model || model == target {
-			entries, _ := a.Extra[OAuth429ModelBlocksKey].(map[string]any)
-			blocked = entries[target] != nil
-		}
-	}
-	return ctx.Value(qualityProbeContextKey{}) != true && (a.IsQualityModelIsolated(model) || a.hasQualityModelCooldown(model) || blocked)
+	return ctx.Value(qualityProbeContextKey{}) != true && (a.IsQualityModelIsolated(model) || a.hasQualityModelCooldown(model))
 }

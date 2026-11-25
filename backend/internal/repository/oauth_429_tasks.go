@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"slices"
+
 	"sort"
 	"strings"
 	"time"
@@ -44,11 +44,11 @@ func oauth429PolicyAccount(ctx context.Context, tx *sql.Tx, id int64) (service.O
 	return cfg, a, nil
 }
 func oauth429EligibleRequest(c service.OAuthAutoConfig, a *service.Account, request, target, endpoint, compactModel string) bool {
-	if c.Revision == "" || !c.DegradationAction.Enabled || !c.DegradationAction.UsesUpstream429() ||
+	if !service.OAuth429ReviewModel(target) || c.Revision == "" || !c.DegradationAction.Enabled || !c.DegradationAction.UsesUpstream429() ||
 		!c.DegradationAction.Independent429.Enabled || c.DegradationAction.Validate() != nil {
 		return false
 	}
-	if a == nil || a.Type != service.AccountTypeOAuth || !a.Schedulable || a.Status != service.StatusActive || a.Concurrency <= 0 {
+	if a == nil || a.Type != service.AccountTypeOAuth || a.HasOAuthDegradationAction() || !a.Schedulable || a.Status != service.StatusActive || a.Concurrency <= 0 {
 		return false
 	}
 	if a.AutoPauseOnExpired && a.ExpiresAt != nil && !time.Now().Before(*a.ExpiresAt) {
@@ -270,7 +270,6 @@ func (r *accountRepository) ObserveOAuth429(ctx context.Context, observation ser
 		task.RequestModel = requestModel
 		task.Endpoint = observation.Endpoint
 		task.Reason = ""
-		task.ModelBlocked = false
 		task.TriggerID = uuid.NewString()
 		task.Generation++
 		task.TriggeredAt = now
@@ -495,7 +494,6 @@ func (r *accountRepository) CompleteOAuth429(ctx context.Context, task *service.
 		if reason != "" {
 			current.Reason = reason
 		}
-		current.ModelBlocked = reason != "" && cfg.DegradationAction.RestrictsModels() && !slices.Contains(cfg.DegradationAction.Models, current.Model)
 		audit := *current
 		audit.Samples = nil
 		audit.Lease = ""
@@ -503,26 +501,11 @@ func (r *accountRepository) CompleteOAuth429(ctx context.Context, task *service.
 		if err := insertAutoConfigEvent(ctx, tx, service.AutoConfigEvent{AccountID: a.ID, AccountName: a.Name, Platform: a.Platform, Kind: service.AutoConfigEventOAuth429, Details: service.AutoConfigEventDetails{OAuth429: &audit, Concurrency: a.Concurrency, PreviousConcurrency: a.Concurrency}}); err != nil {
 			return err
 		}
-		if !current.ModelBlocked {
+		if reason == "" {
 			return nil
 		}
-		blocks, _ := a.Extra[service.OAuth429ModelBlocksKey].(map[string]any)
-		if blocks == nil {
-			blocks = map[string]any{}
-		}
-		blocks[current.Model] = map[string]any{"trigger_id": current.TriggerID, "generation": current.Generation, "revision": current.Revision, "runs": current.Runs, "reason": current.Reason, "applied_at": time.Now().UTC()}
-		if a.Extra == nil {
-			a.Extra = map[string]any{}
-		}
-		a.Extra[service.OAuth429ModelBlocksKey] = blocks
-		raw, err := json.Marshal(a.Extra)
-		if err != nil {
-			return err
-		}
-		if _, err = tx.ExecContext(ctx, `UPDATE accounts SET extra=$2,updated_at=GREATEST(clock_timestamp(),updated_at+INTERVAL '1 microsecond') WHERE id=$1`, a.ID, string(raw)); err != nil {
-			return err
-		}
-		if err = enqueueSchedulerOutbox(ctx, tx, service.SchedulerOutboxEventAccountChanged, &a.ID, nil, nil); err != nil {
+		state := service.OAuthDegradationState{TriggerReason: reason, WindowStart: current.TriggeredAt, WindowEnd: current.Runs[len(current.Runs)-1].FinishedAt, AppliedAt: time.Now().UTC()}
+		if err := applyOAuthDegradation(ctx, tx, cfg, a, state); err != nil {
 			return err
 		}
 		changed = true
@@ -535,6 +518,9 @@ func (r *accountRepository) CompleteOAuth429(ctx context.Context, task *service.
 }
 
 func (r *accountRepository) OAuth429Current(ctx context.Context, task *service.OAuth429Task) (bool, error) {
+	if !service.OAuth429ReviewModel(task.Model) {
+		return false, nil
+	}
 	db, err := r.oauth429DB()
 	if err != nil {
 		return false, err

@@ -105,7 +105,7 @@ func TestOAuth429AccountEpochRejectsInflightAndPriorRun(t *testing.T) {
 	require.NoError(t, repo.CompleteOAuth429(ctx, current))
 	got, err := repo.GetByID(ctx, a.ID)
 	require.NoError(t, err)
-	require.False(t, got.IsOAuth429ModelBlocked("gpt-6-astra"))
+	require.False(t, got.HasOAuthDegradationAction())
 }
 
 func TestOAuth429ExpiryAdmissionAndLeaseSelection(t *testing.T) {

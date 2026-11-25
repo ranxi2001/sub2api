@@ -43,7 +43,7 @@ func TestOAuth429CompactGlobalForwardWorker(t *testing.T) {
 		for _, accountRule := range []bool{false, true} {
 			t.Run(fmt.Sprintf("passthrough_%t/account_rule_%t", passthrough, accountRule), func(t *testing.T) {
 				repo, a, policy := oauth429Fixture(t, nil)
-				cfg := &config.Config{Runtime: config.RuntimeConfig{Role: config.RuntimeRoleGateway}, Gateway: config.GatewayConfig{OpenAICompactModel: "gpt-6-luna"}}
+				cfg := &config.Config{Runtime: config.RuntimeConfig{Role: config.RuntimeRoleGateway}, Gateway: config.GatewayConfig{OpenAICompactModel: "gpt-6-sol"}}
 				routing, err := repo.ConfigureOAuth429Routing(t.Context(), cfg.Gateway.OpenAICompactModel)
 				require.NoError(t, err)
 				// Replace the fixture observer with one initialized from this exact
@@ -53,8 +53,8 @@ func TestOAuth429CompactGlobalForwardWorker(t *testing.T) {
 				policy.DegradationAction.Models = []string{"gpt-6.1-terra"}
 				_, err = ops.SaveOAuthAutoConfig(t.Context(), policy)
 				require.NoError(t, err)
-				credentials := map[string]any{"access_token": "fixture-only", "model_mapping": map[string]any{"alias-one": "gpt-6-astra", "other-alias": "gpt-6-luna"}}
-				target := "gpt-6-luna"
+				credentials := map[string]any{"access_token": "fixture-only", "model_mapping": map[string]any{"alias-one": "gpt-6-astra", "other-alias": "gpt-6-sol"}}
+				target := "gpt-6-sol"
 				if accountRule {
 					credentials["compact_model_mapping"] = map[string]any{"alias-one": "gpt-6-astra"}
 					target = "gpt-6-astra"
@@ -107,25 +107,25 @@ func TestOAuth429CompactGlobalForwardWorker(t *testing.T) {
 				}, 5*time.Second, 20*time.Millisecond, "real compact Forward and transport must enqueue the globally resolved wire model")
 				require.Equal(t, routing.Revision, task.RoutingRevision)
 				require.Equal(t, "alias-one", task.RequestModel)
-				runner, probes, _ := oauth429Runner(t, repo, []string{"23", "27"}, target)
+				runner, probes, _ := oauth429Runner(t, repo, []string{"429", "429", "429", "429", "429"}, target)
 				runner.StartOAuth429Worker()
 				defer runner.Stop()
 				require.Eventually(t, func() bool {
 					var data []byte
 					return integrationDB.QueryRowContext(t.Context(), `SELECT data FROM oauth_429_tasks WHERE account_id=$1 AND model=$2 AND state='complete'`, a.ID, target).Scan(&data) == nil && json.Unmarshal(data, &task) == nil
 				}, 8*time.Second, 20*time.Millisecond)
-				require.Len(t, task.Runs, 2)
+				require.Len(t, task.Runs, 5)
 				require.Equal(t, a.ID, task.AccountID)
 				require.Equal(t, target, task.Model)
 				require.Equal(t, "alias-one", task.RequestModel)
-				require.Equal(t, "two_wrong_answers", task.Reason)
-				require.True(t, task.ModelBlocked)
+				require.Equal(t, "five_consecutive_429", task.Reason)
+				require.Equal(t, "complete", task.State)
 				require.NotEmpty(t, task.TriggerID)
-				require.EqualValues(t, 2, probes.Load())
+				require.EqualValues(t, 5, probes.Load())
 				identities := map[string]bool{}
 				for _, run := range task.Runs {
-					require.True(t, run.AnswerComplete)
-					require.Equal(t, "incorrect", run.Verdict)
+					require.Equal(t, 429, run.HTTPStatus)
+					require.Equal(t, "rate_limited", run.Verdict)
 					require.False(t, run.StartedAt.IsZero())
 					require.False(t, run.FinishedAt.Before(run.StartedAt))
 					for _, id := range []string{run.ID, run.ResultID} {
@@ -136,26 +136,9 @@ func TestOAuth429CompactGlobalForwardWorker(t *testing.T) {
 				}
 				a, err = repo.GetByID(t.Context(), a.ID)
 				require.NoError(t, err)
-				blocks := a.Extra[service.OAuth429ModelBlocksKey].(map[string]any)
-				require.Len(t, blocks, 1)
-				require.NotNil(t, blocks[target])
-				require.Error(t, forward(21, "/v1/responses/compact"))
-				require.EqualValues(t, 20, calls.Load(), "blocked compact request must stop before HTTP")
-				if ordinary != target {
-					require.True(t, service.OAuth429RequestModelSupported(a, "alias-one", "/responses", cfg.Gateway.OpenAICompactModel))
-					_ = forward(22, "/v1/responses")
-					require.EqualValues(t, 21, calls.Load(), "healthy ordinary route must still reach its actual wire")
-					inverse, err := json.Marshal(map[string]any{ordinary: map[string]any{}})
-					require.NoError(t, err)
-					_, err = integrationDB.ExecContext(t.Context(), `UPDATE accounts SET extra=jsonb_set(extra,'{oauth_429_model_blocks}',$2::jsonb) WHERE id=$1`, a.ID, string(inverse))
-					require.NoError(t, err)
-					a, err = repo.GetByID(t.Context(), a.ID)
-					require.NoError(t, err)
-					_ = forward(23, "/v1/responses/compact")
-					require.EqualValues(t, 22, calls.Load(), "healthy compact route must survive a different ordinary block")
-					require.Error(t, forward(24, "/v1/responses"))
-					require.EqualValues(t, 22, calls.Load(), "blocked ordinary route must stop before HTTP")
-				}
+				require.True(t, a.HasOAuthDegradationAction())
+				require.False(t, a.Schedulable, "empty whitelist intersection pauses scheduling")
+				require.NotContains(t, a.Extra, "oauth_429_model_blocks")
 			})
 		}
 	}
@@ -163,7 +146,7 @@ func TestOAuth429CompactGlobalForwardWorker(t *testing.T) {
 
 func TestOAuth429CompactRoutingChangeFencesEveryStage(t *testing.T) {
 	repo, a, c := oauth429Fixture(t, nil)
-	first, err := repo.ConfigureOAuth429Routing(t.Context(), "gpt-6-luna")
+	first, err := repo.ConfigureOAuth429Routing(t.Context(), "gpt-6-sol")
 	require.NoError(t, err)
 	observe := func(i int, policy service.OAuth429RoutingPolicy, input, wire string) bool {
 		v := oauth429ObservationFixture(a.ID, wire, c.Revision, i, 429)
@@ -173,13 +156,13 @@ func TestOAuth429CompactRoutingChangeFencesEveryStage(t *testing.T) {
 		return queued
 	}
 	for i := 0; i < 20; i++ {
-		require.False(t, observe(i, first, "illegal-input", "gpt-6-luna"))
+		require.False(t, observe(i, first, "illegal-input", "gpt-6-sol"))
 		require.False(t, observe(i+20, first, "gpt-6-astra", "gpt-6-astra"), "allowed original must not authorize arbitrary wire")
 	}
 	for i := 0; i < 20; i++ {
-		require.Equal(t, i == 19, observe(i+40, first, "gpt-6-astra", "gpt-6-luna"))
+		require.Equal(t, i == 19, observe(i+40, first, "gpt-6-astra", "gpt-6-sol"))
 	}
-	claimed, err := repo.claimOAuth429(t.Context(), a.ID, "gpt-6-luna")
+	claimed, err := repo.claimOAuth429(t.Context(), a.ID, "gpt-6-sol")
 	require.NoError(t, err)
 	require.NotNil(t, claimed)
 	started, err := repo.StartOAuth429Run(t.Context(), claimed)
@@ -187,7 +170,7 @@ func TestOAuth429CompactRoutingChangeFencesEveryStage(t *testing.T) {
 	require.NotNil(t, started)
 	_, err = repo.ConfigureOAuth429Routing(t.Context(), "gpt-6-astra")
 	require.NoError(t, err)
-	restored, err := repo.ConfigureOAuth429Routing(t.Context(), "gpt-6-luna")
+	restored, err := repo.ConfigureOAuth429Routing(t.Context(), "gpt-6-sol")
 	require.NoError(t, err)
 	require.NotEqual(t, first.Revision, restored.Revision)
 	valid, err := repo.OAuth429Current(t.Context(), claimed)
@@ -199,17 +182,17 @@ func TestOAuth429CompactRoutingChangeFencesEveryStage(t *testing.T) {
 	started.ResultID, started.Verdict, started.FinishedAt, started.AnswerComplete = "stale-result", "incorrect", time.Now(), true
 	require.NoError(t, repo.FinishOAuth429Run(t.Context(), claimed, *started))
 	require.NoError(t, repo.CompleteOAuth429(t.Context(), claimed))
-	require.False(t, observe(80, first, "gpt-6-astra", "gpt-6-luna"), "queued old routing revision cannot revive after change-back")
-	inflight := oauth429ObservationFixture(a.ID, "gpt-6-luna", c.Revision, 81, 429)
+	require.False(t, observe(80, first, "gpt-6-astra", "gpt-6-sol"), "queued old routing revision cannot revive after change-back")
+	inflight := oauth429ObservationFixture(a.ID, "gpt-6-sol", c.Revision, 81, 429)
 	inflight.RequestModel, inflight.Endpoint = "gpt-6-astra", "/responses/compact"
 	inflight.RoutingRevision, inflight.CompactModel, inflight.StartedAt = restored.Revision, restored.CompactModel, first.ValidSince
 	queued, err := repo.ObserveOAuth429(t.Context(), inflight)
 	require.NoError(t, err)
 	require.False(t, queued, "request started before global change must not inherit the new observer revision")
 	for i := 0; i < 20; i++ {
-		require.Equal(t, i == 19, observe(i+100, restored, "gpt-6-astra", "gpt-6-luna"))
+		require.Equal(t, i == 19, observe(i+100, restored, "gpt-6-astra", "gpt-6-sol"))
 	}
-	fresh, err := repo.claimOAuth429(t.Context(), a.ID, "gpt-6-luna")
+	fresh, err := repo.claimOAuth429(t.Context(), a.ID, "gpt-6-sol")
 	require.NoError(t, err)
 	require.NotNil(t, fresh)
 	require.NoError(t, repo.CompleteOAuth429(t.Context(), claimed))

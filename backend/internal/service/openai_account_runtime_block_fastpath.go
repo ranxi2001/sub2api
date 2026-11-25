@@ -669,13 +669,6 @@ func (s *OpenAIGatewayService) isOpenAIAccountRequestRuntimeBlocked(account *Acc
 	if s == nil {
 		return false
 	}
-	endpoint := ""
-	if requireCompact {
-		endpoint = "/responses/compact"
-	}
-	if account != nil && account.isOAuth429ModelBlockedForEndpoint(requestedModel, endpoint, oauth429ConfiguredCompactModel(s.cfg)) {
-		return true
-	}
 	if s.isExcelBPSCoolingDown(account, requestedModel) || s.isExcelBPSModelCoolingDown(account, requestedModel) {
 		return true
 	}

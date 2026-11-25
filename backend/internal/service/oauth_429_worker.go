@@ -20,7 +20,6 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-const OAuth429ModelBlocksKey = "oauth_429_model_blocks"
 const OAuth429Source = "upstream_429_independent"
 
 // Independent reviews use the configured minimum number of business requests.
@@ -53,7 +52,6 @@ type OAuth429Task struct {
 	AccountEpoch    int64            `json:"account_epoch"`
 	Model           string           `json:"model"`
 	Reason          string           `json:"reason,omitempty"`
-	ModelBlocked    bool             `json:"model_blocked,omitempty"`
 	RequestModel    string           `json:"request_model"`
 	Endpoint        string           `json:"endpoint,omitempty"`
 	RoutingRevision string           `json:"routing_revision,omitempty"`
@@ -186,6 +184,16 @@ func (s *AccountOpsService) startOAuth429Observations(ctx context.Context, repo 
 	oauth429HTTPObserver.Store(s)
 }
 
+// OAuth429ReviewModel applies only to the actual upstream target of the 429 branch.
+func OAuth429ReviewModel(model string) bool {
+	switch normalizeKnownOpenAICodexModel(model) {
+	case "gpt-5.6-sol", "gpt-6-sol", "gpt-6-astra", "gpt-6.1-sol", "gpt-6.2-sol", "gpt-6.2-astra":
+		return true
+	default:
+		return false
+	}
+}
+
 func ObserveOAuth429HTTP(req *http.Request, accountID int64, status int, requestStarted ...time.Time) {
 	observer := oauth429HTTPObserver.Load()
 	if observer == nil || accountID <= 0 || req == nil || status < 200 || status > 599 || req.Context().Value(qualityProbeContextKey{}) != nil {
@@ -228,7 +236,7 @@ func ObserveOAuth429HTTP(req *http.Request, accountID int64, status int, request
 			}
 		}
 	}
-	if model == "" || len(requestModel) > 256 || len(model) > 256 {
+	if len(requestModel) > 256 || len(model) > 256 || !OAuth429ReviewModel(model) {
 		return
 	}
 	digest := sha256.Sum256([]byte(requestID))
@@ -249,18 +257,6 @@ func ObserveOAuth429HTTP(req *http.Request, accountID int64, status int, request
 	default:
 		observer.dropped.Add(1)
 	}
-}
-
-func (a *Account) IsOAuth429ModelBlocked(model string) bool {
-	return a.isOAuth429ModelBlockedForEndpoint(model, "")
-}
-
-func (a *Account) isOAuth429ModelBlockedForEndpoint(model, endpoint string, compactModel ...string) bool {
-	if a == nil {
-		return false
-	}
-	entries, _ := a.Extra[OAuth429ModelBlocksKey].(map[string]any)
-	return len(entries) > 0 && entries[ResolveOAuth429TargetModel(a, model, endpoint, compactModel...)] != nil
 }
 
 const OAuth429ConsecutiveLimit = 5
@@ -303,10 +299,6 @@ func (task *OAuth429Task) DecisionReason() string {
 	}
 	if task.consecutiveRateLimits() == OAuth429ConsecutiveLimit {
 		return "five_consecutive_429"
-	}
-	one, two := task.Runs[0], task.Runs[1]
-	if len(task.Runs) == 2 && one.AnswerComplete && two.AnswerComplete && one.Verdict == "incorrect" && two.Verdict == "incorrect" {
-		return "two_wrong_answers"
 	}
 	return ""
 }

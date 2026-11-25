@@ -61,7 +61,7 @@ func oauth429Fixture(t *testing.T, history []string) (*accountRepository, *servi
 	c, err := svc.SaveOAuthAutoConfig(t.Context(), c)
 	require.NoError(t, err)
 
-	a := degradationAccountFixture(t, 50, map[string]any{"gpt-6-astra": "gpt-6-astra", "gpt-6-luna": "gpt-6-luna"}, history, time.Minute)
+	a := degradationAccountFixture(t, 50, map[string]any{"gpt-6-sol": "gpt-6-sol", "gpt-6.1-terra": "gpt-6.1-terra", "gpt-6-astra": "gpt-6-astra", "gpt-6-luna": "gpt-6-luna"}, history, time.Minute)
 	_, err = integrationDB.ExecContext(t.Context(), `UPDATE accounts SET credentials=credentials||'{"access_token":"fixture-only"}'::jsonb WHERE id=$1`, a.ID)
 	require.NoError(t, err)
 	return repo, a, c
@@ -138,9 +138,9 @@ func TestOAuth429WorkerIndependentPair(t *testing.T) {
 		name    string
 		answers []string
 		history []string
-		blocked bool
+		applied bool
 	}{
-		{"qualityops_off_two_wrong", []string{"23", "27"}, nil, true},
+		{"qualityops_off_two_wrong", []string{"23", "27"}, nil, false},
 		{"history_wrong_cannot_shortcut", []string{"23", "21"}, []string{"incorrect", "incorrect"}, false},
 		{"wrong_pass", []string{"23", "21"}, nil, false},
 		{"wrong_then_429_then_correct", []string{"23", "429", "21"}, nil, false},
@@ -161,7 +161,7 @@ func TestOAuth429WorkerIndependentPair(t *testing.T) {
 			oauth429Prime(t, repo, a.ID, "gpt-6-astra")
 			before, err := repo.GetByID(t.Context(), a.ID)
 			require.NoError(t, err)
-			require.False(t, before.IsOAuth429ModelBlocked("gpt-6-astra"))
+			require.False(t, before.HasOAuthDegradationAction())
 			require.Zero(t, calls.Load(), "history cannot stand in for an actual execution")
 			cfg := &config.Config{Runtime: config.RuntimeConfig{Role: config.RuntimeRoleGateway}}
 			secondTests := service.NewAccountTestService(repo, nil, nil, nil, nil, upstream, cfg, nil)
@@ -179,22 +179,24 @@ func TestOAuth429WorkerIndependentPair(t *testing.T) {
 			require.EqualValues(t, len(tc.answers), calls.Load())
 			after, err := repo.GetByID(t.Context(), a.ID)
 			require.NoError(t, err)
-			require.Equal(t, tc.blocked, after.IsOAuth429ModelBlocked("gpt-6-astra"))
+			require.Equal(t, tc.applied, after.HasOAuthDegradationAction())
 			require.True(t, after.IsModelSupported("gpt-6-luna"))
-			require.Equal(t, 50, after.Concurrency)
+			if tc.applied {
+				require.Equal(t, 10, after.Concurrency)
+			} else {
+				require.Equal(t, 50, after.Concurrency)
+			}
 			require.True(t, after.Schedulable)
 			require.Equal(t, service.StatusActive, after.Status)
-			if tc.blocked {
+			if tc.applied {
 				candidate := buildSchedulerMetadataAccount(*after)
 				require.False(t, candidate.IsModelSupported("gpt-6-astra"))
 				require.True(t, candidate.IsModelSupported("gpt-6-luna"))
-				// Save a form loaded before the worker committed its block.
-				require.NoError(t, repo.Update(t.Context(), before))
-				reloaded, err := repo.GetByID(t.Context(), a.ID)
-				require.NoError(t, err)
-				require.True(t, reloaded.IsOAuth429ModelBlocked("gpt-6-astra"))
+				require.Equal(t, "whitelist", after.Credentials["model_mapping_mode"])
+			} else {
+				require.Equal(t, before.Credentials, after.Credentials)
 			}
-			require.Equal(t, before.Credentials, after.Credentials)
+			require.NotContains(t, after.Extra, "oauth_429_model_blocks")
 			var data []byte
 			var state string
 			require.NoError(t, integrationDB.QueryRowContext(t.Context(), `SELECT data,state FROM oauth_429_tasks WHERE account_id=$1 AND model='gpt-6-astra'`, a.ID).Scan(&data, &state))
@@ -208,7 +210,7 @@ func TestOAuth429WorkerIndependentPair(t *testing.T) {
 			require.NoError(t, json.Unmarshal(event, &logged))
 			require.NotNil(t, logged.OAuth429)
 			require.Equal(t, saved.Reason, logged.OAuth429.Reason)
-			require.Equal(t, tc.blocked, logged.OAuth429.ModelBlocked)
+			require.Equal(t, tc.applied, saved.Reason != "")
 			if tc.name == "five_consecutive_429" || tc.name == "five_after_wrong" {
 				require.Equal(t, "five_consecutive_429", saved.Reason)
 			}
@@ -320,7 +322,7 @@ func TestOAuth429PersistentClaimRestartAndFences(t *testing.T) {
 			}
 			var extra []byte
 			require.NoError(t, integrationDB.QueryRowContext(t.Context(), `SELECT extra FROM accounts WHERE id=$1`, a.ID).Scan(&extra))
-			require.NotContains(t, string(extra), service.OAuth429ModelBlocksKey)
+			require.NotContains(t, string(extra), "oauth_429_model_blocks")
 		})
 	}
 }
@@ -328,9 +330,44 @@ func TestOAuth429PersistentClaimRestartAndFences(t *testing.T) {
 // Compile-time production repository contract.
 var _ service.OAuth429Repository = (*accountRepository)(nil)
 
+func TestOAuth429ReviewUsesSelectedAccountActions(t *testing.T) {
+	for _, limitModels := range []bool{false, true} {
+		t.Run(fmt.Sprintf("limit_models_%t", limitModels), func(t *testing.T) {
+			repo, a, cfg := oauth429Fixture(t, nil)
+			cfg.DegradationAction.LimitModels = &limitModels
+			cfg.DegradationAction.Models = []string{"gpt-6-astra"}
+			raw, err := json.Marshal(cfg)
+			require.NoError(t, err)
+			_, err = integrationDB.ExecContext(t.Context(), "UPDATE settings SET value=$1 WHERE key=$2", string(raw), service.SettingKeyOAuthAutoConfig)
+			require.NoError(t, err)
+			oauth429Prime(t, repo, a.ID, "gpt-6-astra")
+			task, err := repo.ClaimOAuth429(t.Context())
+			require.NoError(t, err)
+			require.NotNil(t, task)
+			runner, _, _ := oauth429Runner(t, repo, []string{"429", "429", "429", "429", "429"})
+			require.NoError(t, runner.RunOAuth429Task(t.Context(), repo, task))
+			got, err := repo.GetByID(t.Context(), a.ID)
+			require.NoError(t, err)
+			require.True(t, got.HasOAuthDegradationAction())
+			require.Equal(t, cfg.DegradationAction.TargetConcurrency, got.Concurrency)
+			require.True(t, got.IsModelSupported("gpt-6-astra"), "retained model stays available after its own five 429s")
+			require.Equal(t, !limitModels, got.IsModelSupported("gpt-6-luna"))
+			require.NotContains(t, got.Extra, "oauth_429_model_blocks")
+		})
+	}
+}
+
 func TestOAuth429WorkerAdmitsEachModelIndependently(t *testing.T) {
 	repo, a, _ := oauth429Fixture(t, nil)
-	for _, model := range []string{"gpt-6-astra", "gpt-6-luna"} {
+	for _, model := range []string{"gpt-6-luna", "gpt-6.1-terra"} {
+		for i := 0; i < 30; i++ {
+			require.False(t, oauth429Observe(t, repo, a.ID, model, i))
+		}
+	}
+	var excluded int
+	require.NoError(t, integrationDB.QueryRowContext(t.Context(), "SELECT count(*) FROM oauth_429_tasks WHERE account_id=$1", a.ID).Scan(&excluded))
+	require.Zero(t, excluded)
+	for _, model := range []string{"gpt-6-astra", "gpt-6-sol"} {
 		oauth429Prime(t, repo, a.ID, model)
 	}
 	var pending int
@@ -341,7 +378,7 @@ func TestOAuth429WorkerAdmitsEachModelIndependently(t *testing.T) {
 // Business response ingress wakes the real durable observer without a quality plan.
 func TestOAuth429HTTPTransportDeduplicatesAndWakesWorker(t *testing.T) {
 	repo, a, _ := oauth429Fixture(t, nil)
-	runner, calls, _ := oauth429Runner(t, repo, []string{"23", "27"})
+	runner, calls, _ := oauth429Runner(t, repo, []string{"429", "429", "429", "429", "429"})
 	business := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(429) }))
 	defer business.Close()
 	transport := &accountResponseTransport{base: http.DefaultTransport}
@@ -363,9 +400,9 @@ func TestOAuth429HTTPTransportDeduplicatesAndWakesWorker(t *testing.T) {
 	}
 	require.Eventually(t, func() bool {
 		got, err := repo.GetByID(t.Context(), a.ID)
-		return err == nil && got.IsOAuth429ModelBlocked("gpt-6-astra")
+		return err == nil && got.HasOAuthDegradationAction()
 	}, 8*time.Second, 20*time.Millisecond)
-	require.EqualValues(t, 2, calls.Load())
+	require.EqualValues(t, 5, calls.Load())
 }
 
 func TestOAuth429AliasAndLiveCancellation(t *testing.T) {
@@ -383,7 +420,8 @@ func TestOAuth429AliasAndLiveCancellation(t *testing.T) {
 		require.EqualValues(t, 2, calls.Load())
 		got, err := repo.GetByID(t.Context(), a.ID)
 		require.NoError(t, err)
-		require.False(t, got.IsModelSupported("alias"))
+		require.False(t, got.HasOAuthDegradationAction())
+		require.True(t, got.IsModelSupported("alias"), "two wrong answers in a 429 review must leave the alias available")
 		require.True(t, got.IsModelSupported("gpt-6-luna"))
 	})
 	t.Run("disable aborts in flight", func(t *testing.T) {
@@ -427,7 +465,7 @@ func TestOAuth429AliasAndLiveCancellation(t *testing.T) {
 		}
 		got, err := repo.GetByID(t.Context(), a.ID)
 		require.NoError(t, err)
-		require.False(t, got.IsOAuth429ModelBlocked("gpt-6-astra"))
+		require.False(t, got.HasOAuthDegradationAction())
 	})
 }
 

@@ -27,7 +27,7 @@ func TestOAuth429HTTPParsedModelSurvivesStreamingAndLargeBody(t *testing.T) {
 			repo, a, _ := oauth429Fixture(t, nil)
 			_, err := integrationDB.ExecContext(t.Context(), `UPDATE accounts SET credentials=jsonb_set(credentials,'{model_mapping}','{"alias-*":"gpt-6-astra","gpt-6-luna":"gpt-6-luna"}') WHERE id=$1`, a.ID)
 			require.NoError(t, err)
-			runner, calls, _ := oauth429Runner(t, repo, []string{"23", "27"})
+			runner, calls, _ := oauth429Runner(t, repo, []string{"429", "429", "429", "429", "429"})
 			runner.StartOAuth429Worker()
 			defer runner.Stop()
 			business := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.Copy(io.Discard, r.Body); w.WriteHeader(429) }))
@@ -54,9 +54,9 @@ func TestOAuth429HTTPParsedModelSurvivesStreamingAndLargeBody(t *testing.T) {
 			}
 			require.Eventually(t, func() bool {
 				got, e := repo.GetByID(t.Context(), a.ID)
-				return e == nil && got.IsOAuth429ModelBlocked("alias-one")
+				return e == nil && got.HasOAuthDegradationAction()
 			}, 8*time.Second, 20*time.Millisecond, "real input alias and wire target must survive streaming or large provider bodies")
-			require.EqualValues(t, 2, calls.Load())
+			require.EqualValues(t, 5, calls.Load())
 			got, err := repo.GetByID(t.Context(), a.ID)
 			require.NoError(t, err)
 			require.True(t, got.IsModelSupported("gpt-6-luna"))

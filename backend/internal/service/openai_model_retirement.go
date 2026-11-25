@@ -100,9 +100,6 @@ func supportsOpenAIRequestModel(account *Account, requestedModel string, require
 	if requireCompact {
 		endpoint = "/responses/compact"
 	}
-	if account.isOAuth429ModelBlockedForEndpoint(requestedModel, endpoint, compactModel...) {
-		return false
-	}
 	target := ResolveOAuth429TargetModel(account, requestedModel, endpoint, compactModel...)
 	if account.Platform == PlatformOpenAI && !account.oauthInitialSelectionAllows(target) {
 		return false

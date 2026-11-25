@@ -72,7 +72,7 @@ func TestOAuth429DedupSurvivesStatisticalWindowEviction(t *testing.T) {
 	require.Equal(t, 1, count)
 	// The same request identities on another model have an independent scope.
 	for i := 0; i < 20; i++ {
-		q, e := repo.ObserveOAuth429(t.Context(), oauth429ObservationFixture(a.ID, "gpt-6-luna", c.Revision, i, 429))
+		q, e := repo.ObserveOAuth429(t.Context(), oauth429ObservationFixture(a.ID, "gpt-6-sol", c.Revision, i, 429))
 		require.NoError(t, e)
 		require.Equal(t, i == 19, q)
 	}
