@@ -344,3 +344,54 @@ func TestGatewayService_AnthropicAPIKeyPassthrough_ForwardStreamMissingTerminalP
 	require.Equal(t, 3, result.Usage.OutputTokens)
 	require.Equal(t, "claude-3-7-sonnet-20250219", result.Model)
 }
+
+func TestGatewayService_Forward_AnthropicStreamIncomplete(t *testing.T) {
+	const failure = "event: error\ndata: " + `{"type":"error","error":{"type":"stream_incomplete","message":"missing upstream terminal"}}` + "\n\n"
+	const started = "data: " + `{"type":"message_start","message":{"usage":{"input_tokens":1,"cache_read_input_tokens":17}}}` + "\n\n" +
+		"data: " + `{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}` + "\n\n" +
+		"data: " + `{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"fixture-signature"}}` + "\n\n"
+	for _, tc := range []struct{ name, prefix string }{
+		{"before_output", ""},
+		{"after_thinking_signature", started},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+			parsed, err := ParseGatewayRequest(NewRequestBodyRef([]byte(`{"model":"claude-sonnet-4","stream":true,"messages":[{"role":"user","content":"hello"}]}`)), PlatformAnthropic)
+			require.NoError(t, err)
+			upstream := &anthropicHTTPUpstreamRecorder{resp: &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": {"text/event-stream"}, "X-Request-Id": {"fixture-id"}},
+				Body:       io.NopCloser(strings.NewReader(tc.prefix + failure)),
+			}}
+			account := newAnthropicAPIKeyAccountForTest()
+			delete(account.Extra, "anthropic_passthrough")
+			result, err := newForwardPartialUsageServiceForTest(upstream).Forward(context.Background(), c, account, parsed)
+			require.Error(t, err)
+			attempts, ok := c.MustGet(OpsUpstreamErrorsKey).([]*OpsUpstreamErrorEvent)
+			require.True(t, ok)
+			require.Len(t, attempts, 1)
+			require.Equal(t, "stream_error", attempts[0].Kind)
+			require.Equal(t, http.StatusBadGateway, attempts[0].UpstreamStatusCode)
+			require.Equal(t, "fixture-id", attempts[0].UpstreamRequestID)
+			var failover *UpstreamFailoverError
+			if tc.prefix == "" {
+				require.ErrorAs(t, err, &failover)
+				require.Equal(t, http.StatusBadGateway, failover.StatusCode)
+				require.Nil(t, result)
+				require.False(t, c.Writer.Written())
+				require.Empty(t, c.Writer.Header().Get("x-request-id"))
+				return
+			}
+			require.False(t, errors.As(err, &failover))
+			require.NotNil(t, result)
+			require.Equal(t, 17, result.Usage.CacheReadInputTokens)
+			require.Equal(t, http.StatusOK, rec.Code)
+			require.Contains(t, rec.Body.String(), "fixture-signature")
+			require.Contains(t, rec.Body.String(), "stream_incomplete")
+			require.Equal(t, 1, strings.Count(rec.Body.String(), "event: error"))
+			require.NotContains(t, rec.Body.String(), "message_stop")
+		})
+	}
+}
