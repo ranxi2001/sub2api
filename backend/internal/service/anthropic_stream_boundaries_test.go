@@ -183,6 +183,7 @@ func TestIssue985NativeRelays(t *testing.T) {
 		{"multidata", strings.ReplaceAll(canonical, `,"`, ",\ndata: \""), false},
 		{"unknown_multidata", "event: fixture_extension\ndata: opaque one\ndata: opaque two\n\n" + canonical, false},
 		{"empty", "", true},
+		{"ping_then_eof", issue985Frame("ping", `{"type":"ping"}`), true},
 		{"missing", strings.ReplaceAll(strings.ReplaceAll(canonical, `,"usage":{"input_tokens":17,"output_tokens":0}`, ""), `,"usage":{"output_tokens":3}`, ""), true},
 		{"error_after_terminal", canonical + issue985Frame("error", `{"type":"error","error":{"type":"overloaded_error","message":"fixture"}}`), true},
 		{"reasoning", strings.ReplaceAll(strings.ReplaceAll(canonical, `"type":"text","text":""`, `"type":"thinking","thinking":""`), `"type":"text_delta","text":"fixture text"`, `"type":"thinking_delta","thinking":"fixture reasoning"`), false},
@@ -207,6 +208,13 @@ func TestIssue985NativeRelays(t *testing.T) {
 				if tc.fail {
 					require.Error(t, err)
 					require.NotContains(t, rec.Body.String(), "event: message_stop")
+					if route == "normal" && tc.name == "empty" {
+						var failover *UpstreamFailoverError
+						require.ErrorAs(t, err, &failover)
+						require.Equal(t, http.StatusBadGateway, failover.StatusCode)
+						require.False(t, c.Writer.Written(), "the next account must get an uncommitted response")
+						return
+					}
 					require.Equal(t, 1, strings.Count(rec.Body.String(), "event: error"))
 				} else {
 					require.NoError(t, err)
