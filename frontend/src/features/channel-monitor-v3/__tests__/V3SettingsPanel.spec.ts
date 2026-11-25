@@ -1,5 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
 import V3SettingsPanel from '../V3SettingsPanel.vue'
 import ComponentEditorDialog from '../ComponentEditorDialog.vue'
 import type { MonitorV3Component, MonitorV3Settings } from '@/api/channelMonitorV3'
@@ -17,6 +19,8 @@ vi.mock('@/stores/app', () => ({
   useAppStore: () => ({ cachedPublicSettings: { channel_monitor_enabled: true }, showError: mocks.error, showSuccess: mocks.success }),
 }))
 vi.mock('@/utils/featureFlags', () => ({ getChannelMonitorMode: () => mocks.mode }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ user: { id: 7 } }) }))
+vi.mock('@/api/admin/groups', () => ({ getModelAllowlistCandidates: async () => ['sol', 'astra', 'terra'] }))
 vi.mock('@/api/admin', () => ({ adminAPI: { groups: { getAll: mocks.groups } } }))
 vi.mock('@/api/channelMonitorV3', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/api/channelMonitorV3')>()),
@@ -67,6 +71,7 @@ function settings(extra: Partial<MonitorV3Settings> = {}): MonitorV3Settings {
 }
 
 beforeEach(() => {
+  setActivePinia(createPinia())
   vi.clearAllMocks()
   mocks.mode = 'v2'
   mocks.getSettings.mockImplementation(async () => settings())
@@ -166,7 +171,7 @@ describe('V3 component editor', () => {
     await wrapper.get('form').trigger('submit')
     await flushPromises()
     expect(mocks.createComponent).toHaveBeenCalledWith({
-      category_id: 1, name: 'Codex Pro', description: '', group_id: 41, model: '', degraded_ttft_ms: 30000,
+      category_id: 1, name: 'Codex Pro', description: '', group_id: 41, model: '', models: [], degraded_ttft_ms: 30000,
       show_multiplier: true, visibility: 'public', enabled: true,
     })
     expect(wrapper.emitted('saved')).toHaveLength(1)
@@ -175,10 +180,19 @@ describe('V3 component editor', () => {
   it('edits an existing component in place', async () => {
     mocks.updateComponent.mockImplementation(async (_id, input) => ({ ...component(3, 2), ...input }))
     const wrapper = mount(ComponentEditorDialog, { props: { ...props, component: component(3, 2, { visibility: 'public', model: 'claude-opus-5-5' }) }, global: { stubs } })
-    expect((wrapper.get('[data-testid="monitor-v3-model"]').element as HTMLInputElement).value).toBe('claude-opus-5-5')
-    await wrapper.get('[data-testid="monitor-v3-model"]').setValue('  ')
+    await wrapper.get('input[value="claude-opus-5-5"]').setValue(false)
     await wrapper.get('form').trigger('submit')
     await flushPromises()
-    expect(mocks.updateComponent).toHaveBeenCalledWith(3, expect.objectContaining({ visibility: 'public', category_id: 2, group_id: 43, model: '' }))
+    expect(mocks.updateComponent).toHaveBeenCalledWith(3, expect.objectContaining({ visibility: 'public', category_id: 2, group_id: 43, model: '', models: [] }))
+  })
+
+  it('saves two selected group models and keeps the first as the idle probe model', async () => {
+    const wrapper = mount(ComponentEditorDialog, { props: { ...props, component: component(1, 1) }, global: { stubs } })
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'NewFeatureBadge' }).props('noticeId')).toBe(NEW_FEATURE_NOTICES.monitorV3ComponentModels)
+    await wrapper.get('input[value="sol"]').setValue(true)
+    await wrapper.get('input[value="astra"]').setValue(true)
+    await wrapper.get('form').trigger('submit')
+    expect(mocks.updateComponent).toHaveBeenCalledWith(1, expect.objectContaining({ model: 'sol', models: ['sol', 'astra'] }))
   })
 })

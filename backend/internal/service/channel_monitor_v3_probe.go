@@ -422,9 +422,8 @@ func channelMonitorV3Truncate(value string, limit int) string {
 }
 
 type channelMonitorV3ProbeTarget struct {
-	GroupID int64
-	// Filter is the component's model; empty means the whole group.
-	Filter          string
+	GroupID         int64
+	Component       ChannelMonitorV3Component
 	Model           string
 	ReasoningEffort string
 }
@@ -439,11 +438,11 @@ func channelMonitorV3ProbeTargets(probe ChannelMonitorV3IdleProbe, components []
 		if i < 0 || !c.Enabled || c.GroupDeleted || (c.GroupStatus != "" && c.GroupStatus != StatusActive) {
 			continue
 		}
-		target := channelMonitorV3ProbeTarget{GroupID: c.GroupID, Filter: c.Model, Model: c.Model, ReasoningEffort: probe.Groups[i].ReasoningEffort}
+		target := channelMonitorV3ProbeTarget{GroupID: c.GroupID, Component: c, Model: c.Model, ReasoningEffort: probe.Groups[i].ReasoningEffort}
 		if target.Model == "" {
 			target.Model = probe.Groups[i].Model
 		}
-		if target.Model != "" && !slices.Contains(targets, target) {
+		if target.Model != "" {
 			targets = append(targets, target)
 		}
 	}
@@ -457,7 +456,7 @@ func channelMonitorV3DueProbes(targets []channelMonitorV3ProbeTarget, counts []C
 	for _, t := range targets {
 		var successes int64
 		for _, c := range counts {
-			if c.GroupID == t.GroupID && (t.Filter == "" || c.Model == t.Filter) {
+			if c.GroupID == t.GroupID && t.Component.includesModel(c.Model) {
 				successes += c.Success
 			}
 		}

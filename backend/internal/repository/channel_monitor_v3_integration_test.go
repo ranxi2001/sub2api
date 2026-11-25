@@ -53,6 +53,19 @@ func TestChannelMonitorV3RepositoryLayout(t *testing.T) {
 	require.Equal(t, service.PlatformOpenAI, codex.GroupPlatform)
 	require.InDelta(t, 0.2, codex.GroupRateMultiplier, 1e-9)
 	require.Equal(t, 15000, codex.DegradedTTFTMs)
+	require.Equal(t, []string{input.Model}, codex.Models)
+	selected := input
+	selected.Models = []string{input.Model, "test-astra"}
+	codex, err = repo.UpdateComponent(ctx, codex.ID, selected)
+	require.NoError(t, err)
+	require.Equal(t, selected.Models, codex.Models)
+	codex, err = repo.UpdateComponent(ctx, codex.ID, input)
+	require.NoError(t, err)
+	require.Equal(t, selected.Models, codex.Models, "legacy edit of an unrelated field preserves the selection")
+	selected.Models, selected.Model = []string{}, ""
+	codex, err = repo.UpdateComponent(ctx, codex.ID, selected)
+	require.NoError(t, err)
+	require.Empty(t, codex.Models)
 	featuredInput := input
 	featuredInput.CategoryID, featuredInput.Name, featuredInput.Model = nil, "Featured", ""
 	featured, err := repo.CreateComponent(ctx, featuredInput)

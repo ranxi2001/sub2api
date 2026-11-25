@@ -108,13 +108,14 @@ type ChannelMonitorV3Component struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	GroupID     int64  `json:"group_id"`
-	// Model narrows the row to one requested model; empty means the whole group.
-	Model          string `json:"model"`
-	DegradedTTFTMs int    `json:"degraded_ttft_ms"`
-	ShowMultiplier bool   `json:"show_multiplier"`
-	Visibility     string `json:"visibility"`
-	Enabled        bool   `json:"enabled"`
-	SortOrder      int    `json:"sort_order"`
+	// Model is the first selected model for legacy clients and idle probes.
+	Model          string   `json:"model"`
+	Models         []string `json:"models,omitempty"`
+	DegradedTTFTMs int      `json:"degraded_ttft_ms"`
+	ShowMultiplier bool     `json:"show_multiplier"`
+	Visibility     string   `json:"visibility"`
+	Enabled        bool     `json:"enabled"`
+	SortOrder      int      `json:"sort_order"`
 	// Joined from groups for display.
 	GroupName           string    `json:"group_name"`
 	GroupPlatform       string    `json:"group_platform"`
@@ -125,16 +126,24 @@ type ChannelMonitorV3Component struct {
 	UpdatedAt           time.Time `json:"updated_at"`
 }
 
+func (c *ChannelMonitorV3Component) includesModel(model string) bool {
+	if len(c.Models) != 0 {
+		return slices.Contains(c.Models, model)
+	}
+	return c.Model == "" || model == c.Model
+}
+
 type ChannelMonitorV3ComponentInput struct {
-	CategoryID     *int64 `json:"category_id"`
-	Name           string `json:"name"`
-	Description    string `json:"description"`
-	GroupID        int64  `json:"group_id"`
-	Model          string `json:"model"`
-	DegradedTTFTMs int    `json:"degraded_ttft_ms"`
-	ShowMultiplier bool   `json:"show_multiplier"`
-	Visibility     string `json:"visibility"`
-	Enabled        bool   `json:"enabled"`
+	CategoryID     *int64   `json:"category_id"`
+	Name           string   `json:"name"`
+	Description    string   `json:"description"`
+	GroupID        int64    `json:"group_id"`
+	Model          string   `json:"model"`
+	Models         []string `json:"models"`
+	DegradedTTFTMs int      `json:"degraded_ttft_ms"`
+	ShowMultiplier bool     `json:"show_multiplier"`
+	Visibility     string   `json:"visibility"`
+	Enabled        bool     `json:"enabled"`
 }
 
 // ChannelMonitorV3Settings is everything the admin editor needs in one read.
@@ -205,6 +214,7 @@ type ChannelMonitorV3ComponentStatus struct {
 	Name        string   `json:"name"`
 	Description string   `json:"description,omitempty"`
 	Model       string   `json:"model,omitempty"`
+	Models      []string `json:"models,omitempty"`
 	Multiplier  *float64 `json:"multiplier,omitempty"`
 	// Status is the latest sufficiently sampled slot, while it is still fresh.
 	Status string `json:"status"`
@@ -574,6 +584,23 @@ func normalizeChannelMonitorV3Component(input *ChannelMonitorV3ComponentInput) e
 	input.Name = strings.TrimSpace(input.Name)
 	input.Description = strings.TrimSpace(input.Description)
 	input.Model = strings.TrimSpace(input.Model)
+	if input.Models != nil {
+		models := make([]string, 0, len(input.Models))
+		for _, model := range input.Models {
+			model = strings.TrimSpace(model)
+			if model == "" || utf8.RuneCountInString(model) > 100 {
+				return channelMonitorV3Invalid("each selected model must contain 1 to 100 characters")
+			}
+			if !slices.Contains(models, model) {
+				models = append(models, model)
+			}
+		}
+		input.Models = models
+		input.Model = ""
+		if len(models) > 0 {
+			input.Model = models[0]
+		}
+	}
 	if input.Name == "" || utf8.RuneCountInString(input.Name) > 100 {
 		return channelMonitorV3Invalid("component name is required (at most 100 characters)")
 	}
@@ -732,7 +759,7 @@ func (s *ChannelMonitorV3Service) Status(ctx context.Context, viewer ChannelMoni
 
 func (s *ChannelMonitorV3Service) componentStatus(cfg ChannelMonitorV3Config, component ChannelMonitorV3Component, facts, totals *ChannelMonitorV3Facts, first time.Time, interval time.Duration, viewer ChannelMonitorV3Viewer) ChannelMonitorV3ComponentStatus {
 	item := ChannelMonitorV3ComponentStatus{
-		ID: component.ID, Name: component.Name, Description: component.Description, Model: component.Model,
+		ID: component.ID, Name: component.Name, Description: component.Description, Model: component.Model, Models: component.Models,
 		Status: ChannelMonitorV3StatusUnknown,
 		Cells:  channelMonitorV3Cells(cfg, component, facts, first, cfg.Cells, interval, viewer.Admin),
 	}
@@ -813,7 +840,7 @@ func channelMonitorV3Accumulate(cfg ChannelMonitorV3Config, component ChannelMon
 		return accs
 	}
 	index := func(groupID int64, model string, slot time.Time) int {
-		if groupID != component.GroupID || (component.Model != "" && model != component.Model) {
+		if groupID != component.GroupID || !component.includesModel(model) {
 			return -1
 		}
 		if count == 0 {

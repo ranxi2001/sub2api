@@ -40,6 +40,7 @@ export interface MonitorV3ComponentStatus {
   name: string
   description?: string
   model?: string
+  models?: string[]
   multiplier?: number | null
   status: MonitorV3Status
   /** 0–100 over the configured range; null without traffic. */
@@ -144,8 +145,10 @@ export interface MonitorV3ComponentInput {
   name: string
   description: string
   group_id: number
-  /** Empty means every model requested in the group. */
+  /** First selected model for older clients. */
   model: string
+  /** Empty selects every requested model in this group. */
+  models?: string[]
   /** 0 inherits the page threshold. */
   degraded_ttft_ms: number
   show_multiplier: boolean

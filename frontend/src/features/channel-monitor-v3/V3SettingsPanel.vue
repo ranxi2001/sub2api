@@ -161,7 +161,7 @@
                       <span class="rounded px-1 py-px text-[10px]" :class="platformBadgeLightClass(component.group_platform)">{{ platformLabel(component.group_platform) }}</span>
                       <span class="truncate">{{ component.group_name || '#' + component.group_id }}</span>
                       <span>·</span>
-                      <code v-if="component.model" class="rounded bg-gray-100 px-1 font-mono text-[11px] text-gray-700 dark:bg-dark-700 dark:text-gray-300">{{ component.model }}</code>
+                      <code v-if="componentModels(component).length" class="break-all rounded bg-gray-100 px-1 font-mono text-[11px] text-gray-700 dark:bg-dark-700 dark:text-gray-300">{{ componentModels(component).join(', ') }}</code>
                       <span v-else>{{ t('channelMonitorV3.admin.allModels') }}</span>
                       <span>·</span>
                       <span>{{ t(`channelMonitorV3.visibility.${component.visibility}`) }}</span>
@@ -292,7 +292,7 @@ import ComponentEditorDialog from './ComponentEditorDialog.vue'
 import IdleProbeSettings from './IdleProbeSettings.vue'
 import IncidentsDialog from './IncidentsDialog.vue'
 import StatusPage from './StatusPage.vue'
-import { formatMonitorV3Full, formatMonitorV3Multiplier } from './monitorV3'
+import { componentModels, formatMonitorV3Full, formatMonitorV3Multiplier } from './monitorV3'
 
 /** Facts older than this mean the passive aggregation is not keeping up. */
 const STALE_MS = 10 * 60_000
@@ -455,7 +455,7 @@ async function toggleEnabled(component: MonitorV3Component, enabled: boolean) {
   try {
     await updateComponent(component.id, {
       category_id: component.category_id, name: component.name, description: component.description, group_id: component.group_id,
-      model: component.model, degraded_ttft_ms: component.degraded_ttft_ms, show_multiplier: component.show_multiplier,
+      model: component.model, models: componentModels(component), degraded_ttft_ms: component.degraded_ttft_ms, show_multiplier: component.show_multiplier,
       visibility: component.visibility, enabled,
     })
     component.enabled = enabled
