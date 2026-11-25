@@ -152,7 +152,7 @@ jobs:
           cat evidence/normalization-red.log
           test "$result" -ne 0
           bash .github/scripts/assert-test-log-clean.sh red evidence/normalization-red.log
-          grep -F 'Forward-normalized model must complete both tests and block only its canonical target' evidence/normalization-red.log
+          grep -F 'Forward-normalized model must complete five consecutive 429 tests and apply the configured whitelist' evidence/normalization-red.log
           grep -F -- '--- FAIL: TestOAuth429HTTPForwardNormalization/provider_prefix' evidence/normalization-red.log
           grep -F -- '--- FAIL: TestOAuth429HTTPForwardNormalization/wildcard_to_prefix' evidence/normalization-red.log
       - name: Reviewed head deduplication and account transition behavioral RED
@@ -230,7 +230,7 @@ jobs:
           set -euo pipefail
           mkdir -p evidence
           git rev-parse HEAD > evidence/worker-head.txt
-          (cd backend && go test -race -tags=integration ./internal/repository -run '^TestOAuth429Worker|^TestOAuth429Persistent|^TestOAuth429HTTP|^TestOAuth429Compact|^TestOAuth429ActualAlias|^TestOAuth429Immediate|^TestOAuth429Alias|^TestOAuth429Dedup|^TestOAuth429Queued|^TestOAuth429AccountEpoch|^TestOAuth429Expiry|^TestOAuth429First' -count=1 -v -timeout=20m) 2>&1 | tee evidence/worker.log
+          (cd backend && go test -race -tags=integration ./internal/repository -run '^TestOAuth429Worker|^TestOAuth429ReviewUsesSelectedAccountActions$|^TestOAuth429Persistent|^TestOAuth429HTTP|^TestOAuth429Compact|^TestOAuth429ActualAlias|^TestOAuth429Immediate|^TestOAuth429Alias|^TestOAuth429Dedup|^TestOAuth429Queued|^TestOAuth429AccountEpoch|^TestOAuth429Expiry|^TestOAuth429First' -count=1 -v -timeout=20m) 2>&1 | tee evidence/worker.log
           bash .github/scripts/assert-test-log-clean.sh green evidence/worker.log
           grep -F -- '--- PASS: TestOAuth429WorkerIndependentPair/qualityops_off_two_wrong' evidence/worker.log
           grep -F -- '--- PASS: TestOAuth429WorkerIndependentPair/history_wrong_cannot_shortcut' evidence/worker.log
