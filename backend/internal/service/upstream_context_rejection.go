@@ -13,9 +13,6 @@ func IsUpstreamContextRejection(status int, body []byte) bool {
 	if status != 400 && status != 413 && status != 422 && status != 502 {
 		return false
 	}
-	if status == http.StatusRequestEntityTooLarge {
-		return true
-	}
 	if !gjson.ValidBytes(body) {
 		return false
 	}
