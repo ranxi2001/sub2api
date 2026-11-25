@@ -205,6 +205,9 @@ export default {
   "concurrency": "初始并发",
   "cost_multiplier": "成本倍率",
   "groups": "首次加入分组",
+  jsonImportScheduling: 'JSON 导入自动开启调度',
+  twoFALoginScheduling: '2FA 登录自动开启调度',
+  importSchedulingHint: '取消勾选后，新账号仍保存凭据并应用首次配置，调度保持关闭。停用首次配置后，这两个选项均不生效。',
   totp429: {
     label: '429 后自动更换 2FA',
     hint: '随首次配置为新 OpenAI OAuth 账号启用。遇到 429 时，使用凭证运营已保存的邮箱、密码和当前 2FA 更换密钥，新密钥加密保存。同一账号 1 小时内最多自动创建一次更换任务；凭据不完整或更换结果待确认时不自动更换。'

@@ -343,8 +343,12 @@ func (h *AccountHandler) importCodexSessions(ctx context.Context, req CodexSessi
 			continue
 		}
 
+		source := service.OAuthImportJSON
+		if req.InitializeOpenAITwoFA && !item.IsAgentIdentity {
+			source = service.OAuthImportTwoFA
+		}
 		account, createErr := h.adminService.CreateAccount(ctx, &service.CreateAccountInput{
-			InitialOpenAITwoFA:    req.InitializeOpenAITwoFA && !item.IsAgentIdentity,
+			OAuthImportSource:     source,
 			Name:                  accountName,
 			Notes:                 req.Notes,
 			Platform:              service.PlatformOpenAI,

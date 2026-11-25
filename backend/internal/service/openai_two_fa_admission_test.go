@@ -90,7 +90,11 @@ func TestOpenAITwoFAAdmissionImportScopeAndSnapshot(t *testing.T) {
 			if tc.observer {
 				ctx = WithObserverScope(ctx, []int64{2})
 			}
-			input := &CreateAccountInput{InitialOpenAITwoFA: tc.source, Platform: tc.platform, Type: tc.kind, Concurrency: 9, GroupIDs: []int64{2}, Extra: map[string]any{OpenAITwoFAAdmissionExtraKey: "forged", "keep": true}}
+			source := OAuthImportJSON
+			if tc.source {
+				source = OAuthImportTwoFA
+			}
+			input := &CreateAccountInput{OAuthImportSource: source, Platform: tc.platform, Type: tc.kind, Concurrency: 9, GroupIDs: []int64{2}, Extra: map[string]any{OpenAITwoFAAdmissionExtraKey: "forged", "keep": true}}
 			require.NoError(t, svc.ApplyOAuthAutoConfig(ctx, input))
 			require.NotContains(t, input.Extra, OpenAITwoFAAdmissionExtraKey)
 			require.NoError(t, svc.applyOpenAITwoFAAdmission(ctx, input))

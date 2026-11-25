@@ -79,7 +79,7 @@ func applyOpenAITwoFAAdmissionOutcome(ctx context.Context, tx *sql.Tx, plan *ser
 		}
 	}
 	passedConcurrency := account.LimitOAuthDegradationConcurrency(state.Policy.PassedConcurrency)
-	passedSchedulable := true
+	passedSchedulable := !state.KeepSchedulingOnPass || schedulable
 	if degradation, ok := account.Extra[service.OAuthDegradationActionExtraKey].(map[string]any); ok {
 		nativeControls, _ := degradation["native_controls"].(bool)
 		nativeSchedulingPaused, _ := degradation["native_scheduling_paused"].(bool)

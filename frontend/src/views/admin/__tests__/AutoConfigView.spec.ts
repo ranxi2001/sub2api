@@ -440,8 +440,30 @@ describe('AutoConfigView', () => {
   expect(w.get<HTMLInputElement>('[data-testid="initial-ws-sse-acceleration-enabled"]').element.checked).toBe(false)
   w.unmount()
  })
- it('shares the initial WS notice between both controls, preserves old dismissals and remembers its dismissal per admin', async () => {
-  const id = NEW_FEATURE_NOTICES.oauthInitialWSSettings, oldId = NEW_FEATURE_NOTICES.oauthInitialDisableScheduling429
+ it('keeps JSON and 2FA scheduling choices per platform and across reloads', async () => {
+  const w = mount(AutoConfigView); await flushPromises()
+  const json = '[data-testid="json-import-scheduling"]', twoFA = '[data-testid="two-fa-login-scheduling"]'
+  expect(w.get<HTMLInputElement>(json).element.checked).toBe(true)
+  expect(w.get<HTMLInputElement>(twoFA).element.checked).toBe(true)
+  await w.get(twoFA).setValue(false)
+  await w.get('[data-testid="platform"]').setValue('anthropic')
+  expect(w.find(twoFA).exists()).toBe(false)
+  await w.get(json).setValue(false)
+  await w.get('[data-testid="platform"]').setValue('openai')
+  expect(w.get<HTMLInputElement>(json).element.checked).toBe(true)
+  expect(w.get<HTMLInputElement>(twoFA).element.checked).toBe(false)
+  await w.get('form').trigger('submit'); await flushPromises()
+  const saved = vi.mocked(saveAutoConfig).mock.lastCall![0]
+  expect(saved.json_import_auto_schedule).toEqual({ anthropic: false })
+  expect(saved.two_fa_login_auto_schedule).toEqual({ openai: false })
+  w.unmount()
+  vi.mocked(getAutoConfig).mockResolvedValueOnce(saved)
+  const reloaded = mount(AutoConfigView); await flushPromises()
+  expect(reloaded.get<HTMLInputElement>(twoFA).element.checked).toBe(false)
+  reloaded.unmount()
+ })
+ it.each([NEW_FEATURE_NOTICES.oauthInitialWSSettings, NEW_FEATURE_NOTICES.oauthImportScheduling])('shares and remembers the %s notice across its controls per admin', async (id) => {
+  const oldId = NEW_FEATURE_NOTICES.oauthInitialDisableScheduling429
   useNewFeatureNoticeStore().dismiss(1, oldId)
   const w = mount(AutoConfigView); await flushPromises()
   const wsNotices = (view: typeof w) => view.findAllComponents(NewFeatureBadge).filter(badge => badge.props('noticeId') === id)

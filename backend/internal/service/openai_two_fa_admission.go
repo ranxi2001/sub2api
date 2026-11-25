@@ -36,6 +36,7 @@ func (c OpenAITwoFAAdmissionConfig) Validate() error {
 }
 
 type OpenAITwoFAAdmissionState struct {
+	KeepSchedulingOnPass bool                       `json:"keep_scheduling_on_pass,omitempty"` // preserve the native scheduling flag when the import was configured to start paused
 	Policy               OpenAITwoFAAdmissionConfig `json:"policy"`
 	Phase                string                     `json:"phase"`
 	PlanID               int64                      `json:"plan_id"`
@@ -80,7 +81,7 @@ func AdvanceOpenAITwoFAAdmission(s OpenAITwoFAAdmissionState, outcome string, st
 }
 
 func (s *adminServiceImpl) applyOpenAITwoFAAdmission(ctx context.Context, input *CreateAccountInput) error {
-	if !input.InitialOpenAITwoFA || input.Platform != PlatformOpenAI || input.Type != AccountTypeOAuth || s.settingService == nil {
+	if input.OAuthImportSource != OAuthImportTwoFA || input.Platform != PlatformOpenAI || input.Type != AccountTypeOAuth || s.settingService == nil {
 		return nil
 	}
 	if _, observer := ObserverGroupIDs(ctx); observer {
@@ -109,6 +110,6 @@ func (s *adminServiceImpl) applyOpenAITwoFAAdmission(ctx context.Context, input 
 	if input.Extra == nil {
 		input.Extra = map[string]any{}
 	}
-	input.Extra[OpenAITwoFAAdmissionExtraKey] = OpenAITwoFAAdmissionState{Policy: p, Phase: "pending"}
+	input.Extra[OpenAITwoFAAdmissionExtraKey] = OpenAITwoFAAdmissionState{Policy: p, Phase: "pending", KeepSchedulingOnPass: input.initialAutoSchedule != nil && !*input.initialAutoSchedule}
 	return nil
 }

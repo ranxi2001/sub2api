@@ -205,6 +205,9 @@ export default {
   "concurrency": "Initial concurrency",
   "cost_multiplier": "Cost multiplier",
   "groups": "Initial groups",
+  jsonImportScheduling: 'Enable scheduling after JSON import',
+  twoFALoginScheduling: 'Enable scheduling after 2FA login',
+  importSchedulingHint: 'When unchecked, new accounts still save their credentials and receive the initial configuration with scheduling off. Both options apply only while initial configuration is enabled.',
   totp429: {
     label: 'Automatically rotate 2FA after a 429',
     hint: 'Enable for new OpenAI OAuth accounts through initial configuration. After a 429, use the email, password and current 2FA saved in Credential Operations to rotate the secret and store it encrypted. At most one rotation task per account per hour; incomplete credentials or an unresolved rotation prevent automatic rotation.'

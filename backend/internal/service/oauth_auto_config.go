@@ -9,6 +9,7 @@ import (
 	"maps"
 	"math"
 	"slices"
+	"strings"
 	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -20,6 +21,8 @@ const AutoConfigConcurrencyExtraKey = "auto_config_concurrency"
 
 // Initial account fields, BPS defaults, model billing and concurrency upgrades are independent.
 type OAuthAutoConfig struct {
+	JSONImportAutoSchedule                         map[string]bool              `json:"json_import_auto_schedule,omitempty"`
+	TwoFALoginAutoSchedule                         map[string]bool              `json:"two_fa_login_auto_schedule,omitempty"`
 	APIKeyDisposition                              OAuthAPIKeyDispositionConfig `json:"apikey_disposition"`
 	OpenAIAPIKeyFallback                           OpenAIAPIKeyFallbackConfig   `json:"openai_apikey_fallback"`
 	DegradationAction                              OAuthDegradationConfig       `json:"degradation_action"`
@@ -174,6 +177,38 @@ func (s *SettingService) GetOAuthAutoConfig(ctx context.Context) (OAuthAutoConfi
 	}
 	return GetOAuthAutoConfig(ctx, s.settingRepo)
 }
+
+// A nil decision leaves ordinary account creation outside the import policy.
+func (c *OAuthAutoConfig) importScheduling(input *CreateAccountInput) *bool {
+	var choices map[string]bool
+	switch input.OAuthImportSource {
+	case OAuthImportJSON:
+		choices = c.JSONImportAutoSchedule
+	case OAuthImportTwoFA:
+		choices = c.TwoFALoginAutoSchedule
+	default:
+		return nil
+	}
+	enabled, configured := choices[c.Platform]
+	if !configured {
+		enabled = true
+	}
+	if enabled {
+		// The generic JSON backup and batch formats accept credential maps with
+		// metadata only. Import those settings, but keep the account paused.
+		account := Account{Platform: input.Platform, Type: input.Type, Credentials: input.Credentials}
+		if account.IsOpenAIAgentIdentity() {
+			_, err := agentIdentityKeyFromAccount(&account)
+			enabled = err == nil
+		} else {
+			access, _ := input.Credentials["access_token"].(string)
+			refresh, _ := input.Credentials["refresh_token"].(string)
+			enabled = strings.TrimSpace(access) != "" || strings.TrimSpace(refresh) != ""
+		}
+	}
+	return &enabled
+}
+
 func (s *adminServiceImpl) ApplyOAuthAutoConfig(ctx context.Context, input *CreateAccountInput) error {
 	if input == nil {
 		return ErrAccountNilInput
@@ -181,6 +216,7 @@ func (s *adminServiceImpl) ApplyOAuthAutoConfig(ctx context.Context, input *Crea
 	input.InitialAPIKeyDisposition = nil
 	input.InitialQualityPlan = nil
 	input.InitialAdmissionPlan = nil
+	input.initialAutoSchedule = nil
 	input.Credentials = maps.Clone(input.Credentials)
 	delete(input.Credentials, OAuthInitialModelSelectionKey)
 	// Imported/user-supplied markers must not fabricate automatic-configuration history.
@@ -226,6 +262,7 @@ func (s *adminServiceImpl) ApplyOAuthAutoConfig(ctx context.Context, input *Crea
 		policy.GroupIDs = slices.Clone(policy.GroupIDs)
 		input.InitialAPIKeyDisposition = &policy
 	}
+	input.initialAutoSchedule = c.importScheduling(input)
 	input.InitialQualityPlan = plan
 	applyOAuthInitialModels(input, c.ModelMappings, c.SelectedModels)
 	input.Priority = c.Priority

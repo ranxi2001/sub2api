@@ -167,7 +167,7 @@ func (h *AccountHandler) importScopedCodexSessions(ctx context.Context, api serv
 			if req.Priority != nil {
 				priority = *req.Priority
 			}
-			account, err = api.ScopedAdminCreateCodex(ctx, &service.CreateAccountInput{ProxyMode: proxyMode, Name: name, Notes: req.Notes, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Credentials: credentials, Extra: extra, GroupIDs: req.GroupIDs, ProxyID: req.ProxyID, Concurrency: concurrency, Priority: priority, RateMultiplier: req.RateMultiplier, LoadFactor: req.LoadFactor, ExpiresAt: expires, AutoPauseOnExpired: autoPause, SkipDefaultGroupBind: true})
+			account, err = api.ScopedAdminCreateCodex(ctx, &service.CreateAccountInput{OAuthImportSource: service.OAuthImportJSON, ProxyMode: proxyMode, Name: name, Notes: req.Notes, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, Credentials: credentials, Extra: extra, GroupIDs: req.GroupIDs, ProxyID: req.ProxyID, Concurrency: concurrency, Priority: priority, RateMultiplier: req.RateMultiplier, LoadFactor: req.LoadFactor, ExpiresAt: expires, AutoPauseOnExpired: autoPause, SkipDefaultGroupBind: true})
 		}
 		if err != nil {
 			fail(entry.Index, err)

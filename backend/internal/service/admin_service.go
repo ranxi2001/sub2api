@@ -432,12 +432,20 @@ type UpdateGroupInput struct {
 	CopyAccountsFromGroupIDs []int64
 }
 
+type OAuthImportSource string
+
+const (
+	OAuthImportJSON  OAuthImportSource = "json"
+	OAuthImportTwoFA OAuthImportSource = "two_fa"
+)
+
 type CreateAccountInput struct {
 	InitialAPIKeyDisposition *OAuthAPIKeyDispositionConfig `json:"-"`
 	ProxyMode                string                        // 受限写入在验权后选择代理。
-	InitialOpenAITwoFA       bool                          `json:"-"`
-	InitialAdmissionPlan     *ScheduledTestPlan            `json:"-"`
-	InitialQualityPlan       *ScheduledTestPlan            `json:"-"`
+	OAuthImportSource        OAuthImportSource             `json:"-"`
+	initialAutoSchedule      *bool
+	InitialAdmissionPlan     *ScheduledTestPlan `json:"-"`
+	InitialQualityPlan       *ScheduledTestPlan `json:"-"`
 	Name                     string
 	Notes                    *string
 	Platform                 string
