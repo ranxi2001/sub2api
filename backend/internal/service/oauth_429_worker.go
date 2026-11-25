@@ -20,7 +20,6 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-const OAuth429ModelBlocksKey = "oauth_429_model_blocks"
 const OAuth429Source = "upstream_429_independent"
 
 // Independent reviews use the configured minimum number of business requests.
@@ -53,7 +52,6 @@ type OAuth429Task struct {
 	AccountEpoch    int64            `json:"account_epoch"`
 	Model           string           `json:"model"`
 	Reason          string           `json:"reason,omitempty"`
-	ModelBlocked    bool             `json:"model_blocked,omitempty"`
 	RequestModel    string           `json:"request_model"`
 	Endpoint        string           `json:"endpoint,omitempty"`
 	RoutingRevision string           `json:"routing_revision,omitempty"`
@@ -249,18 +247,6 @@ func ObserveOAuth429HTTP(req *http.Request, accountID int64, status int, request
 	default:
 		observer.dropped.Add(1)
 	}
-}
-
-func (a *Account) IsOAuth429ModelBlocked(model string) bool {
-	return a.isOAuth429ModelBlockedForEndpoint(model, "")
-}
-
-func (a *Account) isOAuth429ModelBlockedForEndpoint(model, endpoint string, compactModel ...string) bool {
-	if a == nil {
-		return false
-	}
-	entries, _ := a.Extra[OAuth429ModelBlocksKey].(map[string]any)
-	return len(entries) > 0 && entries[ResolveOAuth429TargetModel(a, model, endpoint, compactModel...)] != nil
 }
 
 const OAuth429ConsecutiveLimit = 5

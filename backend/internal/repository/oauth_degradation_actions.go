@@ -137,9 +137,7 @@ func (r *accountRepository) evaluateOAuthDegradation(ctx context.Context, id int
 	if !found {
 		return nil
 	}
-	// HTTP pressure requires a dedicated account/model review. It is never
-	// evidence of a wrong answer and must not enter this account-wide action.
-	// Only the existing probe/candy branch may authorize this legacy action.
+	// The independent 429 worker confirms its own evidence before applying this policy.
 	reason := ""
 	if reason == "" && review != nil && c.DegradationAction.NeedsCandyRetest(m) &&
 		!review.StartedAt.Before(m.WindowStart) && now.Before(review.LeaseUntil) {
@@ -154,6 +152,29 @@ func (r *accountRepository) evaluateOAuthDegradation(ctx context.Context, id int
 	if reason == "" {
 		return nil
 	}
+	state := service.OAuthDegradationState{TriggerReason: reason, QualitySamples: m.QualitySamples, WindowStart: m.WindowStart, WindowEnd: m.WindowEnd, AppliedAt: now}
+	if c.DegradationAction.ThresholdPercent != nil {
+		state.ThresholdPercent = *c.DegradationAction.ThresholdPercent
+	}
+	if m.DegradationPercent != nil {
+		state.DegradationPercent = *m.DegradationPercent
+	}
+	if reason == service.OAuthDegradationCandyRetested {
+		state.CandyReview = review
+	}
+	if err = applyOAuthDegradation(ctx, tx, c, &a, state); err != nil {
+		return err
+	}
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	r.syncSchedulerAccountSnapshotDetached(ctx, id)
+	return nil
+}
+
+// Both confirmation paths hold the live policy and account locks in this transaction.
+func applyOAuthDegradation(ctx context.Context, tx *sql.Tx, c service.OAuthAutoConfig, a *service.Account, state service.OAuthDegradationState) error {
+	id := a.ID
 	models := make([]string, 0, len(c.DegradationAction.Models))
 	mapping := make(map[string]any)
 	nativeSchedulingPaused := false
@@ -217,22 +238,12 @@ func (r *accountRepository) evaluateOAuthDegradation(ctx context.Context, id int
 		next = min(next, c.DegradationAction.TargetConcurrency)
 	}
 	limitConcurrency, limitModels := c.DegradationAction.RestrictsConcurrency(), c.DegradationAction.RestrictsModels()
-	state := service.OAuthDegradationState{NativeControls: true, NativeSchedulingPaused: nativeSchedulingPaused, LimitConcurrency: &limitConcurrency, LimitModels: &limitModels, LimitGroups: c.DegradationAction.LimitGroups, GroupIDs: append([]int64{}, c.DegradationAction.GroupIDs...), RemovedGroupIDs: removedGroups, Revision: c.Revision, Models: models, ConcurrencyCap: next, QualitySamples: m.QualitySamples, WindowStart: m.WindowStart, WindowEnd: m.WindowEnd, AppliedAt: now}
-	state.TriggerReason = reason
-	if c.DegradationAction.ThresholdPercent != nil {
-		state.ThresholdPercent = *c.DegradationAction.ThresholdPercent
-	}
-	if m.DegradationPercent != nil {
-		state.DegradationPercent = *m.DegradationPercent
-	}
-	if reason == service.OAuthDegradationCandyRetested {
-		state.CandyReview = review
-	}
-	if reason == "upstream_429" || reason == service.OAuthDegradationProbeAnd429 {
-		state.UpstreamError = &m.UpstreamError
-		state.UpstreamErrorThresholdPercent = c.DegradationAction.HTTPErrorThreshold()
-		state.Upstream429ShareThresholdPercent = c.DegradationAction.HTTP429ShareThreshold()
-	}
+	state.NativeControls = true
+	state.NativeSchedulingPaused = nativeSchedulingPaused
+	state.LimitConcurrency, state.LimitModels = &limitConcurrency, &limitModels
+	state.LimitGroups = c.DegradationAction.LimitGroups
+	state.GroupIDs, state.RemovedGroupIDs = c.DegradationAction.GroupIDs, removedGroups
+	state.Models, state.ConcurrencyCap, state.Revision = models, next, c.Revision
 
 	if a.Extra == nil {
 		a.Extra = make(map[string]any)
@@ -266,9 +277,5 @@ func (r *accountRepository) evaluateOAuthDegradation(ctx context.Context, id int
 	if err = insertAutoConfigEvent(ctx, tx, service.AutoConfigEvent{AccountID: id, AccountName: a.Name, Platform: a.Platform, Kind: service.AutoConfigEventDegradation, Details: service.AutoConfigEventDetails{PreviousConcurrency: a.Concurrency, Concurrency: next, Degradation: &state}}); err != nil {
 		return err
 	}
-	if err = tx.Commit(); err != nil {
-		return err
-	}
-	r.syncSchedulerAccountSnapshotDetached(ctx, id)
 	return nil
 }

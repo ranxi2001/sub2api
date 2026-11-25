@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
@@ -91,17 +90,8 @@ func TestOAuth429EndpointResolution(t *testing.T) {
 	a.Extra = map[string]any{"openai_passthrough": true}
 	require.Equal(t, "alias-one", ResolveOAuth429TargetModel(a, "alias-one", "/v1/responses"))
 	require.Equal(t, "gpt-6-luna", ResolveOAuth429TargetModel(a, "alias-one", "/v1/responses/compact"))
-	// A canonical block must follow every alias to this target and no alias to
-	// another model. The public mapping still controls admission independently.
-	a.Extra = map[string]any{OAuth429ModelBlocksKey: map[string]any{"gpt-6-astra": map[string]any{}}}
-	a.Credentials["model_mapping"] = map[string]any{"alias-*": "openai/gpt-6-astra", "other": "gpt-6-luna"}
-	require.True(t, a.IsOAuth429ModelBlocked("alias-one"))
-	require.True(t, a.IsOAuth429ModelBlocked("alias-two"))
-	require.False(t, a.IsOAuth429ModelBlocked("other"))
-	require.False(t, OAuth429RequestModelSupported(a, "alias-one", "/v1/responses"))
-	require.True(t, OAuth429RequestModelSupported(a, "alias-one", "/v1/responses/compact"), "a normal target block must not block a different compact target")
-	a.Extra[OAuth429ModelBlocksKey] = map[string]any{"gpt-6-luna": map[string]any{}}
+	// A stale extra field cannot override the current public whitelist.
+	a.Extra = map[string]any{"oauth_429_model_blocks": map[string]any{"gpt-6-astra": map[string]any{}}}
 	require.True(t, OAuth429RequestModelSupported(a, "alias-one", "/v1/responses"))
-	require.False(t, OAuth429RequestModelSupported(a, "alias-one", "/v1/responses/compact"))
-	require.False(t, strings.Contains(ResolveOAuth429TargetModel(a, "alias-one", ""), "openai/"))
+	require.False(t, a.IsModelSupported("illegal-input"))
 }

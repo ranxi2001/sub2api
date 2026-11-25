@@ -118,12 +118,12 @@ func TestOAuth429HandlerPostgresWorkerLoopback(t *testing.T) {
 	}
 	require.Eventually(t, func() bool {
 		got, err := accounts.GetByID(ctx, a.ID)
-		return err == nil && got.IsOAuth429ModelBlocked("gpt-6-astra")
+		return err == nil && got.HasOAuthDegradationAction()
 	}, 8*time.Second, 20*time.Millisecond, "threshold must drive two tests without a quality plan, cron or ordinary 429 cooldown")
 	require.EqualValues(t, 2, calls.Load())
 	got, err := accounts.GetByID(ctx, a.ID)
 	require.NoError(t, err)
-	require.Equal(t, 50, got.Concurrency)
+	require.Equal(t, cfg.DegradationAction.TargetConcurrency, got.Concurrency)
 	require.True(t, got.IsModelSupported("gpt-6-luna"))
 	require.NotNil(t, got.RateLimitResetAt)
 	var plans int

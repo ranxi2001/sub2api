@@ -77,8 +77,8 @@ func TestOAuth429HTTPForwardNormalization(t *testing.T) {
 			}
 			require.Eventually(t, func() bool {
 				got, err := repo.GetByID(t.Context(), a.ID)
-				return err == nil && got.IsOAuth429ModelBlocked(tc.input)
-			}, 8*time.Second, 20*time.Millisecond, "Forward-normalized model must complete both tests and block only its canonical target")
+				return err == nil && got.HasOAuthDegradationAction()
+			}, 8*time.Second, 20*time.Millisecond, "Forward-normalized model must complete both tests and apply the configured whitelist")
 			var data []byte
 			require.NoError(t, integrationDB.QueryRowContext(t.Context(), `SELECT data FROM oauth_429_tasks WHERE account_id=$1 AND model='gpt-6-astra' AND state='complete'`, a.ID).Scan(&data))
 			var task service.OAuth429Task
@@ -88,11 +88,8 @@ func TestOAuth429HTTPForwardNormalization(t *testing.T) {
 			require.EqualValues(t, 2, calls.Load())
 			got, err := repo.GetByID(t.Context(), a.ID)
 			require.NoError(t, err)
-			require.False(t, got.IsOAuth429ModelBlocked("gpt-6-luna"))
+			require.False(t, got.IsModelSupported(tc.input))
 			require.True(t, got.IsModelSupported("gpt-6-luna"))
-			blocks := got.Extra[service.OAuth429ModelBlocksKey].(map[string]any)
-			require.Len(t, blocks, 1)
-			require.NotNil(t, blocks["gpt-6-astra"])
 		})
 	}
 }

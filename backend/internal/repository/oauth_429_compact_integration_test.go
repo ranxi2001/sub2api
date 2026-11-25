@@ -119,7 +119,7 @@ func TestOAuth429CompactGlobalForwardWorker(t *testing.T) {
 				require.Equal(t, target, task.Model)
 				require.Equal(t, "alias-one", task.RequestModel)
 				require.Equal(t, "two_wrong_answers", task.Reason)
-				require.True(t, task.ModelBlocked)
+				require.Equal(t, "complete", task.State)
 				require.NotEmpty(t, task.TriggerID)
 				require.EqualValues(t, 2, probes.Load())
 				identities := map[string]bool{}
@@ -136,26 +136,9 @@ func TestOAuth429CompactGlobalForwardWorker(t *testing.T) {
 				}
 				a, err = repo.GetByID(t.Context(), a.ID)
 				require.NoError(t, err)
-				blocks := a.Extra[service.OAuth429ModelBlocksKey].(map[string]any)
-				require.Len(t, blocks, 1)
-				require.NotNil(t, blocks[target])
-				require.Error(t, forward(21, "/v1/responses/compact"))
-				require.EqualValues(t, 20, calls.Load(), "blocked compact request must stop before HTTP")
-				if ordinary != target {
-					require.True(t, service.OAuth429RequestModelSupported(a, "alias-one", "/responses", cfg.Gateway.OpenAICompactModel))
-					_ = forward(22, "/v1/responses")
-					require.EqualValues(t, 21, calls.Load(), "healthy ordinary route must still reach its actual wire")
-					inverse, err := json.Marshal(map[string]any{ordinary: map[string]any{}})
-					require.NoError(t, err)
-					_, err = integrationDB.ExecContext(t.Context(), `UPDATE accounts SET extra=jsonb_set(extra,'{oauth_429_model_blocks}',$2::jsonb) WHERE id=$1`, a.ID, string(inverse))
-					require.NoError(t, err)
-					a, err = repo.GetByID(t.Context(), a.ID)
-					require.NoError(t, err)
-					_ = forward(23, "/v1/responses/compact")
-					require.EqualValues(t, 22, calls.Load(), "healthy compact route must survive a different ordinary block")
-					require.Error(t, forward(24, "/v1/responses"))
-					require.EqualValues(t, 22, calls.Load(), "blocked ordinary route must stop before HTTP")
-				}
+				require.True(t, a.HasOAuthDegradationAction())
+				require.False(t, a.Schedulable, "empty whitelist intersection pauses scheduling")
+				require.NotContains(t, a.Extra, "oauth_429_model_blocks")
 			})
 		}
 	}

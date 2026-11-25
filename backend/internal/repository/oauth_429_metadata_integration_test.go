@@ -54,7 +54,7 @@ func TestOAuth429HTTPParsedModelSurvivesStreamingAndLargeBody(t *testing.T) {
 			}
 			require.Eventually(t, func() bool {
 				got, e := repo.GetByID(t.Context(), a.ID)
-				return e == nil && got.IsOAuth429ModelBlocked("alias-one")
+				return e == nil && got.HasOAuthDegradationAction()
 			}, 8*time.Second, 20*time.Millisecond, "real input alias and wire target must survive streaming or large provider bodies")
 			require.EqualValues(t, 2, calls.Load())
 			got, err := repo.GetByID(t.Context(), a.ID)
