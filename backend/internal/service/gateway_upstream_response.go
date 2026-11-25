@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -849,20 +850,23 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 	// 更新5h窗口状态
 	s.rateLimitService.UpdateSessionWindow(ctx, account, resp.Header)
 
-	if s.responseHeaderFilter != nil {
-		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
-	}
+	// Install upstream headers only for the attempt that writes the downstream response.
+	prepareHeaders := sync.OnceFunc(func() {
+		if s.responseHeaderFilter != nil {
+			responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+		}
 
-	// 设置SSE响应头
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("X-Accel-Buffering", "no")
+		// 设置SSE响应头
+		c.Header("Content-Type", "text/event-stream")
+		c.Header("Cache-Control", "no-cache")
+		c.Header("Connection", "keep-alive")
+		c.Header("X-Accel-Buffering", "no")
 
-	// 透传其他响应头
-	if v := resp.Header.Get("x-request-id"); v != "" {
-		c.Header("x-request-id", v)
-	}
+		// 透传其他响应头
+		if v := resp.Header.Get("x-request-id"); v != "" {
+			c.Header("x-request-id", v)
+		}
+	})
 
 	w := c.Writer
 	flusher, ok := w.(http.Flusher)
@@ -981,6 +985,7 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 			// json.Marshal 不可能在已知 string-only 输入上失败，保守 fallback
 			body = []byte(fmt.Sprintf(`{"type":"error","error":{"type":%q,"message":%q}}`, reason, message))
 		}
+		prepareHeaders()
 		_, _ = fmt.Fprintf(w, "event: error\ndata: %s\n\n", body)
 		flusher.Flush()
 	}
@@ -1235,6 +1240,7 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 				_, _ = terminalFrames.WriteString(block)
 				continue
 			}
+			prepareHeaders()
 			if _, err := io.WriteString(w, reverseToolNamesIfPresentString(c, block)); err != nil {
 				status.clientDisconnected = true
 				return err
@@ -1278,11 +1284,25 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 				}
 				status.readErr = io.EOF
 				if failure := status.failure(); failure != nil {
+					// An empty stream leaves no client message or measured usage to preserve.
+					if failure.errType == "stream_incomplete" && !c.Writer.Written() && status.frameCount == 0 && !usage.hasObservedTokens() {
+						appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+							ProxyID: opsUpstreamProxyID(account), ProxyName: opsUpstreamProxyName(account),
+							Platform: account.Platform, AccountID: account.ID, AccountName: account.Name,
+							UpstreamStatusCode: http.StatusBadGateway, UpstreamRequestID: resp.Header.Get("x-request-id"),
+							Kind: "failover", Message: failure.message,
+						})
+						return nil, &UpstreamFailoverError{
+							StatusCode:   http.StatusBadGateway,
+							ResponseBody: []byte(`{"type":"error","error":{"type":"stream_incomplete","message":"upstream stream ended without a terminal event"}}`),
+						}
+					}
 					MarkOpsStreamError(c, failure.errType, failure.message, http.StatusBadGateway)
 					MarkResponseCommitted(c)
 					sendErrorEvent(failure.errType, failure.message)
 					return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, failure.err
 				}
+				prepareHeaders()
 				if _, err := io.WriteString(w, reverseToolNamesIfPresentString(c, terminalFrames.String())); err != nil {
 					return clientGone(err)
 				}
@@ -1372,6 +1392,7 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 					keepaliveBlock = block
 				}
 			}
+			prepareHeaders()
 			if _, werr := fmt.Fprint(w, keepaliveBlock); werr != nil {
 				return clientGone(werr)
 			}

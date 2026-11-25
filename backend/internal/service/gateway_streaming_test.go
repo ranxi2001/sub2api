@@ -185,8 +185,12 @@ func TestHandleStreamingResponse_EmptyStream(t *testing.T) {
 	result, err := svc.handleStreamingResponse(context.Background(), resp, c, &Account{ID: 1}, time.Now(), "model", "model", false)
 	_ = pr.Close()
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "missing terminal event")
-	require.NotNil(t, result)
+	var failover *UpstreamFailoverError
+	require.ErrorAs(t, err, &failover)
+	require.Equal(t, http.StatusBadGateway, failover.StatusCode)
+	require.Contains(t, string(failover.ResponseBody), "stream_incomplete")
+	require.False(t, c.Writer.Written())
+	require.Nil(t, result)
 }
 
 func TestHandleStreamingResponse_SpecialCharactersInJSON(t *testing.T) {
