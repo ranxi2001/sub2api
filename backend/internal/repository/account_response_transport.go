@@ -24,13 +24,12 @@ func (t *accountResponseTransport) RoundTrip(req *http.Request) (*http.Response,
 		account, received := requestcapture.AccountFromContext(req.Context()), time.Now()
 		// These statuses need the semantic error before they can be counted.
 		// Observe the caller's normal reads; do not pre-read or delay headers.
-		if resp.StatusCode == http.StatusRequestEntityTooLarge {
-			// 413 is itself an explicit request-size rejection. Some gateway
-			// handlers intentionally close its body without reading it.
-		} else if resp.Body != nil && (resp.StatusCode == 400 || resp.StatusCode == 422 || resp.StatusCode == 502) {
+		if resp.Body != nil && (resp.StatusCode == 400 || resp.StatusCode == 422 || resp.StatusCode == 502) {
 			resp.Body = &accountErrorResponseBody{ReadCloser: resp.Body, ctx: req.Context(), account: account,
 				status: resp.StatusCode, received: received, store: upstreamstats.Default}
-		} else {
+		} else if resp.StatusCode != http.StatusRequestEntityTooLarge {
+			// 413 is itself an explicit request-size rejection. Some gateway
+			// handlers intentionally close its body without reading it.
 			upstreamstats.Default.Record(account, resp.StatusCode, received)
 		}
 		service.ObserveOAuth429HTTP(req, requestcapture.AccountFromContext(req.Context()), resp.StatusCode, started)
