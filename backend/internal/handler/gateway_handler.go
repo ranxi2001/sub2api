@@ -1982,6 +1982,12 @@ func (h *GatewayHandler) handleFailoverExhausted(c *gin.Context, failoverErr *se
 	upstreamMsg := service.ExtractUpstreamErrorMessage(responseBody)
 	service.SetOpsUpstreamError(c, statusCode, upstreamMsg, "")
 
+	if failoverErr.Reason == service.AnthropicModelUnavailableReason {
+		h.handleStreamingAwareErrorWithCode(c, http.StatusNotFound, "model_not_found", "model_not_found",
+			"The requested model is not supported by the selected upstream group.", streamStarted)
+		return
+	}
+
 	// 使用默认的错误映射
 	status, errType, errMsg := h.mapUpstreamError(statusCode)
 	h.handleStreamingAwareError(c, status, errType, errMsg, streamStarted)
