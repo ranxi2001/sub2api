@@ -18,7 +18,7 @@ import (
 )
 
 func (r *accountRepository) ScopedAdminList(ctx context.Context, p pagination.PaginationParams, platform, kind, status, search string) ([]service.Account, int64, error) {
-	principal := adminaccess.FromContext(ctx)
+	principal := adminaccess.RestrictedFromContext(ctx)
 	if principal == nil {
 		return nil, 0, fmt.Errorf("缺少受限身份")
 	}
@@ -164,7 +164,7 @@ func scopedAdminAccountPredicates(policy adminaccess.Policy, permission string) 
 // ScopedAdminCodexCandidates 按导入身份逐级匹配，最多返回一个候选的身份字段。
 // 不向应用加载其他账户的凭证；真正合并凭证仍在写事务锁内进行。
 func (r *accountRepository) ScopedAdminCodexCandidates(ctx context.Context, identity service.ScopedCodexIdentity) ([]service.Account, error) {
-	principal := adminaccess.FromContext(ctx)
+	principal := adminaccess.RestrictedFromContext(ctx)
 	if principal == nil {
 		return nil, fmt.Errorf("缺少受限身份")
 	}

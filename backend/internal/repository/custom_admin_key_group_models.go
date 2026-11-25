@@ -14,7 +14,7 @@ import (
 )
 
 func (r *groupRepository) ScopedAdminUpdateGroupModels(ctx context.Context, id int64, cfg service.GroupModelAllowlist) (*service.Group, error) {
-	p := adminaccess.FromContext(ctx)
+	p := adminaccess.RestrictedFromContext(ctx)
 	if p == nil {
 		return nil, infraerrors.Forbidden("SCOPED_GROUP_MODELS_FORBIDDEN", "缺少受限身份")
 	}
@@ -47,7 +47,7 @@ func (r *groupRepository) ScopedAdminUpdateGroupModels(ctx context.Context, id i
 
 // ScopedAdminListGroupModels 在数据库内过滤范围，分页和总数均只包含已授权分组。
 func (r *groupRepository) ScopedAdminListGroupModels(ctx context.Context, params pagination.PaginationParams, all bool, platform, status, search string) ([]service.Group, int64, error) {
-	p := adminaccess.FromContext(ctx)
+	p := adminaccess.RestrictedFromContext(ctx)
 	if p == nil {
 		return nil, 0, infraerrors.Forbidden("SCOPED_GROUP_MODELS_FORBIDDEN", "缺少受限身份")
 	}

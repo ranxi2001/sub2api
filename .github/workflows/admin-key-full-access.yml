@@ -1,0 +1,51 @@
+name: Admin key full access UI
+on:
+  pull_request:
+    paths:
+      - 'frontend/src/components/admin/settings/AdminAccessKeysSettings.vue'
+      - 'frontend/src/api/admin/adminAccessKeys.ts'
+      - 'frontend/src/i18n/locales/*/adminAccessKeys.ts'
+      - '.github/scripts/admin-key-full-access-preview.mjs'
+      - '.github/workflows/admin-key-full-access.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: admin-key-full-access-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  component-preview:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Install screenshot browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/admin-key-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/admin-key-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Capture actual component before and after
+        env:
+          PLAYWRIGHT_MODULE: ${{ runner.temp }}/admin-key-browser/node_modules/playwright/index.mjs
+          BASELINE: ${{ github.event.pull_request.base.sha || 'HEAD^' }}
+        run: node .github/scripts/admin-key-full-access-preview.mjs --repo . --baseline "$BASELINE" --output "$RUNNER_TEMP/admin-key-ui"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: admin-key-full-access-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            ${{ runner.temp }}/admin-key-ui/*.png
+            ${{ runner.temp }}/admin-key-ui/manifest.json
+          if-no-files-found: error

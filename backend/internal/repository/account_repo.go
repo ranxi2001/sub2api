@@ -2451,7 +2451,7 @@ func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, gro
 	if scoped := r.accountTransactionScope(ctx); scoped != r {
 		return scoped.BindGroups(ctx, accountID, groupIDs)
 	}
-	if adminaccess.FromContext(ctx) != nil {
+	if adminaccess.RestrictedFromContext(ctx) != nil {
 		return r.scopedAdminBindGroups(ctx, accountID, groupIDs)
 	}
 	// 使用事务保证删除旧绑定与创建新绑定的原子性
@@ -3358,7 +3358,7 @@ func (r *accountRepository) SetSchedulable(ctx context.Context, id int64, schedu
 	// Scoped writes already hold the account row in their caller-owned transaction.
 	// Cancel pending timers in that same transaction, without opening Store.Manual's
 	// independent transaction or changing ordinary account-edit semantics.
-	if principal := adminaccess.FromContext(ctx); principal != nil {
+	if principal := adminaccess.RestrictedFromContext(ctx); principal != nil {
 		if dbent.TxFromContext(ctx) == nil || principal.CreatorID <= 0 {
 			return errors.New("scoped schedulable write requires an authenticated transaction")
 		}

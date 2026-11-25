@@ -1,6 +1,9 @@
 package adminaccess
 
-import "slices"
+import (
+	"slices"
+	"strings"
+)
 
 type Permission struct {
 	ID       string `json:"id"`
@@ -79,6 +82,9 @@ func PermissionCatalog() []Permission {
 
 // RouteAllowed 只检查动作准入；账户资源及字段必须再由专用处理器检查。
 func RouteAllowed(policy Policy, method, path string) bool {
+	if policy.FullAccess {
+		return strings.HasPrefix(path, "/api/v1/admin/") && !strings.HasPrefix(path, "/api/v1/admin/settings/admin-api-key")
+	}
 	target := method + " " + path
 	for _, definition := range definitions {
 		matched := false

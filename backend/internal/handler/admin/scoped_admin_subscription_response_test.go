@@ -73,55 +73,63 @@ func (r *scopedSubscriptionRepo) ExtendExpiry(context.Context, int64, time.Time)
 	return nil
 }
 
-func TestScopedAdminSubscriptionExtendReplayRespectsReadPermission(t *testing.T) {
+func TestScopedAdminSubscriptionExtendReplayRejectsChangedAuthorization(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	previous := service.DefaultIdempotencyCoordinator()
 	t.Cleanup(func() { service.SetDefaultIdempotencyCoordinator(previous) })
-	service.SetDefaultIdempotencyCoordinator(service.NewIdempotencyCoordinator(newMemoryIdempotencyRepoStub(), service.DefaultIdempotencyConfig()))
-	repo := &scopedSubscriptionRepo{}
-	svc := service.NewSubscriptionService(nil, repo, nil, nil, nil)
-	defer svc.Stop()
-	h := NewSubscriptionHandler(svc)
-	r := gin.New()
-	r.Use(func(c *gin.Context) {
-		if c.GetHeader("X-Test-Mode") != "admin" {
-			permissions := []string{"subscriptions.extend"}
-			if c.GetHeader("X-Test-Mode") == "read" {
-				permissions = append(permissions, "subscriptions.read")
+	for _, firstMode := range []string{"admin", "write", "read"} {
+		service.SetDefaultIdempotencyCoordinator(service.NewIdempotencyCoordinator(newMemoryIdempotencyRepoStub(), service.DefaultIdempotencyConfig()))
+		repo := &scopedSubscriptionRepo{}
+		svc := service.NewSubscriptionService(nil, repo, nil, nil, nil)
+		defer svc.Stop()
+		h := NewSubscriptionHandler(svc)
+		r := gin.New()
+		r.Use(func(c *gin.Context) {
+			if c.GetHeader("X-Test-Mode") != "admin" {
+				permissions := []string{"subscriptions.extend"}
+				if c.GetHeader("X-Test-Mode") == "read" {
+					permissions = append(permissions, "subscriptions.read")
+				}
+				c.Request = c.Request.WithContext(adminaccess.WithPrincipal(c.Request.Context(), &adminaccess.Principal{Policy: adminaccess.Policy{GlobalPermissions: permissions}}))
 			}
-			c.Request = c.Request.WithContext(adminaccess.WithPrincipal(c.Request.Context(), &adminaccess.Principal{Policy: adminaccess.Policy{GlobalPermissions: permissions}}))
-		}
-	})
-	r.POST("/subscriptions/:id/extend", h.Extend)
-	for i, mode := range []string{"admin", "write", "read"} {
-		req := httptest.NewRequest("POST", "/subscriptions/1/extend", strings.NewReader(`{"days":1}`))
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Idempotency-Key", "same-extension")
-		req.Header.Set("X-Test-Mode", mode)
-		w := httptest.NewRecorder()
-		r.ServeHTTP(w, req)
-		require.Equal(t, 200, w.Code, w.Body.String())
-		if i > 0 {
-			require.Equal(t, "true", w.Header().Get("X-Idempotency-Replayed"))
-		}
-		var result struct {
-			Data map[string]json.RawMessage `json:"data"`
-		}
-		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &result))
-		if mode == "admin" {
-			require.Contains(t, result.Data, "user")
-		} else {
-			require.NotContains(t, result.Data, "user")
-			require.NotContains(t, result.Data, "group")
-			require.NotContains(t, result.Data, "assigned_by_user")
-			if mode == "write" {
-				require.Len(t, result.Data, 1)
+		})
+		r.POST("/subscriptions/:id/extend", h.Extend)
+		for i, mode := range []string{firstMode, firstMode, "admin", "write", "read"} {
+			req := httptest.NewRequest("POST", "/subscriptions/1/extend", strings.NewReader(`{"days":1}`))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Idempotency-Key", "same-extension")
+			req.Header.Set("X-Test-Mode", mode)
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			if mode != firstMode {
+				require.Equal(t, 409, w.Code, w.Body.String())
+				require.NotContains(t, w.Body.String(), "private-user")
+				require.Empty(t, w.Header().Get("X-Idempotency-Replayed"))
+				continue
+			}
+			require.Equal(t, 200, w.Code, w.Body.String())
+			if i > 0 {
+				require.Equal(t, "true", w.Header().Get("X-Idempotency-Replayed"))
+			}
+			var result struct {
+				Data map[string]json.RawMessage `json:"data"`
+			}
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &result))
+			if mode == "admin" {
+				require.Contains(t, result.Data, "user")
 			} else {
-				require.Contains(t, result.Data, "daily_usage_usd")
+				require.NotContains(t, result.Data, "user")
+				require.NotContains(t, result.Data, "group")
+				require.NotContains(t, result.Data, "assigned_by_user")
+				if mode == "write" {
+					require.Len(t, result.Data, 1)
+				} else {
+					require.Contains(t, result.Data, "daily_usage_usd")
+				}
 			}
 		}
+		require.Equal(t, 1, repo.writes)
 	}
-	require.Equal(t, 1, repo.writes)
 }
 
 func TestScopedAdminSubscriptionBulkProjectionPreservesIDs(t *testing.T) {

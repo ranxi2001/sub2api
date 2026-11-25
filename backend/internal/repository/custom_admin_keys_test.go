@@ -44,7 +44,20 @@ func TestScopedAdminKeyRepositoryEditDoesNotRestoreOldHash(t *testing.T) {
 	defer db.Close()
 	repo := NewScopedAdminKeyRepository(db)
 	k := &service.ScopedAdminKey{ID: "id", Hash: "旧摘要", ScopedAdminKeyInput: service.ScopedAdminKeyInput{Name: "更新", AllowedIPs: []string{}}, UpdatedAt: time.Now().UTC()}
-	mock.ExpectExec(`UPDATE scoped_admin_api_keys SET name=\$2,description=\$3,enabled=\$4,expires_at=\$5,allowed_ips=\$6,policy=\$7,updated_at=\$8 WHERE id=\$1 AND revoked_at IS NULL`).WithArgs(k.ID, k.Name, k.Description, k.Enabled, k.ExpiresAt, "[]", sqlmock.AnyArg(), k.UpdatedAt).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`UPDATE scoped_admin_api_keys SET name=\$2,description=\$3,enabled=\$4,expires_at=\$5,allowed_ips=\$6,policy=\$7,updated_at=\$8 WHERE id=\$1 AND revoked_at IS NULL AND updated_at=\$9`).WithArgs(k.ID, k.Name, k.Description, k.Enabled, k.ExpiresAt, "[]", sqlmock.AnyArg(), k.UpdatedAt, k.ExpectedUpdatedAt).WillReturnResult(sqlmock.NewResult(0, 1))
 	require.NoError(t, repo.UpdateScopedAdminKey(context.Background(), k))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestScopedAdminKeyRepositoryRejectsStalePermissionUpdate(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+	repo := NewScopedAdminKeyRepository(db)
+	k := &service.ScopedAdminKey{ID: "id", ExpectedUpdatedAt: time.Now().Add(-time.Minute), UpdatedAt: time.Now()}
+	mock.ExpectExec(`UPDATE scoped_admin_api_keys SET name=.*AND updated_at=\$9`).
+		WithArgs(k.ID, k.Name, k.Description, k.Enabled, k.ExpiresAt, "null", sqlmock.AnyArg(), k.UpdatedAt, k.ExpectedUpdatedAt).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	require.ErrorIs(t, repo.UpdateScopedAdminKey(context.Background(), k), service.ErrScopedAdminKeyConflict)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
