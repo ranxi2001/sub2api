@@ -420,7 +420,8 @@ func TestOAuth429AliasAndLiveCancellation(t *testing.T) {
 		require.EqualValues(t, 2, calls.Load())
 		got, err := repo.GetByID(t.Context(), a.ID)
 		require.NoError(t, err)
-		require.False(t, got.IsModelSupported("alias"))
+		require.False(t, got.HasOAuthDegradationAction())
+		require.True(t, got.IsModelSupported("alias"), "two wrong answers in a 429 review must leave the alias available")
 		require.True(t, got.IsModelSupported("gpt-6-luna"))
 	})
 	t.Run("disable aborts in flight", func(t *testing.T) {
