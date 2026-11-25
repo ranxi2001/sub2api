@@ -382,6 +382,35 @@ func (s *GatewayService) readUpstreamErrorBody(resp *http.Response) ([]byte, err
 
 const anthropicRequestTooLargeMessage = "Request body is too large. Anthropic Messages requests are limited to 32 MiB. Reduce the request size and try again."
 
+const AnthropicModelUnavailableReason GatewayFailureReason = "anthropic_model_unavailable"
+
+// A relay can reject a model offered by a different account in the same local group.
+func (s *GatewayService) anthropicModelNotFoundFailover(c *gin.Context, account *Account, resp *http.Response) *UpstreamFailoverError {
+	if account == nil || account.Platform != PlatformAnthropic || resp == nil || resp.StatusCode != http.StatusNotFound || resp.Body == nil {
+		return nil
+	}
+	body, err := s.readUpstreamErrorBody(resp)
+	_ = resp.Body.Close()
+	resp.Body = io.NopCloser(bytes.NewReader(body))
+	if err != nil || !gjson.ValidBytes(body) {
+		return nil
+	}
+	message := extractUpstreamErrorMessage(body)
+	code := extractUpstreamErrorCode(body)
+	kind := gjson.GetBytes(body, "error.type").String()
+	if !IsOpsModelCapabilityRejection(resp.StatusCode, 0, message) &&
+		code != "model_not_found" && kind != "model_not_found" && code != "model_not_supported" && kind != "model_not_supported" {
+		return nil
+	}
+	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+		Platform: account.Platform, AccountID: account.ID, AccountName: account.Name,
+		ProxyID: opsUpstreamProxyID(account), ProxyName: opsUpstreamProxyName(account),
+		Kind: "failover", UpstreamStatusCode: resp.StatusCode, UpstreamRequestID: resp.Header.Get("x-request-id"),
+		Message: sanitizeUpstreamErrorMessage(message),
+	})
+	return &UpstreamFailoverError{StatusCode: resp.StatusCode, ResponseBody: body, Reason: AnthropicModelUnavailableReason}
+}
+
 var errAnthropicRequestTooLarge = errors.New("anthropic request body too large")
 
 func isAnthropicRequestTooLarge(account *Account, resp *http.Response) bool {

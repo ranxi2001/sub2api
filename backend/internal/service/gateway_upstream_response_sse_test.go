@@ -16,6 +16,39 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestAnthropicModelNotFoundFailover(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		body     string
+		failover bool
+	}{
+		{"upstream group", `{"error":{"message":"Model X is not supported by any configured account in this group"}}`, true},
+		{"structured code", `{"error":{"code":"model_not_found","message":"Unknown model"}}`, true},
+		{"unknown resource", `{"error":{"type":"not_found_error","message":"Resource not found"}}`, false},
+		{"unknown endpoint", "404 page not found", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+			resp := &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(strings.NewReader(tc.body))}
+			acct := &Account{ID: 7, Platform: PlatformAnthropic}
+			failure := (&GatewayService{}).anthropicModelNotFoundFailover(c, acct, resp)
+			if tc.failover {
+				require.NotNil(t, failure)
+				require.Equal(t, AnthropicModelUnavailableReason, failure.Reason)
+				require.True(t, failure.ShouldRetryNextAccount())
+				require.False(t, failure.RetryableOnSameAccount)
+			} else {
+				require.Nil(t, failure)
+				body, err := io.ReadAll(resp.Body)
+				require.NoError(t, err)
+				require.Equal(t, tc.body, string(body))
+			}
+			require.False(t, c.Writer.Written())
+		})
+	}
+}
+
 func TestGatewayUpstreamErrorAfterKeepalive(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
