@@ -28,7 +28,6 @@
         <div class="flex items-start justify-between gap-4">
           <div class="min-w-0">
             <h2 class="truncate text-lg font-bold text-gray-900 dark:text-white sm:text-xl" :title="status.featured.description || status.featured.name">{{ status.featured.name }}</h2>
-            <p v-if="componentModels(status.featured).length" class="break-all text-xs text-gray-500">{{ componentModels(status.featured).join(', ') }}</p>
             <div class="mt-2 flex flex-wrap items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
               <StatusDot :status="status.featured.status" :label="t(`channelMonitorV3.status.${status.featured.status}`)" />
               <span data-testid="monitor-v3-featured-status">{{ t(`channelMonitorV3.headline.${status.featured.status}`) }}</span>
@@ -156,7 +155,6 @@
                   </div>
                   <span class="shrink-0 tabular-nums text-gray-500 dark:text-gray-400">{{ t('channelMonitorV3.page.availabilityValue', { value: formatMonitorV3Availability(component.availability) }) }}</span>
                 </div>
-                <p v-if="componentModels(component).length" class="mt-1 break-all text-xs text-gray-500">{{ componentModels(component).join(', ') }}</p>
                 <StatusBar
                   class="mt-2.5"
                   :cells="component.cells"
