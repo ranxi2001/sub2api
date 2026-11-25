@@ -62,7 +62,7 @@ func TestScopedAdminUserResponsePreservesFullAdminResponses(t *testing.T) {
 	}
 }
 
-func TestScopedAdminUserBalanceResponseRedactsCachedFullAdminResult(t *testing.T) {
+func TestScopedAdminUserBalanceReplayRejectsDifferentCredential(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	previous := service.DefaultIdempotencyCoordinator()
 	t.Cleanup(func() { service.SetDefaultIdempotencyCoordinator(previous) })
@@ -82,7 +82,7 @@ func TestScopedAdminUserBalanceResponseRedactsCachedFullAdminResult(t *testing.T
 				c.Next()
 			})
 			r.POST("/users/:id/balance", h.UpdateBalance)
-			for i, scoped := range []bool{scopedFirst, !scopedFirst, true} {
+			for i, scoped := range []bool{scopedFirst, !scopedFirst, scopedFirst} {
 				req := httptest.NewRequest("POST", "/users/7/balance", strings.NewReader(`{"balance":1,"operation":"add"}`))
 				req.Header.Set("Content-Type", "application/json")
 				req.Header.Set("Idempotency-Key", "same-operation")
@@ -91,6 +91,13 @@ func TestScopedAdminUserBalanceResponseRedactsCachedFullAdminResult(t *testing.T
 				}
 				w := httptest.NewRecorder()
 				r.ServeHTTP(w, req)
+				if scoped != scopedFirst {
+					require.Equal(t, 409, w.Code, w.Body.String())
+					require.NotContains(t, w.Body.String(), "内部备注")
+					require.NotContains(t, w.Body.String(), "内部密钥")
+					require.Empty(t, w.Header().Get("X-Idempotency-Replayed"))
+					continue
+				}
 				require.Equal(t, 200, w.Code, w.Body.String())
 				if i > 0 {
 					require.Equal(t, "true", w.Header().Get("X-Idempotency-Replayed"))

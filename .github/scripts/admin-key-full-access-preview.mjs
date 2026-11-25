@@ -46,7 +46,7 @@ if(phase==='before'&&id===root+'/src/i18n/locales/zh/adminAccessKeys.ts')return 
  await page.goto('http://127.0.0.1:4318');await page.getByRole('button',{name:'编辑权限',exact:true}).click();
  await page.screenshot({path:output+'/'+phase+'.png',fullPage:true});
  if(phase==='after'){
- await page.locator('[data-test="full-access"]').check();await page.locator('[data-test="full-access-phrase"]').fill('开启全权访问');await page.screenshot({path:output+'/confirmation.png',fullPage:false});
+ await page.locator('[data-test="full-access"]').check();await page.locator('[data-test="full-access-phrase"]').fill('开启全权访问');await page.locator('.modal-content').screenshot({path:output+'/confirmation.png',animations:'disabled'});
  await page.locator('[data-test="full-access-confirm"]').click();await page.locator('[data-test="save"]').click();await page.getByRole('status').filter({hasText:'密钥已保存'}).waitFor();await page.screenshot({path:output+'/saved.png',fullPage:true});
  }
  await context.close();await server.close();server=null;
