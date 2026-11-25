@@ -4,7 +4,7 @@ export default {
   "rulesSuspended": "资源规则已暂停，关闭全权访问后恢复；有效期、IP 限制、限流和审计继续生效。",
   "fullAccessConfirmTitle": "确认开启全权访问",
   "fullAccessPhrase": "开启全权访问",
-  "fullAccessPhraseHint": "请输入“{phrase}”以确认："
+  "fullAccessPhraseHint": "请输入“{phrase}”以确认：",
   "title": "管理员访问密钥",
   "authorizationHint": "按操作和资源范围授权；未勾选操作不生效。",
   "sharedAccountWarning": "共享账户操作会影响所有关联分组；全站权限不受分组限制。",

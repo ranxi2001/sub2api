@@ -4,7 +4,7 @@ export default {
   "rulesSuspended": "Resource rules are suspended and resume when full access is disabled. Expiration, IP restrictions, rate limits, and auditing remain active.",
   "fullAccessConfirmTitle": "Confirm full access",
   "fullAccessPhrase": "ENABLE FULL ACCESS",
-  "fullAccessPhraseHint": "Type “{phrase}” to confirm:"
+  "fullAccessPhraseHint": "Type “{phrase}” to confirm:",
   "title": "Admin access keys",
   "authorizationHint": "Grant operations within resource scopes. Unselected operations are denied.",
   "sharedAccountWarning": "Shared account changes affect every associated group. Global permissions apply independently of group scopes.",
