@@ -216,6 +216,10 @@ backend/internal/handler/model_plaza_currency_test.go
 # Context-rejection attribution tests require the candidate's native WS failure
 # marker. Historical RED overlays predate that field; candidate GREEN keeps it.
 backend/internal/handler/ops_context_rejection_test.go
+backend/internal/service/compat_context_rejection_test.go
+backend/internal/service/gateway_context_rejection_test.go
+backend/internal/service/openai_ws_ops_failure_test.go
+backend/internal/repository/account_response_client_rejection_test.go
 
 # Anthropic media fixtures share compatEffortPolicyUpstream, absent in historical RED.
 # Current candidate/GREEN retains both files and the complete media assertions.
