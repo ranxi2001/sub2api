@@ -23,12 +23,22 @@
       <div class="grid gap-4 sm:grid-cols-2">
         <div>
           <label class="input-label">{{ t('channelMonitorV3.editor.group') }}</label>
-          <Select v-model="form.group_id" :options="groupOptions" searchable :placeholder="t('channelMonitorV3.editor.groupPlaceholder')" :aria-label="t('channelMonitorV3.editor.group')" data-testid="monitor-v3-group" />
+          <Select :model-value="form.group_id" :options="groupOptions" searchable :placeholder="t('channelMonitorV3.editor.groupPlaceholder')" :aria-label="t('channelMonitorV3.editor.group')" data-testid="monitor-v3-group" @update:model-value="changeGroup" />
           <p class="mt-1 text-xs text-gray-400">{{ t('channelMonitorV3.editor.groupHint') }}</p>
         </div>
         <div>
-          <label class="input-label" for="monitor-v3-model">{{ t('channelMonitorV3.editor.model') }}</label>
-          <input id="monitor-v3-model" v-model="form.model" class="input font-mono" maxlength="100" :placeholder="t('channelMonitorV3.editor.modelPlaceholder')" data-testid="monitor-v3-model" />
+          <div class="mb-1 flex items-center gap-2">
+            <label for="monitor-v3-model" class="text-sm font-medium">{{ t('channelMonitorV3.editor.model') }}</label>
+            <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.monitorV3ComponentModels" :user-id="auth.user?.id" />
+          </div>
+          <input id="monitor-v3-model" v-model.trim="query" type="search" class="input" maxlength="100" :disabled="!form.group_id" :placeholder="t('channelMonitorV3.editor.modelPlaceholder')" />
+          <div v-if="options.length" class="mt-1 max-h-36 overflow-y-auto rounded border border-gray-200 p-2 dark:border-dark-600">
+            <label v-for="model in options" :key="model" class="flex cursor-pointer items-center gap-2 py-1 text-xs">
+              <input v-model="form.models" type="checkbox" :value="model" />
+              <span class="break-all font-mono">{{ model }}</span>
+            </label>
+          </div>
+          <p v-if="candidateError" class="mt-1 text-xs text-amber-600" role="status">{{ t('channelMonitorV3.editor.candidatesFailed') }}</p>
           <p class="mt-1 text-xs text-gray-400">{{ t('channelMonitorV3.editor.modelHint') }}</p>
         </div>
       </div>
@@ -91,6 +101,10 @@ import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select from '@/components/common/Select.vue'
 import Toggle from '@/components/common/Toggle.vue'
+import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
+import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
+import { useAuthStore } from '@/stores/auth'
+import { getModelAllowlistCandidates } from '@/api/admin/groups'
 import type { AdminGroup } from '@/types'
 import {
   MONITOR_V3_TTFT_THRESHOLDS,
@@ -103,7 +117,7 @@ import {
 } from '@/api/channelMonitorV3'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { platformLabel } from '@/utils/platformColors'
-import { formatMonitorV3Multiplier } from './monitorV3'
+import { componentModels, formatMonitorV3Multiplier } from './monitorV3'
 
 const props = defineProps<{
   show: boolean
@@ -115,16 +129,18 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ (e: 'close'): void; (e: 'saved', value: MonitorV3Component): void }>()
 const { t } = useI18n()
+const auth = useAuthStore()
 
 const visibilities: MonitorV3Visibility[] = ['group', 'public']
 
-function blank(): MonitorV3ComponentInput {
+function blank(): MonitorV3ComponentInput & { models: string[] } {
   return {
     category_id: props.defaultCategoryId,
     name: '',
     description: '',
     group_id: 0,
     model: '',
+    models: [],
     degraded_ttft_ms: 0,
     show_multiplier: true,
     visibility: 'group',
@@ -132,7 +148,39 @@ function blank(): MonitorV3ComponentInput {
   }
 }
 
-const form = reactive<MonitorV3ComponentInput>(blank())
+const form = reactive(blank())
+const candidates = ref<string[]>([])
+const query = ref('')
+const candidateError = ref(false)
+const options = computed(() => {
+  const all = [...new Set([...form.models, ...candidates.value])]
+  const search = query.value.toLowerCase()
+  const matches = all.filter((model) => model.toLowerCase().includes(search))
+  if (query.value && !all.includes(query.value)) matches.push(query.value)
+  return matches
+})
+
+function changeGroup(value: unknown) {
+  const id = Number(value)
+  if (form.group_id === id) return
+  form.group_id = id
+  form.models = []
+  query.value = ''
+}
+
+watch(() => [props.show, form.group_id] as const, async ([open, id], _, onCleanup) => {
+  let current = true
+  onCleanup(() => { current = false })
+  candidates.value = []
+  candidateError.value = false
+  if (!open || !id) return
+  try {
+    const models = await getModelAllowlistCandidates(id)
+    if (current) candidates.value = models
+  } catch {
+    if (current) candidateError.value = true
+  }
+}, { immediate: true })
 const saving = ref(false)
 const error = ref('')
 
@@ -142,10 +190,11 @@ watch(() => props.show, (open) => {
   Object.assign(form, source
     ? {
         category_id: source.category_id, name: source.name, description: source.description, group_id: source.group_id,
-        model: source.model, degraded_ttft_ms: source.degraded_ttft_ms, show_multiplier: source.show_multiplier,
+        model: source.model, models: [...componentModels(source)], degraded_ttft_ms: source.degraded_ttft_ms, show_multiplier: source.show_multiplier,
         visibility: source.visibility, enabled: source.enabled,
       }
     : blank())
+  query.value = ''
   error.value = ''
 }, { immediate: true })
 
@@ -172,7 +221,7 @@ const thresholdOptions = computed(() => [
 ])
 
 function payload(): MonitorV3ComponentInput {
-  return { ...form, name: form.name.trim(), description: form.description.trim(), model: form.model.trim() }
+  return { ...form, name: form.name.trim(), description: form.description.trim(), model: form.models[0] ?? '', models: [...form.models] }
 }
 
 async function save() {

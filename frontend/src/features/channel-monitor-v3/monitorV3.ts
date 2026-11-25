@@ -11,6 +11,10 @@ export const MONITOR_V3_COLORS: Record<MonitorV3Status | MonitorV3CellStatus, st
 
 export const MONITOR_V3_EMPTY_CELL = 'bg-gray-200 dark:bg-dark-600'
 
+export function componentModels(component: { models?: string[]; model?: string }): string[] {
+  return component.models ?? (component.model ? [component.model] : [])
+}
+
 /** 97.4612 → "97.46%", 88.597 → "88.6%", null → "—". */
 export function formatMonitorV3Availability(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return '—'

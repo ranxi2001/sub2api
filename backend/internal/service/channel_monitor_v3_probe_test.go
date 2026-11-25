@@ -328,6 +328,28 @@ func TestChannelMonitorV3ProberCountsOnlyTheComponentModel(t *testing.T) {
 	require.Equal(t, 1, probed)
 }
 
+func TestChannelMonitorV3SelectedModels(t *testing.T) {
+	input := ChannelMonitorV3ComponentInput{Name: "text", GroupID: 4, Models: []string{" sol ", "astra", "sol"}}
+	require.NoError(t, normalizeChannelMonitorV3Component(&input))
+	require.Equal(t, []string{"sol", "astra"}, input.Models)
+	require.Equal(t, "sol", input.Model)
+	component := ChannelMonitorV3Component{GroupID: 4, Model: input.Model, Models: input.Models, Enabled: true}
+	facts := ChannelMonitorV3Facts{Metrics: []ChannelMonitorV3Fact{
+		{GroupID: 4, Model: "sol", Success: 9},
+		{GroupID: 4, Model: "astra", Success: 3, Errors: 1},
+		{GroupID: 4, Model: "terra", Errors: 300},
+		{GroupID: 5, Model: "sol", Errors: 100},
+	}}
+	total := channelMonitorV3Accumulate(ChannelMonitorV3Config{}, component, &facts, time.Time{}, 0)[0]
+	require.EqualValues(t, 12, total.success)
+	require.EqualValues(t, 1, total.errors)
+	probe := ChannelMonitorV3IdleProbe{Groups: []ChannelMonitorV3IdleProbeGroup{{GroupID: 4}}}
+	targets := channelMonitorV3ProbeTargets(probe, []ChannelMonitorV3Component{component})
+	require.Len(t, targets, 1)
+	require.Equal(t, "sol", targets[0].Model)
+	require.Empty(t, channelMonitorV3DueProbes(targets, facts.Metrics, 10))
+}
+
 func TestChannelMonitorV3ProberVerdicts(t *testing.T) {
 	for _, tc := range []struct {
 		name     string

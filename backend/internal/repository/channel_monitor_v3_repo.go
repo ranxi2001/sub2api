@@ -138,7 +138,8 @@ func (r *channelMonitorV3Repository) DeleteCategory(ctx context.Context, id int6
 }
 
 const channelMonitorV3ComponentSelect = `
-	SELECT c.id, c.category_id, c.name, c.description, c.group_id, c.model, c.degraded_ttft_ms,
+	SELECT c.id, c.category_id, c.name, c.description, c.group_id, c.model,
+	       CASE WHEN c.models[1] = c.model THEN c.models WHEN c.model <> '' THEN ARRAY[c.model] ELSE '{}'::text[] END, c.degraded_ttft_ms,
 	       c.show_multiplier, c.visibility, c.enabled, c.sort_order, c.created_at, c.updated_at,
 	       COALESCE(g.name, ''), COALESCE(g.platform, ''), COALESCE(g.status, ''),
 	       COALESCE(g.rate_multiplier, 0)::float8, (g.id IS NULL OR g.deleted_at IS NOT NULL)
@@ -147,7 +148,7 @@ const channelMonitorV3ComponentSelect = `
 
 func scanChannelMonitorV3Component(row interface{ Scan(...any) error }) (*service.ChannelMonitorV3Component, error) {
 	var c service.ChannelMonitorV3Component
-	if err := row.Scan(&c.ID, &c.CategoryID, &c.Name, &c.Description, &c.GroupID, &c.Model, &c.DegradedTTFTMs,
+	if err := row.Scan(&c.ID, &c.CategoryID, &c.Name, &c.Description, &c.GroupID, &c.Model, pq.Array(&c.Models), &c.DegradedTTFTMs,
 		&c.ShowMultiplier, &c.Visibility, &c.Enabled, &c.SortOrder, &c.CreatedAt, &c.UpdatedAt,
 		&c.GroupName, &c.GroupPlatform, &c.GroupStatus, &c.GroupRateMultiplier, &c.GroupDeleted); err != nil {
 		return nil, err
@@ -187,12 +188,12 @@ func (r *channelMonitorV3Repository) CreateComponent(ctx context.Context, input 
 	var id int64
 	err := r.db.QueryRowContext(ctx, `
 		INSERT INTO channel_monitor_v3_components (category_id, name, description, group_id, model,
-			degraded_ttft_ms, show_multiplier, visibility, enabled, sort_order)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,
+			degraded_ttft_ms, show_multiplier, visibility, enabled, models, sort_order)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10::text[], '{}'),
 			COALESCE((SELECT MAX(sort_order) + 1 FROM channel_monitor_v3_components), 0))
 		RETURNING id`,
 		input.CategoryID, input.Name, input.Description, input.GroupID, input.Model,
-		input.DegradedTTFTMs, input.ShowMultiplier, input.Visibility, input.Enabled).Scan(&id)
+		input.DegradedTTFTMs, input.ShowMultiplier, input.Visibility, input.Enabled, pq.Array(input.Models)).Scan(&id)
 	if err != nil {
 		return nil, fmt.Errorf("create channel monitor v3 component: %w", err)
 	}
@@ -202,11 +203,12 @@ func (r *channelMonitorV3Repository) CreateComponent(ctx context.Context, input 
 func (r *channelMonitorV3Repository) UpdateComponent(ctx context.Context, id int64, input service.ChannelMonitorV3ComponentInput) (*service.ChannelMonitorV3Component, error) {
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE channel_monitor_v3_components
-		SET category_id = $2, name = $3, description = $4, group_id = $5, model = $6,
-		    degraded_ttft_ms = $7, show_multiplier = $8, visibility = $9, enabled = $10, updated_at = NOW()
+		SET category_id = $2, name = $3, description = $4, group_id = $5, model = $6::text,
+		    degraded_ttft_ms = $7, show_multiplier = $8, visibility = $9, enabled = $10, updated_at = NOW(),
+		    models = COALESCE($11::text[], CASE WHEN group_id = $5 AND model = $6::text THEN models ELSE '{}'::text[] END)
 		WHERE id = $1`,
 		id, input.CategoryID, input.Name, input.Description, input.GroupID, input.Model,
-		input.DegradedTTFTMs, input.ShowMultiplier, input.Visibility, input.Enabled)
+		input.DegradedTTFTMs, input.ShowMultiplier, input.Visibility, input.Enabled, pq.Array(input.Models))
 	if err != nil {
 		return nil, fmt.Errorf("update channel monitor v3 component: %w", err)
 	}
