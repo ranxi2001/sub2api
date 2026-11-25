@@ -48,7 +48,7 @@ func scopedAdminAccountDTO(a *service.Account, p adminaccess.Policy) gin.H {
 
 // ScopedAdminKeyAccounts 在原处理器前完成独立授权和安全输出。
 func (h *AccountHandler) ScopedAdminKeyAccounts(c *gin.Context) {
-	principal := adminaccess.FromContext(c.Request.Context())
+	principal := adminaccess.RestrictedFromContext(c.Request.Context())
 	if principal == nil {
 		return
 	}

@@ -110,7 +110,7 @@ func (s *adminServiceImpl) ScopedAdminList(ctx context.Context, p pagination.Pag
 }
 
 func (s *adminServiceImpl) ScopedAdminWrite(ctx context.Context, id int64, action string, fields map[string]json.RawMessage, run func(context.Context, *Account) (*Account, error)) (*Account, error) {
-	principal := adminaccess.FromContext(ctx)
+	principal := adminaccess.RestrictedFromContext(ctx)
 	if principal == nil {
 		return nil, infraerrors.Forbidden("SCOPED_ACCOUNT_FORBIDDEN", "缺少受限身份")
 	}

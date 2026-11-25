@@ -23,7 +23,7 @@ func scopedAdminGroupModelsDTO(g *service.Group) gin.H {
 
 // ScopedAdminKeyGroupModels 接管分组模型接口，禁止复用可修改费率等字段的完整处理器。
 func (h *GroupHandler) ScopedAdminKeyGroupModels(c *gin.Context) {
-	p := adminaccess.FromContext(c.Request.Context())
+	p := adminaccess.RestrictedFromContext(c.Request.Context())
 	if p == nil {
 		return
 	}
