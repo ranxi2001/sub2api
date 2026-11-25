@@ -184,6 +184,16 @@ func (s *AccountOpsService) startOAuth429Observations(ctx context.Context, repo 
 	oauth429HTTPObserver.Store(s)
 }
 
+// OAuth429ReviewModel applies only to the actual upstream target of the 429 branch.
+func OAuth429ReviewModel(model string) bool {
+	switch normalizeKnownOpenAICodexModel(model) {
+	case "gpt-5.6-sol", "gpt-6-sol", "gpt-6-astra", "gpt-6.1-sol", "gpt-6.2-sol", "gpt-6.2-astra":
+		return true
+	default:
+		return false
+	}
+}
+
 func ObserveOAuth429HTTP(req *http.Request, accountID int64, status int, requestStarted ...time.Time) {
 	observer := oauth429HTTPObserver.Load()
 	if observer == nil || accountID <= 0 || req == nil || status < 200 || status > 599 || req.Context().Value(qualityProbeContextKey{}) != nil {
@@ -226,7 +236,7 @@ func ObserveOAuth429HTTP(req *http.Request, accountID int64, status int, request
 			}
 		}
 	}
-	if model == "" || len(requestModel) > 256 || len(model) > 256 {
+	if len(requestModel) > 256 || len(model) > 256 || !OAuth429ReviewModel(model) {
 		return
 	}
 	digest := sha256.Sum256([]byte(requestID))

@@ -61,7 +61,7 @@ func oauth429Fixture(t *testing.T, history []string) (*accountRepository, *servi
 	c, err := svc.SaveOAuthAutoConfig(t.Context(), c)
 	require.NoError(t, err)
 
-	a := degradationAccountFixture(t, 50, map[string]any{"gpt-6-astra": "gpt-6-astra", "gpt-6-luna": "gpt-6-luna"}, history, time.Minute)
+	a := degradationAccountFixture(t, 50, map[string]any{"gpt-6-sol": "gpt-6-sol", "gpt-6.1-terra": "gpt-6.1-terra", "gpt-6-astra": "gpt-6-astra", "gpt-6-luna": "gpt-6-luna"}, history, time.Minute)
 	_, err = integrationDB.ExecContext(t.Context(), `UPDATE accounts SET credentials=credentials||'{"access_token":"fixture-only"}'::jsonb WHERE id=$1`, a.ID)
 	require.NoError(t, err)
 	return repo, a, c
@@ -359,7 +359,15 @@ func TestOAuth429ReviewUsesSelectedAccountActions(t *testing.T) {
 
 func TestOAuth429WorkerAdmitsEachModelIndependently(t *testing.T) {
 	repo, a, _ := oauth429Fixture(t, nil)
-	for _, model := range []string{"gpt-6-astra", "gpt-6-luna"} {
+	for _, model := range []string{"gpt-6-luna", "gpt-6.1-terra"} {
+		for i := 0; i < 30; i++ {
+			require.False(t, oauth429Observe(t, repo, a.ID, model, i))
+		}
+	}
+	var excluded int
+	require.NoError(t, integrationDB.QueryRowContext(t.Context(), "SELECT count(*) FROM oauth_429_tasks WHERE account_id=$1", a.ID).Scan(&excluded))
+	require.Zero(t, excluded)
+	for _, model := range []string{"gpt-6-astra", "gpt-6-sol"} {
 		oauth429Prime(t, repo, a.ID, model)
 	}
 	var pending int

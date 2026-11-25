@@ -60,7 +60,7 @@ export default {
     errors: { accounts_unavailable: 'Could not read account state.', metric_unavailable: 'Could not read the monitored metric.', account_enable_failed: 'Some fallback accounts could not be enabled. Check their state.' }
   },
  degradation: {
-  "independentScope": "Use up to 200 business samples per account and model in the last hour. Confirmed reviews apply the selected account actions. Enabling model restrictions updates the account mapping using the retained model whitelist.",
+  "independentScope": "Only requests forwarded to Sol or Astra count toward the 429 threshold and qualify for retests. Use up to 200 business samples per account and model in the last hour. Confirmed reviews apply the selected account actions. Enabling model restrictions updates the account mapping using the retained model whitelist.",
   "independentSamples": "Minimum business request samples (20–200)",
   "independentHint": "Business HTTP 429 pressure can trigger tests on the original account and model. Only five consecutive upstream HTTP 429 responses in the same review trigger the configured degradation actions. Timeouts, empty or truncated answers, and the text 429 do not count toward the streak.",
   "independentEnable": "Run independent tests at the 429 threshold",

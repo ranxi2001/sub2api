@@ -44,7 +44,7 @@ func oauth429PolicyAccount(ctx context.Context, tx *sql.Tx, id int64) (service.O
 	return cfg, a, nil
 }
 func oauth429EligibleRequest(c service.OAuthAutoConfig, a *service.Account, request, target, endpoint, compactModel string) bool {
-	if c.Revision == "" || !c.DegradationAction.Enabled || !c.DegradationAction.UsesUpstream429() ||
+	if !service.OAuth429ReviewModel(target) || c.Revision == "" || !c.DegradationAction.Enabled || !c.DegradationAction.UsesUpstream429() ||
 		!c.DegradationAction.Independent429.Enabled || c.DegradationAction.Validate() != nil {
 		return false
 	}
@@ -518,6 +518,9 @@ func (r *accountRepository) CompleteOAuth429(ctx context.Context, task *service.
 }
 
 func (r *accountRepository) OAuth429Current(ctx context.Context, task *service.OAuth429Task) (bool, error) {
+	if !service.OAuth429ReviewModel(task.Model) {
+		return false, nil
+	}
 	db, err := r.oauth429DB()
 	if err != nil {
 		return false, err

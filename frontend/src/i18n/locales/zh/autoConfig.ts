@@ -60,7 +60,7 @@ export default {
     errors: { accounts_unavailable: '账号状态读取失败。', metric_unavailable: '监控指标读取失败。', account_enable_failed: '部分兜底账号开启失败，请检查账号状态。' }
   },
  degradation: {
-  "independentScope": "每个账号和模型使用最近一小时内最多 200 个业务样本。复测确认后执行下方勾选的账号处置动作。启用模型限制时，按保留模型白名单更新账号映射。",
+  "independentScope": "429 触发统计与复测只看实际转发到 Sol、Astra 的请求，每个账号和模型取最近一小时内最多 200 个业务样本。复测确认后执行下方勾选的账号处置动作。启用模型限制时，按保留模型白名单更新账号映射。",
   "independentSamples": "最少业务请求样本（20–200）",
   "independentHint": "启用后，业务 429 达到阈值会对原账号和模型发起复测。只有同一轮复测连续 5 次收到上游 HTTP 429，才执行降智后处置。超时、空答、截断和正文里的数字 429 都不能计入连续 429。",
   "independentEnable": "达到 429 阈值后自动复测",
