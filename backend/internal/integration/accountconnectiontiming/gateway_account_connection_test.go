@@ -135,7 +135,7 @@ func gatewayTestFixture(base, platform string) (*gatewayTestAccounts, *config.Co
 		Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 7,
 		GroupIDs: []int64{group.ID}, AccountGroups: []service.AccountGroup{{GroupID: group.ID}},
 		Credentials: map[string]any{"upstream_kind": "new_api", "base_url": base, "api_key": "synthetic-gateway-key"},
-		Extra: map[string]any{"synthetic_metadata": "preserve"},
+		Extra:       map[string]any{"synthetic_metadata": "preserve"},
 	}
 	cfg := &config.Config{}
 	cfg.Security.URLAllowlist.AllowInsecureHTTP = true

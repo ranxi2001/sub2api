@@ -33,6 +33,11 @@ func (r *initialSelectionAccounts) Create(_ context.Context, a *service.Account)
 	r.created = append(r.created, a)
 	return nil
 }
+func (r *initialSelectionAccounts) CreateWithAccountGroups(ctx context.Context, a *service.Account, groups []service.AccountGroup) error {
+	a.AccountGroups = groups
+	return r.Create(ctx, a)
+}
+
 func (r *initialSelectionAccounts) BindGroups(context.Context, int64, []int64) error { return nil }
 
 type initialSelectionAdmin struct {

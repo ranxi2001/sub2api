@@ -2399,6 +2399,7 @@ func (h *AccountHandler) BatchCreate(c *gin.Context) {
 			skipCheck := item.ConfirmMixedChannelRisk != nil && *item.ConfirmMixedChannelRisk
 
 			account, err := h.adminService.CreateAccount(ctx, &service.CreateAccountInput{
+				OAuthImportSource:     service.OAuthImportJSON,
 				Name:                  item.Name,
 				Notes:                 item.Notes,
 				Platform:              item.Platform,

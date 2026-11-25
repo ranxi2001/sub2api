@@ -34,7 +34,7 @@ func TestOAuthImportScheduling(t *testing.T) {
 				raw, err = json.Marshal(cfg)
 				require.NoError(t, err)
 				repo.raw = string(raw)
-				input := &CreateAccountInput{Platform: PlatformOpenAI, Type: AccountTypeOAuth, OAuthImportSource: OAuthImportTwoFA}
+				input := &CreateAccountInput{Platform: PlatformOpenAI, Type: AccountTypeOAuth, OAuthImportSource: OAuthImportTwoFA, Credentials: map[string]any{"access_token": "fixture"}}
 				require.NoError(t, svc.ApplyOAuthAutoConfig(t.Context(), input))
 				require.NoError(t, svc.applyOpenAITwoFAAdmission(t.Context(), input))
 				require.Equal(t, !twoFAOn, input.Extra[OpenAITwoFAAdmissionExtraKey].(OpenAITwoFAAdmissionState).KeepSchedulingOnPass)
@@ -44,4 +44,13 @@ func TestOAuthImportScheduling(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestOAuthJSONImportMissingCredentialStaysPaused(t *testing.T) {
+	cfg := DefaultOAuthAutoConfig()
+	input := &CreateAccountInput{Platform: PlatformOpenAI, Type: AccountTypeOAuth, OAuthImportSource: OAuthImportJSON,
+		Credentials: map[string]any{"email": "fixture@example.invalid", "access_token": "  "}}
+	require.False(t, *cfg.importScheduling(input))
+	input.Credentials["refresh_token"] = "fixture"
+	require.True(t, *cfg.importScheduling(input), "legacy settings allow imports with a refresh credential")
 }

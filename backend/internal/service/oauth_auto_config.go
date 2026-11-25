@@ -9,6 +9,7 @@ import (
 	"maps"
 	"math"
 	"slices"
+	"strings"
 	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -176,10 +177,11 @@ func (s *SettingService) GetOAuthAutoConfig(ctx context.Context) (OAuthAutoConfi
 	}
 	return GetOAuthAutoConfig(ctx, s.settingRepo)
 }
+
 // A nil decision leaves ordinary account creation outside the import policy.
-func (c *OAuthAutoConfig) importScheduling(source OAuthImportSource) *bool {
+func (c *OAuthAutoConfig) importScheduling(input *CreateAccountInput) *bool {
 	var choices map[string]bool
-	switch source {
+	switch input.OAuthImportSource {
 	case OAuthImportJSON:
 		choices = c.JSONImportAutoSchedule
 	case OAuthImportTwoFA:
@@ -190,6 +192,19 @@ func (c *OAuthAutoConfig) importScheduling(source OAuthImportSource) *bool {
 	enabled, configured := choices[c.Platform]
 	if !configured {
 		enabled = true
+	}
+	if enabled {
+		// The generic JSON backup and batch formats accept credential maps with
+		// metadata only. Import those settings, but keep the account paused.
+		account := Account{Platform: input.Platform, Type: input.Type, Credentials: input.Credentials}
+		if account.IsOpenAIAgentIdentity() {
+			_, err := agentIdentityKeyFromAccount(&account)
+			enabled = err == nil
+		} else {
+			access, _ := input.Credentials["access_token"].(string)
+			refresh, _ := input.Credentials["refresh_token"].(string)
+			enabled = strings.TrimSpace(access) != "" || strings.TrimSpace(refresh) != ""
+		}
 	}
 	return &enabled
 }
@@ -247,7 +262,7 @@ func (s *adminServiceImpl) ApplyOAuthAutoConfig(ctx context.Context, input *Crea
 		policy.GroupIDs = slices.Clone(policy.GroupIDs)
 		input.InitialAPIKeyDisposition = &policy
 	}
-	input.initialAutoSchedule = c.importScheduling(input.OAuthImportSource)
+	input.initialAutoSchedule = c.importScheduling(input)
 	input.InitialQualityPlan = plan
 	applyOAuthInitialModels(input, c.ModelMappings, c.SelectedModels)
 	input.Priority = c.Priority
