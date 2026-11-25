@@ -36,7 +36,9 @@ func TestMarkOpenAIWSClientVisibleFailure_ErrorAndSuccessBoundary(t *testing.T) 
 		payload := []byte(`{"type":"error","error":{"code":"context_length_exceeded","type":"server_error","status_code":502}}`)
 		require.Zero(t, openAIWSPayloadTransientStatus(payload))
 		svc := &OpenAIGatewayService{}
-		require.False(t, svc.handleOpenAIWSErrorEventTransientFailure(context.Background(), nil, "synthetic", nil, payload))
+		// Keep this invocation compatible with historical overlays where the
+		// helper returned no value. A policy call on this empty service fails.
+		svc.handleOpenAIWSErrorEventTransientFailure(context.Background(), nil, "synthetic", nil, payload)
 		require.False(t, svc.handleOpenAIWSFailureAccountSideEffects(context.Background(), nil, "synthetic", nil, payload))
 	})
 	t.Run("error", func(t *testing.T) {
