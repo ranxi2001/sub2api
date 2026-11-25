@@ -135,7 +135,7 @@ function details(event: AutoConfigEvent) {
     if (e.limit_concurrency !== false) actions.push(t('autoConfig.degradation.concurrencyEvent', { before: d.previous_concurrency, after: d.concurrency }))
     if (e.limit_models !== false) actions.push(t('autoConfig.degradation.modelsEvent', { models: (e.models ?? []).join(', ') || '∅' }))
     if (e.limit_groups) actions.push(t('autoConfig.degradation.groupsEvent', { groups: groupIDs(e.group_ids), removed: groupIDs(e.removed_group_ids) }))
-    if (e.trigger_reason === 'five_consecutive_429' || e.trigger_reason === 'two_wrong_answers') {
+    if (e.trigger_reason === 'five_consecutive_429') {
       return [t('autoConfig.logs.oauth429Reasons.' + e.trigger_reason), ...actions].join(' · ')
     }
     if (e.trigger_reason === 'probe_and_candy_retests' && e.candy_review) {

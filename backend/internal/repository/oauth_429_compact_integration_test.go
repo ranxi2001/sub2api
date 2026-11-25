@@ -107,25 +107,25 @@ func TestOAuth429CompactGlobalForwardWorker(t *testing.T) {
 				}, 5*time.Second, 20*time.Millisecond, "real compact Forward and transport must enqueue the globally resolved wire model")
 				require.Equal(t, routing.Revision, task.RoutingRevision)
 				require.Equal(t, "alias-one", task.RequestModel)
-				runner, probes, _ := oauth429Runner(t, repo, []string{"23", "27"}, target)
+				runner, probes, _ := oauth429Runner(t, repo, []string{"429", "429", "429", "429", "429"}, target)
 				runner.StartOAuth429Worker()
 				defer runner.Stop()
 				require.Eventually(t, func() bool {
 					var data []byte
 					return integrationDB.QueryRowContext(t.Context(), `SELECT data FROM oauth_429_tasks WHERE account_id=$1 AND model=$2 AND state='complete'`, a.ID, target).Scan(&data) == nil && json.Unmarshal(data, &task) == nil
 				}, 8*time.Second, 20*time.Millisecond)
-				require.Len(t, task.Runs, 2)
+				require.Len(t, task.Runs, 5)
 				require.Equal(t, a.ID, task.AccountID)
 				require.Equal(t, target, task.Model)
 				require.Equal(t, "alias-one", task.RequestModel)
-				require.Equal(t, "two_wrong_answers", task.Reason)
+				require.Equal(t, "five_consecutive_429", task.Reason)
 				require.Equal(t, "complete", task.State)
 				require.NotEmpty(t, task.TriggerID)
-				require.EqualValues(t, 2, probes.Load())
+				require.EqualValues(t, 5, probes.Load())
 				identities := map[string]bool{}
 				for _, run := range task.Runs {
-					require.True(t, run.AnswerComplete)
-					require.Equal(t, "incorrect", run.Verdict)
+					require.Equal(t, 429, run.HTTPStatus)
+					require.Equal(t, "rate_limited", run.Verdict)
 					require.False(t, run.StartedAt.IsZero())
 					require.False(t, run.FinishedAt.Before(run.StartedAt))
 					for _, id := range []string{run.ID, run.ResultID} {

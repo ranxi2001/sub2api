@@ -7,7 +7,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -101,7 +100,7 @@ func TestOAuth429HandlerPostgresWorkerLoopback(t *testing.T) {
 	var calls atomic.Int32
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		_, _ = io.WriteString(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"23\"}\n\ndata: {\"type\":\"response.completed\"}\n\n")
+		w.WriteHeader(http.StatusTooManyRequests)
 	}))
 	defer provider.Close()
 	target, err := url.Parse(provider.URL)
@@ -119,8 +118,8 @@ func TestOAuth429HandlerPostgresWorkerLoopback(t *testing.T) {
 	require.Eventually(t, func() bool {
 		got, err := accounts.GetByID(ctx, a.ID)
 		return err == nil && got.HasOAuthDegradationAction()
-	}, 8*time.Second, 20*time.Millisecond, "threshold must drive two tests without a quality plan, cron or ordinary 429 cooldown")
-	require.EqualValues(t, 2, calls.Load())
+	}, 8*time.Second, 20*time.Millisecond, "threshold must drive five tests without a quality plan, cron or ordinary 429 cooldown")
+	require.EqualValues(t, 5, calls.Load())
 	got, err := accounts.GetByID(ctx, a.ID)
 	require.NoError(t, err)
 	require.Equal(t, cfg.DegradationAction.TargetConcurrency, got.Concurrency)

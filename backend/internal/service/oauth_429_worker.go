@@ -290,10 +290,6 @@ func (task *OAuth429Task) DecisionReason() string {
 	if task.consecutiveRateLimits() == OAuth429ConsecutiveLimit {
 		return "five_consecutive_429"
 	}
-	one, two := task.Runs[0], task.Runs[1]
-	if len(task.Runs) == 2 && one.AnswerComplete && two.AnswerComplete && one.Verdict == "incorrect" && two.Verdict == "incorrect" {
-		return "two_wrong_answers"
-	}
 	return ""
 }
 

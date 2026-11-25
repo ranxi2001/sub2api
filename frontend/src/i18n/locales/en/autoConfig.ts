@@ -62,7 +62,7 @@ export default {
  degradation: {
   "independentScope": "Use up to 200 business samples per account and model in the last hour. Confirmed reviews apply the selected account actions. Enabling model restrictions updates the account mapping using the retained model whitelist.",
   "independentSamples": "Minimum business request samples (20–200)",
-  "independentHint": "Business HTTP 429 pressure can trigger tests on the original account and model. Two complete wrong answers or five consecutive upstream HTTP 429 test responses can trigger the configured degradation actions. Timeouts, empty or truncated answers, and the text 429 do not count toward the streak.",
+  "independentHint": "Business HTTP 429 pressure can trigger tests on the original account and model. Only five consecutive upstream HTTP 429 responses in the same review trigger the configured degradation actions. Timeouts, empty or truncated answers, and the text 429 do not count toward the streak.",
   "independentEnable": "Run independent tests at the 429 threshold",
   "title": "Degradation actions",
   "hint": "The probe branch retains its confirmation policy. HTTP 429 pressure only starts the independent tests below; it never proves a wrong answer or directly changes account concurrency.",

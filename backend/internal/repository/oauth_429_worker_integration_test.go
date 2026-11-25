@@ -140,7 +140,7 @@ func TestOAuth429WorkerIndependentPair(t *testing.T) {
 		history []string
 		applied bool
 	}{
-		{"qualityops_off_two_wrong", []string{"23", "27"}, nil, true},
+		{"qualityops_off_two_wrong", []string{"23", "27"}, nil, false},
 		{"history_wrong_cannot_shortcut", []string{"23", "21"}, []string{"incorrect", "incorrect"}, false},
 		{"wrong_pass", []string{"23", "21"}, nil, false},
 		{"wrong_then_429_then_correct", []string{"23", "429", "21"}, nil, false},
@@ -370,7 +370,7 @@ func TestOAuth429WorkerAdmitsEachModelIndependently(t *testing.T) {
 // Business response ingress wakes the real durable observer without a quality plan.
 func TestOAuth429HTTPTransportDeduplicatesAndWakesWorker(t *testing.T) {
 	repo, a, _ := oauth429Fixture(t, nil)
-	runner, calls, _ := oauth429Runner(t, repo, []string{"23", "27"})
+	runner, calls, _ := oauth429Runner(t, repo, []string{"429", "429", "429", "429", "429"})
 	business := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(429) }))
 	defer business.Close()
 	transport := &accountResponseTransport{base: http.DefaultTransport}
@@ -394,7 +394,7 @@ func TestOAuth429HTTPTransportDeduplicatesAndWakesWorker(t *testing.T) {
 		got, err := repo.GetByID(t.Context(), a.ID)
 		return err == nil && got.HasOAuthDegradationAction()
 	}, 8*time.Second, 20*time.Millisecond)
-	require.EqualValues(t, 2, calls.Load())
+	require.EqualValues(t, 5, calls.Load())
 }
 
 func TestOAuth429AliasAndLiveCancellation(t *testing.T) {

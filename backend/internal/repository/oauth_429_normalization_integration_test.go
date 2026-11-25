@@ -34,7 +34,7 @@ func TestOAuth429HTTPForwardNormalization(t *testing.T) {
 			repo, a, _ := oauth429Fixture(t, nil)
 			_, err := integrationDB.ExecContext(t.Context(), `UPDATE accounts SET credentials=jsonb_set(credentials,'{model_mapping}',$2::jsonb) WHERE id=$1`, a.ID, tc.mapping)
 			require.NoError(t, err)
-			runner, calls, _ := oauth429Runner(t, repo, []string{"23", "27"})
+			runner, calls, _ := oauth429Runner(t, repo, []string{"429", "429", "429", "429", "429"})
 			runner.StartOAuth429Worker()
 			defer runner.Stop()
 			business := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.Copy(io.Discard, r.Body); w.WriteHeader(429) }))
@@ -78,14 +78,14 @@ func TestOAuth429HTTPForwardNormalization(t *testing.T) {
 			require.Eventually(t, func() bool {
 				got, err := repo.GetByID(t.Context(), a.ID)
 				return err == nil && got.HasOAuthDegradationAction()
-			}, 8*time.Second, 20*time.Millisecond, "Forward-normalized model must complete both tests and apply the configured whitelist")
+			}, 8*time.Second, 20*time.Millisecond, "Forward-normalized model must complete five consecutive 429 tests and apply the configured whitelist")
 			var data []byte
 			require.NoError(t, integrationDB.QueryRowContext(t.Context(), `SELECT data FROM oauth_429_tasks WHERE account_id=$1 AND model='gpt-6-astra' AND state='complete'`, a.ID).Scan(&data))
 			var task service.OAuth429Task
 			require.NoError(t, json.Unmarshal(data, &task))
 			require.Equal(t, tc.input, task.RequestModel)
-			require.Len(t, task.Runs, 2)
-			require.EqualValues(t, 2, calls.Load())
+			require.Len(t, task.Runs, 5)
+			require.EqualValues(t, 5, calls.Load())
 			got, err := repo.GetByID(t.Context(), a.ID)
 			require.NoError(t, err)
 			require.False(t, got.IsModelSupported(tc.input))
