@@ -1701,7 +1701,7 @@ func logOpsStreamErrorValue(c *gin.Context, ops *service.OpsService, wireStatus 
 		entry.IsBusinessLimited = false
 		entry.UpstreamErrorDetail = nil
 	}
-	if streamErr.UpstreamWSFailure != nil {
+	if streamErr.UpstreamWSFailure != nil && !streamErr.RequestScoped {
 		entry.ErrorPhase, entry.ErrorOwner, entry.ErrorSource = "upstream", "provider", "upstream_transport"
 		entry.IsBusinessLimited = false
 		// A WS business status is not an HTTP response from the provider.

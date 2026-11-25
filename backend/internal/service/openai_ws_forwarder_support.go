@@ -276,13 +276,17 @@ func markOpenAIWSClientVisibleFailure(c *gin.Context, eventType string, payload 
 	if message == "" {
 		message = "upstream websocket request failed"
 	}
+	requestScoped := IsUpstreamContextRejection(status, payload)
+	if requestScoped {
+		status, errType, code = http.StatusBadRequest, "invalid_request_error", "context_length_exceeded"
+	}
 	var origin *OpsUpstreamWSFailure
 	if len(upstream) > 0 {
 		origin = upstream[0]
 	}
 	MarkOpsStreamErrorValue(c, OpsStreamError{
 		ErrType: errType, Code: code, Message: message, IntendedStatus: status,
-		CountTowardsSLA: true, UpstreamWSFailure: origin,
+		CountTowardsSLA: !requestScoped, RequestScoped: requestScoped, UpstreamWSFailure: origin,
 	})
 }
 
@@ -887,6 +891,8 @@ func openAIWSErrorHTTPStatusFromRaw(codeRaw, errTypeRaw string) int {
 		return http.StatusForbidden
 	case isOpenAIWSRateLimitError(codeRaw, errTypeRaw, ""):
 		return http.StatusTooManyRequests
+	case code == "context_length_exceeded", code == "context_too_large":
+		return http.StatusBadRequest
 	default:
 		return http.StatusBadGateway
 	}
