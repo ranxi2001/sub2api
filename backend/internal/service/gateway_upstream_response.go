@@ -1000,6 +1000,7 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 	noopDeltaKeepaliveDeltaType := ""
 
 	pendingEventLines := make([]string, 0, 4)
+	sawUpstreamLine := false
 
 	processSSEEvent := func(lines []string) ([]string, string, *sseUsagePatch, error) {
 		if len(lines) == 0 {
@@ -1285,7 +1286,7 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 				status.readErr = io.EOF
 				if failure := status.failure(); failure != nil {
 					// An empty stream leaves no client message or measured usage to preserve.
-					if failure.errType == "stream_incomplete" && !c.Writer.Written() && status.frameCount == 0 && !usage.hasObservedTokens() {
+					if failure.errType == "stream_incomplete" && !c.Writer.Written() && !sawUpstreamLine && !usage.hasObservedTokens() {
 						appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 							ProxyID: opsUpstreamProxyID(account), ProxyName: opsUpstreamProxyName(account),
 							Platform: account.Platform, AccountID: account.ID, AccountName: account.Name,
@@ -1351,6 +1352,7 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 				sendErrorEvent("stream_read_error", disconnectMsg)
 				return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, fmt.Errorf("stream read error: %w", ev.err)
 			}
+			sawUpstreamLine = true
 			line := ev.line
 			if line == "" {
 				if err := consumePending(); err != nil {
