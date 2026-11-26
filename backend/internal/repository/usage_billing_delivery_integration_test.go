@@ -130,3 +130,20 @@ func TestUsageBillingDeliveryArchiveClaimNeverBackChargesHistory(t *testing.T) {
 	require.Equal(t, "100.00000000", balance)
 	require.Zero(t, logs, "no fabricated historical canonical usage")
 }
+
+func TestApplyUsageSettlesOnceWithoutStaging(t *testing.T) {
+	ctx := context.Background()
+	repo, cmd, usage, _ := durableBillingFixture(t)
+	first, err := repo.ApplyUsage(ctx, &cmd, &usage)
+	require.NoError(t, err)
+	require.True(t, first.Settled && first.Result.Applied)
+	usage.ActualCost = 77
+	replay, err := repo.ApplyUsage(ctx, &cmd, &usage)
+	require.NoError(t, err)
+	require.True(t, replay.Settled)
+	require.False(t, replay.Result.Applied)
+	require.Equal(t, first.Event.Usage.ActualCost, replay.Event.Usage.ActualCost)
+	var events int
+	require.NoError(t, repo.db.QueryRowContext(ctx, "SELECT count(*) FROM usage_billing_events WHERE request_id=$1", cmd.RequestID).Scan(&events))
+	require.Zero(t, events)
+}

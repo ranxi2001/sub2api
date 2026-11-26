@@ -55,6 +55,10 @@ func (r *usageBillingRepository) PendingUsageBilling(ctx context.Context, limit 
 		query += ` ORDER BY CASE WHEN state='pending' THEN 0 ELSE 1 END,next_attempt_at,staged_at,request_id,api_key_id LIMIT $1`
 		rows, err := r.db.QueryContext(ctx, query, args...)
 		if err != nil {
+			var pgErr interface{ SQLState() string }
+			if errors.As(err, &pgErr) && pgErr.SQLState() == "42P01" {
+				return nil, service.ErrUsageBillingJournalRetired
+			}
 			return nil, err
 		}
 		var keys []service.UsageBillingEventKey
