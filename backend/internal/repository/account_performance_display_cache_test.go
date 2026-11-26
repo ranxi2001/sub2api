@@ -212,7 +212,7 @@ func TestAccountPerformanceDisplayRefreshUsesReadOnlyDatabaseBudget(t *testing.T
 	defer repo.Stop()
 	mock.ExpectBegin()
 	mock.ExpectExec("SET LOCAL statement_timeout='4500ms'; SET LOCAL lock_timeout='500ms'; SET LOCAL work_mem='8MB'; SET LOCAL max_parallel_workers_per_gather=0").WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectQuery("WITH source").WithArgs("{7}", sqlmock.AnyArg(), sqlmock.AnyArg()).WillReturnRows(performanceRow(service.PerformanceConfig{}))
+	mock.ExpectQuery("WITH usage").WithArgs("{7}", sqlmock.AnyArg(), sqlmock.AnyArg()).WillReturnRows(performanceRow(service.PerformanceConfig{}))
 	mock.ExpectCommit()
 	repo.display.refresh([]performanceDisplayJob{{7, 60}})
 	require.Equal(t, int64(1), client.Exists(context.Background(), repo.display.key(performanceDisplayJob{7, 60})).Val())

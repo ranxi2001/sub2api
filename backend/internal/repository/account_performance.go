@@ -49,10 +49,25 @@ func (r *accountPerformanceRepository) Stop() {
 	}
 }
 
-// Quality rounds have their own completion evidence. Per-request verified
-// latency and cache samples are unavailable after diagnostic collection retired.
+// Score billed text usage in the selected window. Quality rounds use their
+// own completion evidence; a latency sample does not establish stream success.
 const performanceMetricsSQL = `
-WITH rounds AS (
+WITH usage AS (
+ SELECT account_id,
+   AVG(output_tokens * 1000.0 / NULLIF(duration_ms, 0)) FILTER (WHERE output_tokens >= 2 AND duration_ms > 0) AS tps,
+   COUNT(*) FILTER (WHERE output_tokens >= 2 AND duration_ms > 0) AS tps_n,
+   AVG(first_token_ms) FILTER (WHERE stream AND output_tokens >= 2 AND first_token_ms BETWEEN 0 AND duration_ms) AS ttft,
+   COUNT(*) FILTER (WHERE stream AND output_tokens >= 2 AND first_token_ms BETWEEN 0 AND duration_ms) AS ttft_n,
+   AVG(100.0 * cache_read_tokens / NULLIF(input_tokens::numeric + cache_read_tokens + cache_creation_tokens, 0))
+     FILTER (WHERE input_tokens >= 0 AND cache_read_tokens >= 0 AND cache_creation_tokens >= 0) AS cache_percent,
+   COUNT(*) FILTER (WHERE input_tokens >= 0 AND cache_read_tokens >= 0 AND cache_creation_tokens >= 0
+     AND input_tokens::numeric + cache_read_tokens + cache_creation_tokens > 0) AS cache_n
+ FROM usage_logs
+ WHERE account_id = ANY($1) AND created_at >= $2 AND created_at <= $3
+   AND COALESCE(image_count, 0) = 0 AND COALESCE(image_output_tokens, 0) = 0
+   AND COALESCE(billing_mode, 'token') NOT IN ('image','video')
+ GROUP BY account_id
+), rounds AS (
  SELECT p.account_id,p.id,r.quality_round_id,
  bool_or(r.pelican_config @> '{"quality_429_streak":3,"quality_http_status":429}' OR r.quality_judgment->>'verdict'='incorrect' AND r.status='failed' AND r.error_message IN ('answer_mismatch','state_degraded')
     AND (COALESCE(r.pelican_config->>'question_kind','')<>'random_reasoning'
@@ -81,11 +96,11 @@ WITH rounds AS (
  SELECT account_id,100.0*COUNT(*) FILTER(WHERE failed)/NULLIF(COUNT(*) FILTER(WHERE passed OR failed),0) AS degraded,
  COUNT(*) FILTER(WHERE passed OR failed) AS quality_n FROM rounds GROUP BY account_id
 )
-SELECT ids.id,NULL::float8,0,NULL::float8,0,q.degraded,COALESCE(q.quality_n,0),
- COALESCE(m.config,'{}'),COALESCE(m.revision,0),COALESCE(m.paused,false),COALESCE(m.pause_generation,0),m.paused_at,COALESCE(m.reason,''),NULL::float8,0
+SELECT ids.id,u.tps,COALESCE(u.tps_n,0),u.ttft,COALESCE(u.ttft_n,0),q.degraded,COALESCE(q.quality_n,0),
+ COALESCE(m.config,'{}'),COALESCE(m.revision,0),COALESCE(m.paused,false),COALESCE(m.pause_generation,0),m.paused_at,COALESCE(m.reason,''),u.cache_percent,COALESCE(u.cache_n,0)
 FROM unnest($1::bigint[]) ids(id)
 JOIN accounts a ON a.id=ids.id AND a.deleted_at IS NULL
-LEFT JOIN quality q ON q.account_id=ids.id
+LEFT JOIN usage u ON u.account_id=ids.id LEFT JOIN quality q ON q.account_id=ids.id
 LEFT JOIN account_performance_monitors m ON m.account_id=ids.id
 `
 

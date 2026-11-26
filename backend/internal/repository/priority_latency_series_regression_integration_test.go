@@ -78,5 +78,5 @@ func TestPriorityLatencySeriesUsesConfiguredMeasurementAndPercentile(t *testing.
 	require.NoError(t, json.Unmarshal(encoded, &bucket))
 	selected, exists := bucket["selected_ttft_ms"]
 	require.True(t, exists, "latency series must expose the configured percentile")
-	require.Nil(t, selected, "retired attributed timing has no samples")
+	require.Equal(t, float64(99000), selected, "historical preferences use the recorded first token time")
 }

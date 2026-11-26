@@ -68,8 +68,9 @@ func TestPriorityAnalysisPostgresScopeWindowAndCompletePool(t *testing.T) {
 		return service.PrioritySchedulingScore{}
 	}
 	require.Equal(t, 1, find(got).ProfitSamples)
-	require.Zero(t, find(got).Samples)
-	require.Nil(t, find(got).SelectedTTFTMs)
+	require.Equal(t, 4, find(got).Samples)
+	require.NotNil(t, find(got).SelectedTTFTMs)
+	require.InDelta(t, 5274.5, *find(got).SelectedTTFTMs, .01)
 	q.Minutes = 60
 	wide, err := service.ReadPriorityAnalysis(ctx, accounts, usage, cfg, q)
 	require.NoError(t, err)
@@ -135,7 +136,7 @@ func TestPriorityAnalysisPostgresPublicAliasAndRouteQuality(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, got.Snapshot.Candidates, 1)
 	require.Equal(t, "public-alias", got.Snapshot.Model)
-	require.Zero(t, got.Snapshot.Candidates[0].Samples)
+	require.Equal(t, 1, got.Snapshot.Candidates[0].Samples)
 	require.Equal(t, 1, got.Snapshot.Candidates[0].QualitySamples)
 	require.Equal(t, 1, got.Snapshot.Candidates[0].QualityPassed)
 }

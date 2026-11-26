@@ -872,10 +872,10 @@ describe('admin UsageView ranking tab', () => {
     expect(wrapper.find('[data-test="ranking"]').exists()).toBe(false)
 
     const tabs = wrapper.findAll('[data-testid="usage-detail-tab"]')
-    expect(tabs).toHaveLength(5)
+    expect(tabs).toHaveLength(3)
     expect(wrapper.find('[data-test="connection-tab"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="ranking"]').exists()).toBe(false)
-    await tabs[3].trigger('click')
+    await tabs[2].trigger('click')
     await flushPromises()
     expect(wrapper.find('[data-test="ranking"]').exists()).toBe(true)
 
@@ -1226,7 +1226,6 @@ describe('admin UsageView rolling 24 hour requests', () => {
     expect(list.mock.lastCall?.[0]).toMatchObject({ ...range, page: 2 })
     await (wrapper.vm as any).exportToExcel()
     expect(exportList.mock.lastCall?.[0]).toMatchObject(range)
-    expect((wrapper.vm as any).connectionFilters).toMatchObject({ start_time: range.start_date, end_time: range.end_date })
     ;(wrapper.vm as any).switchTab('errors')
     await flushPromises()
     expect(listErrorLogs.mock.lastCall?.[0]).toMatchObject({ start_time: range.start_date, end_time: range.end_date })

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import UsageTable from '../UsageTable.vue'
 import enDashboard from '@/i18n/locales/en/dashboard'
@@ -39,7 +39,7 @@ describe('server latency display without pre-forward wait disclosure', () => {
         const wrapper = mount(UsageTable, {
           props: {
             data: [serverLatency], columns: [{ key: 'latency', label: 'Latency' }],
-            enableTimingDetails: audience === 'admin', cacheRateAudience: audience,
+            cacheRateAudience: audience,
             showAccountBilling: audience === 'admin',
           }, global: global(locale),
         })
