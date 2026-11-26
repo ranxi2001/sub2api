@@ -95,6 +95,10 @@ func (s *AccountTestService) RunPelicanBackground(ctx context.Context, accountID
 	finished := time.Now()
 	snapshot := *cfg
 	snapshot.Ciallo = ciallo
+	snapshot.QualityHTTPStatus, snapshot.Quality429Streak = 0, 0
+	if cfg.Quality != nil && status == "failed" && ctx.Err() == nil {
+		snapshot.QualityHTTPStatus = c.GetInt("quality_terminal_http_status")
+	}
 	snapshot.ModelID = model
 	snapshot.ActualPrompt = intelligenceTestPrompt(cfg)
 	return &ScheduledTestResult{DirectOAuth401: directOAuth401, DirectOAuthRevoked401: directOAuthRevoked401, Status: status, ResponseText: output, ErrorMessage: message, LatencyMs: finished.Sub(started).Milliseconds(), StartedAt: started, FinishedAt: finished, PelicanConfig: &snapshot}, nil
@@ -249,6 +253,7 @@ func (s *ScheduledTestRunnerService) runPelicanPlan(ctx context.Context, plan *S
 				cfg := *plan.PelicanConfig
 				samplePlan.ModelID = models[index%len(models)]
 				cfg.ModelID = samplePlan.ModelID
+				cfg.QualityHTTPStatus, cfg.Quality429Streak = 0, 0
 				if randomSamples != nil {
 					cfg = *randomSamples[index/len(models)]
 					cfg.ModelID = samplePlan.ModelID
@@ -276,7 +281,7 @@ func (s *ScheduledTestRunnerService) runPelicanPlan(ctx context.Context, plan *S
 					continue
 				}
 				result := s.runPelicanSample(runCtx, &samplePlan)
-				if plan.PelicanConfig.Quality != nil && qualityModelUnsupported(result.ErrorMessage) {
+				if plan.PelicanConfig.Quality != nil && result.PelicanConfig.QualityHTTPStatus != http.StatusTooManyRequests && qualityModelUnsupported(result.ErrorMessage) {
 					unsupported.Store(samplePlan.ModelID, true)
 					persistCtx, persistCancel := context.WithTimeout(context.WithoutCancel(runCtx), 3*time.Second)
 					persistErr := s.scheduledSvc.rememberUnsupportedQualityModel(persistCtx, plan.AccountID, samplePlan.ModelID)
@@ -320,6 +325,7 @@ func (s *ScheduledTestRunnerService) runPelicanPlan(ctx context.Context, plan *S
 		plan.QualityModelOutcomes = qualityPlanModelOutcomes(plan, results)
 	}
 	qualityAction := ""
+	roundSaved := false
 	if plan.PelicanConfig.Quality != nil {
 		qualityAction = "inconclusive"
 		freshSignal := true
@@ -328,7 +334,17 @@ func (s *ScheduledTestRunnerService) runPelicanPlan(ctx context.Context, plan *S
 		}
 		if applyTriggeredQuality && freshSignal && (qualityRoundHasResults(results) || plan.PelicanConfig.Quality.Action == QualityActionOpenAITwoFAAdmission) {
 			var actionErr error
-			qualityAction, actionErr = s.planRepo.ApplyQualityOutcome(saveCtx, plan, until, qualityRoundOutcome(results))
+			outcome := qualityRoundOutcome(results)
+			if store, ok := s.planRepo.(Quality429Repository); ok && len(Quality429Models(plan, results)) > 0 {
+				qualityAction, actionErr = store.SaveQuality429Round(saveCtx, plan, until, results, outcome)
+				if actionErr != nil {
+					logger.LegacyPrintf("service.scheduled_test_runner", "quality plan=%d save rate-limit round failed: %v", plan.ID, actionErr)
+					return false
+				}
+				roundSaved = true
+			} else {
+				qualityAction, actionErr = s.planRepo.ApplyQualityOutcome(saveCtx, plan, until, outcome)
+			}
 			if actionErr != nil {
 				qualityAction = "action_error"
 				logger.LegacyPrintf("service.scheduled_test_runner", "quality plan=%d action failed: %v", plan.ID, actionErr)
@@ -338,6 +354,9 @@ func (s *ScheduledTestRunnerService) runPelicanPlan(ctx context.Context, plan *S
 	succeeded := false
 	allSaved := true
 	for _, result := range results {
+		if roundSaved {
+			continue
+		}
 		result.QualityAction = qualityAction
 		if plan.PelicanConfig.Quality != nil {
 			result.QualityRoundID = until.Format(time.RFC3339Nano)

@@ -2885,6 +2885,8 @@ export interface PelicanQuestion {
 }
 
 export interface PelicanTestConfig {
+  quality_http_status?: number
+  quality_429_streak?: number
   prompt_mode?: 'custom' | 'random'
   pelican_question?: PelicanQuestion
   actual_prompt?: string

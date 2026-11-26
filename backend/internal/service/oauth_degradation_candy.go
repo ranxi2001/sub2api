@@ -24,7 +24,10 @@ func (s *ScheduledTestRunnerService) reviewDegradationCandyRound(ctx context.Con
 		return
 	}
 	for _, result := range results {
-		if !wrongCandyAnswer(result) || result.PelicanConfig == nil || result.PelicanConfig.ModelID == "" {
+		if result == nil || result.PelicanConfig == nil || result.PelicanConfig.ModelID == "" {
+			continue
+		}
+		if !wrongCandyAnswer(result) && (result.PelicanConfig.Quality429Streak < 3 || plan.PelicanConfig.Quality.Action == QualityActionObserveOnly) {
 			continue
 		}
 		// One pair per claimed round, even when several models failed.

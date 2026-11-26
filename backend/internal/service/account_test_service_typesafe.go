@@ -83,7 +83,7 @@ func (s *AccountTestService) testTypeSafeAccountConnection(c *gin.Context, accou
 		if (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) && s.accountRepo != nil {
 			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
 		}
-		return s.sendErrorAndEnd(c, errMsg)
+		return s.sendHTTPErrorAndEnd(c, resp.StatusCode, errMsg)
 	}
 
 	decoded, err := typesafe.DecodeSystemOneResponse(resp.Body)

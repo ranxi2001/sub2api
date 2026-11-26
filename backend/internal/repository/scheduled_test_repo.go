@@ -83,7 +83,7 @@ func (r *scheduledTestPlanRepository) Update(ctx context.Context, plan *service.
 		UPDATE scheduled_test_plans
 		SET model_id = $2, cron_expression = $3, enabled = $4, max_results = $5, auto_recover = $6,
  next_run_at = CASE WHEN $4 AND $8::jsonb->'quality' IS NOT NULL AND pelican_config->>'_manual_quality_run'='true'
- THEN next_run_at ELSE $7 END, updated_at = NOW(),
+ THEN next_run_at ELSE $7 END, updated_at = NOW(), quality_429_state=NULL,
  pelican_config = CASE WHEN $4 AND $8::jsonb->'quality' IS NOT NULL AND pelican_config->>'_manual_quality_run'='true'
  THEN $8::jsonb || jsonb_build_object('_manual_quality_run',true,'_manual_quality_run_id',pelican_config->'_manual_quality_run_id') ELSE $8::jsonb END
 		WHERE id = $1 AND COALESCE(pelican_config->'quality'->>'action','') <> 'openai_two_fa_admission'
@@ -390,7 +390,8 @@ func (r *scheduledTestPlanRepository) ClaimPelican(ctx context.Context, plan *se
  COALESCE(pelican_config->>'_manual_quality_run_id','') AS manual_quality_run_id
  FROM scheduled_test_plans WHERE id=$1 FOR UPDATE
  ) UPDATE scheduled_test_plans
- SET running_until = $3, next_run_at = $4, pelican_config = pelican_config - '_manual_quality_run' - '_manual_quality_run_id'
+ SET running_until = $3, next_run_at = $4, pelican_config = pelican_config - '_manual_quality_run' - '_manual_quality_run_id',
+ quality_round_seq = quality_round_seq + 1
  FROM candidate
  WHERE id = $1 AND enabled = true
  AND id=candidate_id

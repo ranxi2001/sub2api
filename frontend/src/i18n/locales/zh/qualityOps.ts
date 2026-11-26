@@ -1,4 +1,6 @@
 export default {
+  "rateLimitPending": "HTTP 429 · 连续 {n}/3 轮",
+  "rateLimitDegraded": "HTTP 429 · 连续三轮，策略计入降智",
   "ciallo": {
     "ruleHint": "按规则的模型、推理强度和时间计划发送 ciallo。完整回复以指定问候和颜文字开头即匹配，由内置规则判定。结果参与本规则配置的处置；首次配置可选择仅观察。",
     "title": "Ciallo 检测",
