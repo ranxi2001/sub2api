@@ -17,6 +17,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
 )
 
@@ -405,13 +406,15 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		// portable accelerated POST with explicit account rejection evidence.
 		if accelerateHTTPSSE && reqStream && ctx.Err() == nil && c != nil && c.Writer != nil &&
 			!c.Writer.Written() && !IsResponseCommitted(c) && turnState == "" &&
-			openAIWSModelFailureCanReplay(ctx, payloadAsJSONBytes(payload)) &&
+			ctx.Value(openAIWSHandshakeReplayKey{}) == true &&
+			openAIWSHandshakePayloadPortable(ctx, payloadAsJSONBytes(payload)) &&
 			errors.As(err, &dialErr) && dialErr != nil &&
 			(isOpenAIExplicitAccountCredential401(dialErr.StatusCode, dialErr.ResponseHeaders, dialErr.ResponseBody) ||
-				(dialErr.StatusCode == http.StatusTooManyRequests && dialErr.ResponseHeaders.Get("Proxy-Authenticate") == "" && isOpenAIQuotaExhaustedResponse(dialErr.ResponseBody))) {
-			return nil, s.handleFailoverErrorResponsePassthrough(ctx,
+				isOpenAIExplicitQuota429(dialErr.StatusCode, dialErr.ResponseHeaders, dialErr.ResponseBody)) {
+			rejection := s.handleFailoverErrorResponsePassthrough(ctx,
 				&http.Response{StatusCode: dialErr.StatusCode, Header: dialErr.ResponseHeaders},
 				c, account, payloadAsJSONBytes(payload), dialErr.ResponseBody)
+			return nil, &openAIWSHandshakeAccountFailover{cause: rejection, meter: regionalMeterAttemptFrom(ctx)}
 		}
 		if errors.As(err, &dialErr) && dialErr != nil && dialErr.StatusCode == http.StatusTooManyRequests {
 			s.persistOpenAIWSRateLimitSignal(ctx, account, dialErr.ResponseHeaders, nil, "rate_limit_exceeded", "rate_limit_error", strings.TrimSpace(err.Error()), mappedModel)
@@ -971,6 +974,32 @@ readLoop:
 		wsOutputStarted := wroteDownstream
 		if eventType == "error" || eventType == "response.failed" {
 			markOpenAICyberPolicyEvent(c, message, http.StatusOK, usage)
+		}
+
+		// The generation frame was already sent. Quota is a terminal business
+		// error, never proof that execution did not begin. Emit one allowlisted
+		// Responses failure rather than forwarding a bare error and appending a
+		// generic terminal from the outer handler.
+		if accelerateHTTPSSE && reqStream && (eventType == "error" || eventType == "response.failed") &&
+			isOpenAIQuotaExhaustedResponse(message) {
+			lease.MarkBroken()
+			errCode, errType, errMessage := parseOpenAIWSErrorEventFields(message)
+			s.persistOpenAIWSRateLimitSignal(openAI429LeaseObservation(ctx, lease), account, lease.HandshakeHeaders(), message, errCode, errType, errMessage, mappedModel)
+			if !clientDisconnected && ctx.Err() == nil {
+				id := responseID
+				if id == "" {
+					id = "resp_" + uuid.NewString()
+				}
+				source, _ := json.Marshal(gin.H{"sequence_number": nextSequenceNumber, "error": gin.H{
+					"type": "rate_limit_error", "code": "usage_limit_reached", "message": "The usage limit has been reached",
+				}})
+				failed := buildOpenAIWSHTTPBridgeFailedEvent(id, originalModel, time.Now().Unix(), source, "")
+				flushBufferedStreamEvents("quota_failure")
+				MarkResponseCommitted(c)
+				emitStreamMessage(failed, true)
+				markOpenAIWSClientVisibleFailure(c, "response.failed", failed, &OpsUpstreamWSFailure{Phase: "upstream_event"})
+			}
+			return nil, errors.New("upstream response failed: usage_limit_reached")
 		}
 
 		if eventType == "error" {

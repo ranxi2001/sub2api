@@ -4,6 +4,8 @@ on:
     branches: [production]
     paths:
       - 'backend/internal/service/openai_ws*'
+      - 'backend/internal/service/openai_gateway_forward.go'
+      - 'backend/internal/service/regional_metering.go'
       - 'backend/internal/service/openai_issue1077*'
       - 'backend/internal/handler/openai_issue1077*'
       - 'backend/internal/handler/openai_gateway_handler.go'
@@ -34,11 +36,12 @@ jobs:
           git worktree add --detach "$RUNNER_TEMP/issue1077-base" d8f00260f44bf6a6d0385eaa92c74841ab5476d5
           git -C "$RUNNER_TEMP/issue1077-base" rev-parse HEAD > "$RUNNER_TEMP/issue1077-base.txt"
           cp backend/internal/service/openai_issue1077_test.go "$RUNNER_TEMP/issue1077-base/backend/internal/service/"
+          cp backend/internal/handler/openai_issue1077_test.go "$RUNNER_TEMP/issue1077-base/backend/internal/handler/"
       - name: Baseline must fail the behavioral assertion, not compilation
         run: |
           set -euo pipefail
           set +e
-          (cd "$RUNNER_TEMP/issue1077-base/backend" && go test -json -tags=unit ./internal/service -run '^TestIssue1077HandshakeAccountRejection$' -count=1 -timeout=3m) > "$RUNNER_TEMP/issue1077-red.jsonl" 2>&1
+          (cd "$RUNNER_TEMP/issue1077-base/backend" && go test -json -tags=unit ./internal/service ./internal/handler -run '^TestIssue1077(HandshakeAccountRejection|HandlerSamePOST)$' -count=1 -timeout=3m) > "$RUNNER_TEMP/issue1077-red.jsonl" 2>&1
           result=$?
           set -e
           cat "$RUNNER_TEMP/issue1077-red.jsonl"
@@ -54,10 +57,12 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
-          (cd backend && go test -race -json -tags=unit ./internal/service -run '^TestIssue1077' -count=1 -timeout=5m) | tee "$RUNNER_TEMP/issue1077-green.jsonl"
+          (cd backend && go test -race -json -tags=unit ./internal/service ./internal/handler -run '^Test(Issue1077|OpenAIWSHTTPBridgeLaterTurn|ProxyOpenAIWSHTTPBridgeTurnLater|BuildOpenAIWSCurrentTurnRetryPayload|OpenAIWSSSEIncompleteRegionalHandlerOwnsSingleResponse)'  -count=1 -timeout=5m) | tee "$RUNNER_TEMP/issue1077-green.jsonl"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: issue1077-${{ github.event.pull_request.head.sha }}
-          path: ${{ runner.temp }}/issue1077-*
+          path: |
+            ${{ runner.temp }}/issue1077-*.txt
+            ${{ runner.temp }}/issue1077-*.jsonl
           if-no-files-found: error

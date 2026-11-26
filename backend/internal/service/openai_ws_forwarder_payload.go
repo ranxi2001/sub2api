@@ -740,7 +740,12 @@ func openAIWSRawItemsContainNonPortableContext(items []json.RawMessage) bool {
 	contains = func(value any) bool {
 		switch typed := value.(type) {
 		case map[string]any:
-			if itemType, ok := typed["type"].(string); ok && strings.TrimSpace(itemType) == "item_reference" {
+			for _, key := range []string{"file_id", "file_data", "image_url", "vector_store_ids", "container"} {
+				if _, exists := typed[key]; exists {
+					return true
+				}
+			}
+			if itemType, ok := typed["type"].(string); ok && (strings.TrimSpace(itemType) == "item_reference" || itemType == "input_image" || itemType == "input_file") {
 				return true
 			}
 			if encrypted, ok := typed["encrypted_content"].(string); ok && strings.TrimSpace(encrypted) != "" {
@@ -905,8 +910,14 @@ func buildOpenAIWSCurrentTurnRetryPayload(
 	fullInputExists bool,
 	originalModel string,
 ) ([]byte, bool, error) {
-	if !fullInputExists {
+	if !fullInputExists || !openAIEncryptedJSONUnambiguous(payload) ||
+		!openAIWSReplayToolsPortable(gjson.GetBytes(payload, "tools")) {
 		return nil, false, nil
+	}
+	for _, key := range []string{"conversation", "conversation_id"} {
+		if value := gjson.GetBytes(payload, key); value.Exists() && value.Type != gjson.Null && value.String() != "" {
+			return nil, false, nil
+		}
 	}
 	if openAIWSRawItemsContainNonPortableContext(fullInput) {
 		// Do not strip previous_response_id and replay opaque account-bound

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -16,12 +17,21 @@ func TestIssue1077HandshakeAccountRejection(t *testing.T) {
 		name, body   string
 		status       int
 		wantFailover bool
+		headers      http.Header
 	}{
-		{"credential", `{"error":{"code":"invalid_api_key","type":"authentication_error"}}`, 401, true},
-		{"quota", `{"error":{"type":"usage_limit_reached"}}`, 429, true},
-		{"proxy", `{"error":{"code":"proxy_authentication_required","type":"authentication_error"}}`, 401, false},
-		{"bare_401", `Unauthorized`, 401, false},
-		{"short_throttle", `{"error":{"code":"rate_limit_exceeded"}}`, 429, false},
+		{"credential", `{"error":{"code":"invalid_api_key","type":"authentication_error"}}`, 401, true, nil},
+		{"quota", `{"error":{"type":"usage_limit_reached"}}`, 429, true, nil},
+		{"proxy", `{"error":{"code":"proxy_authentication_required","type":"authentication_error"}}`, 401, false, nil},
+		{"bare_401", `Unauthorized`, 401, false, nil},
+		{"generic_auth", `{"error":{"type":"authentication_error","message":"relay rejected"}}`, 401, false, nil},
+		{"unknown_auth", `{"error":{"code":"relay_rejected","type":"authentication_error"}}`, 401, false, nil},
+		{"proxy_header", `{"error":{"code":"invalid_api_key"}}`, 401, false, http.Header{"Proxy-Authenticate": {"fixture"}}},
+		{"conflict_quota", `{"error":{"code":"rate_limit_exceeded","type":"usage_limit_reached"}}`, 429, false, nil},
+		{"proxy_quota", `{"error":{"code":"proxy_authentication_required","type":"usage_limit_reached"}}`, 429, false, nil},
+		{"duplicate", `{"error":{"code":"usage_limit_reached","code":"rate_limit_exceeded"}}`, 429, false, nil},
+		{"message_only", `{"error":{"message":"usage_limit_reached"}}`, 429, false, nil},
+		{"retry_after", `{"error":{"type":"usage_limit_reached"}}`, 429, false, http.Header{"Retry-After": {"1"}}},
+		{"short_throttle", `{"error":{"code":"rate_limit_exceeded"}}`, 429, false, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
@@ -32,6 +42,7 @@ func TestIssue1077HandshakeAccountRejection(t *testing.T) {
 			d := &wsSSETestDialer{conn: conn, status: tc.status, err: &openAIWSHandshakeError{Body: []byte(tc.body), Err: errors.New("fixture handshake refusal")}}
 			h := &httpUpstreamRecorder{}
 			s := wsSSETestService(t, d, h)
+			s.openaiWSPool.setClientDialerForTest(&wsSSEGuardHeaderDialer{d, tc.headers})
 			_, err := s.Forward(context.Background(), c, wsSSETestAccount(), []byte(wsSSETestRequest))
 			require.Error(t, err)
 			var failover *UpstreamFailoverError
@@ -48,5 +59,69 @@ func TestIssue1077HandshakeAccountRejection(t *testing.T) {
 			conn.mu.Unlock()
 			require.Zero(t, writes, "even a prewarm must not be sent")
 		})
+	}
+}
+
+func TestIssue1077HandshakeOriginalPayloadSafety(t *testing.T) {
+	for _, extra := range []string{
+		`,"tools":[{"type":"file_search","vector_store_ids":["vs_private"]}]`,
+		`,"tools":[{"type":"code_interpreter","container":"private"}]`,
+		`,"conversation":"conv_private"`,
+		`,"previous_response_id":"resp_private"`,
+		`,"input":[{"type":"function_call_output","call_id":"orphan","output":"done"}]`,
+		`,"input":[{"type":"input_image","image_url":"fixture"}]`,
+		`,"input":[{"type":"reasoning","encrypted_content":"fixture"}]`,
+	} {
+		t.Run(extra, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
+			d := &wsSSETestDialer{status: 401, err: &openAIWSHandshakeError{Body: []byte(`{"error":{"code":"invalid_api_key"}}`), Err: errors.New("fixture refusal")}}
+			s := wsSSETestService(t, d, wsSSEGuardHTTPUpstream())
+			body := []byte(strings.TrimSuffix(wsSSETestRequest, "}") + extra + "}")
+			original := string(body)
+			_, err := s.Forward(context.Background(), c, wsSSETestAccount(), body)
+			var failover *UpstreamFailoverError
+			require.False(t, errors.As(err, &failover), "bound original payload cannot open handshake failover")
+			require.Equal(t, original, string(body))
+		})
+	}
+}
+
+func TestIssue1077StreamQuotaHasOneSafeTerminal(t *testing.T) {
+	for _, before := range []string{"", `{"type":"response.created","sequence_number":12,"response":{"id":"resp_quota"}}`, `{"type":"response.output_text.delta","delta":"partial"}`} {
+		for _, failure := range []string{
+			`{"type":"error","status_code":429,"error":{"type":"usage_limit_reached","message":"private fixture upstream body","resets_at":1795726241}}`,
+			`{"type":"response.failed","response":{"error":{"code":"usage_limit_reached","message":"private fixture upstream body"}}}`,
+		} {
+			t.Run(before+failure[:20], func(t *testing.T) {
+				events := []string{}
+				if before != "" {
+					events = append(events, before)
+				}
+				events = append(events, failure)
+				w, c, result, _, err := issue776Forward(t, events, nil)
+				require.Error(t, err)
+				require.Nil(t, result, "quota must not manufacture billable usage")
+				var replay *UpstreamFailoverError
+				require.False(t, errors.As(err, &replay), "generation already sent; never switch on absence of tokens")
+				require.Equal(t, http.StatusOK, w.Code)
+				messages := issue776SSEMessages(t, w.Body.String())
+				want := 1
+				if before != "" {
+					want++
+				}
+				require.Len(t, messages, want)
+				require.NotContains(t, w.Body.String(), "private fixture")
+				require.NotContains(t, w.Body.String(), `"type":"error"`)
+				require.Contains(t, w.Body.String(), `"code":"usage_limit_reached"`)
+				marked, ok := GetOpsStreamError(c)
+				require.True(t, ok)
+				require.Equal(t, 429, marked.IntendedStatus)
+				require.NotNil(t, marked.UpstreamWSFailure)
+				require.Equal(t, "upstream_event", marked.UpstreamWSFailure.Phase)
+			})
+		}
 	}
 }
