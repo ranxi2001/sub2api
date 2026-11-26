@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"log/slog"
+	"net/http"
 	"time"
 )
 
@@ -33,6 +34,7 @@ func (s *ScheduledTestRunnerService) reviewDegradationCandyRound(ctx context.Con
 		// One pair per claimed round, even when several models failed.
 		sample := *plan
 		cfg := *plan.PelicanConfig
+		cfg.QualityHTTPStatus, cfg.Quality429Streak = 0, 0
 		cfg.ModelID = result.PelicanConfig.ModelID
 		sample.ModelID, sample.PelicanConfig, sample.degradationRetest = cfg.ModelID, &cfg, true
 		review := OAuthDegradationCandyReview{PlanID: plan.ID, ModelID: sample.ModelID, LeaseUntil: until, PlanUpdatedAt: plan.UpdatedAt, StartedAt: result.StartedAt}
@@ -49,11 +51,14 @@ func (s *ScheduledTestRunnerService) reviewDegradationCandyRound(ctx context.Con
 			if ctx.Err() != nil || !time.Now().Before(until) {
 				return
 			}
-			if wrongCandyAnswer(s.runPelicanSample(ctx, &sample)) {
+			retest := s.runPelicanSample(ctx, &sample)
+			if wrongCandyAnswer(retest) {
 				review.Incorrect++
+			} else if retest != nil && retest.Status == "failed" && retest.PelicanConfig != nil && retest.PelicanConfig.QualityHTTPStatus == http.StatusTooManyRequests {
+				review.RateLimited++
 			}
 		}
-		if review.Incorrect == 2 {
+		if review.Confirmed() {
 			if _, err := repo.ReviewOAuthDegradationCandy(ctx, plan.AccountID, review); err != nil {
 				slog.Error("oauth_degradation_candy_apply", "account_id", plan.AccountID, "error", err)
 			}

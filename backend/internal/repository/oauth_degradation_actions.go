@@ -56,8 +56,8 @@ func (r *accountRepository) EvaluateOAuthDegradation(ctx context.Context, id int
 	return r.evaluateOAuthDegradation(ctx, id, now, nil)
 }
 
-// A review with no answers requests permission to probe. After two wrong
-// answers the runner submits the same lease and configuration revision.
+// A review with no revision requests permission to probe. Confirmed retests
+// must use the same lease and configuration revision.
 func (r *accountRepository) ReviewOAuthDegradationCandy(ctx context.Context, id int64, review service.OAuthDegradationCandyReview) (string, error) {
 	err := r.evaluateOAuthDegradation(ctx, id, time.Now().UTC(), &review)
 	return review.Revision, err
@@ -142,11 +142,11 @@ func (r *accountRepository) evaluateOAuthDegradation(ctx context.Context, id int
 	reason := ""
 	if reason == "" && review != nil && c.DegradationAction.NeedsCandyRetest(m) &&
 		!review.StartedAt.Before(m.WindowStart) && now.Before(review.LeaseUntil) {
-		if review.Incorrect == 0 {
+		if review.Incorrect == 0 && review.RateLimited == 0 {
 			review.Revision = c.Revision
 			return nil
 		}
-		if review.Incorrect == 2 && review.Revision != "" && review.Revision == c.Revision {
+		if review.Confirmed() && review.Revision != "" && review.Revision == c.Revision {
 			reason = service.OAuthDegradationCandyRetested
 		}
 	}

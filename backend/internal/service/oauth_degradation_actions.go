@@ -135,7 +135,12 @@ type OAuthDegradationCandyReview struct {
 	PlanUpdatedAt time.Time `json:"plan_updated_at"`
 	StartedAt     time.Time `json:"started_at"`
 	Incorrect     int       `json:"incorrect"`
+	RateLimited   int       `json:"rate_limited,omitempty"`
 	Revision      string    `json:"revision"`
+}
+
+func (r OAuthDegradationCandyReview) Confirmed() bool {
+	return r.Incorrect >= 0 && r.Incorrect <= 2 && r.RateLimited == 2-r.Incorrect
 }
 
 func (c OAuthDegradationConfig) TriggerReason(m AccountPerformance) string {
