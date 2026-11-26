@@ -400,6 +400,19 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			account.ProxyID != nil && account.Proxy != nil,
 		)
 		var dialErr *openAIWSDialError
+		// Acquire failed before either prewarm or response.create. Reuse the
+		// ordinary HTTP account policy and handler budgets only for a fresh,
+		// portable accelerated POST with explicit account rejection evidence.
+		if accelerateHTTPSSE && reqStream && ctx.Err() == nil && c != nil && c.Writer != nil &&
+			!c.Writer.Written() && !IsResponseCommitted(c) && turnState == "" &&
+			openAIWSModelFailureCanReplay(ctx, payloadAsJSONBytes(payload)) &&
+			errors.As(err, &dialErr) && dialErr != nil &&
+			(isOpenAIExplicitAccountCredential401(dialErr.StatusCode, dialErr.ResponseHeaders, dialErr.ResponseBody) ||
+				(dialErr.StatusCode == http.StatusTooManyRequests && dialErr.ResponseHeaders.Get("Proxy-Authenticate") == "" && isOpenAIQuotaExhaustedResponse(dialErr.ResponseBody))) {
+			return nil, s.handleFailoverErrorResponsePassthrough(ctx,
+				&http.Response{StatusCode: dialErr.StatusCode, Header: dialErr.ResponseHeaders},
+				c, account, payloadAsJSONBytes(payload), dialErr.ResponseBody)
+		}
 		if errors.As(err, &dialErr) && dialErr != nil && dialErr.StatusCode == http.StatusTooManyRequests {
 			s.persistOpenAIWSRateLimitSignal(ctx, account, dialErr.ResponseHeaders, nil, "rate_limit_exceeded", "rate_limit_error", strings.TrimSpace(err.Error()), mappedModel)
 		}
