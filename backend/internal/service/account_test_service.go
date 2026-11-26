@@ -3844,11 +3844,6 @@ func (s *AccountTestService) sendEvent(c *gin.Context, event TestEvent) {
 }
 
 // sendErrorAndEnd sends an error event and ends the stream
-func (s *AccountTestService) sendHTTPErrorAndEnd(c *gin.Context, status int, errorMsg string) error {
-	c.Set("quality_terminal_http_status", status)
-	return s.sendErrorAndEnd(c, errorMsg)
-}
-
 func (s *AccountTestService) sendErrorAndEnd(c *gin.Context, errorMsg string) error {
 	logAccountTestError(c, errorMsg)
 	s.sendEvent(c, TestEvent{Type: "error", Error: errorMsg})

@@ -59,7 +59,7 @@ func TestQuality429RoundAccountingAndActions(t *testing.T) {
 				var schedulable bool
 				require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT schedulable FROM accounts WHERE id=$1", account.ID).Scan(&schedulable))
 				require.Equal(t, action == service.QualityActionObserveOnly || i < 3, schedulable)
-				if i == 3 {
+				if i == 3 || i == 5 {
 					review := service.OAuthDegradationCandyReview{PlanID: plan.ID, ModelID: plan.ModelID, LeaseUntil: until, PlanUpdatedAt: plan.UpdatedAt, StartedAt: samples[0].StartedAt}
 					revision, err := reviewRepo.ReviewOAuthDegradationCandy(ctx, account.ID, review)
 					require.NoError(t, err)
@@ -71,6 +71,15 @@ func TestQuality429RoundAccountingAndActions(t *testing.T) {
 					var events int
 					require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT count(*) FROM account_auto_config_events WHERE account_id=$1 AND kind='degradation_applied'`, account.ID).Scan(&events))
 					require.Zero(t, events, "permission for independent retests is not confirmation")
+					if i == 5 && revision != "" {
+						review.Revision, review.Incorrect = revision, 2
+						for range 2 {
+							_, err = reviewRepo.ReviewOAuthDegradationCandy(ctx, account.ID, review)
+							require.NoError(t, err)
+						}
+						require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT count(*) FROM account_auto_config_events WHERE account_id=$1 AND kind='degradation_applied'`, account.ID).Scan(&events))
+						require.Equal(t, 1, events, "authorized action after two independent wrong answers")
+					}
 				}
 				require.NoError(t, plans.FinishPelican(ctx, plan.ID, until, time.Now()))
 			}

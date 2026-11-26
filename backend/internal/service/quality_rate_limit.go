@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"time"
+
+	"github.com/gin-gonic/gin"
 )
 
 // SaveQuality429Round commits classification, the guarded action and raw samples together.
@@ -40,4 +42,9 @@ func Quality429Models(plan *ScheduledTestPlan, results []*ScheduledTestResult) [
 		}
 	}
 	return found
+}
+
+func (s *AccountTestService) sendHTTPErrorAndEnd(c *gin.Context, status int, errorMsg string) error {
+	c.Set("quality_terminal_http_status", status)
+	return s.sendErrorAndEnd(c, errorMsg)
 }
