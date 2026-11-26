@@ -28,9 +28,8 @@ describe('server latency display without pre-forward wait disclosure', () => {
     for (const page of [adminPage, userPage]) {
       expect(page).toContain("import UsageTable from '@/components/admin/usage/UsageTable.vue'")
       expect(page).toContain('<UsageTable')
+      expect(page).not.toContain('enable-timing-details')
     }
-    expect(adminPage).toContain('enable-timing-details')
-    expect(userPage).not.toContain('enable-timing-details')
   })
 
   for (const locale of ['en', 'zh'] as const) {
