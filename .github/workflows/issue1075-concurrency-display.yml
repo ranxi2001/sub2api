@@ -1,0 +1,59 @@
+name: Account concurrency display
+
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/internal/handler/admin/account_handler.go'
+      - 'backend/internal/handler/admin/account_concurrency_display_test.go'
+      - 'frontend/src/components/account/AccountCapacityCell.vue'
+      - 'frontend/src/components/account/__tests__/AccountCapacityCell.spec.ts'
+      - 'frontend/src/views/admin/AccountsView.vue'
+      - 'frontend/src/views/admin/__tests__/AccountsView.*.spec.ts'
+      - '.github/workflows/issue1075-concurrency-display.yml'
+      - '.github/scripts/issue1075-concurrency-screenshot.mjs'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue1075-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Account display, sorting and summary regressions
+        working-directory: backend
+        run: go test -tags=unit ./internal/handler/admin -run '^TestAccount(ConcurrencyDisplay|CurrentConcurrency|ConcurrencySummary)' -count=1 -v
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NODE_OPTIONS: --max-old-space-size=6144
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Real capacity cell, cached rows and polling lifecycle regressions
+        run: pnpm --dir frontend exec vitest run src/components/account/__tests__/AccountCapacityCell.spec.ts src/views/admin/__tests__/AccountsView.declarationRefresh.spec.ts src/views/admin/__tests__/AccountsView.lite.spec.ts

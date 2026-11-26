@@ -263,6 +263,24 @@ describe('admin AccountsView lite account list', () => {
     wrapper.unmount()
   })
 
+  it('clears a cached concurrency count on explicit null and retains it only for omitted edit fields', async () => {
+    const account = { ...listRow, current_concurrency: 2 }
+    listAccounts.mockResolvedValue({ items: [account], total: 1, page: 1, page_size: 20, pages: 1 })
+    const wrapper = mountView()
+    await flushPromises()
+    const displayed = () => wrapper.findComponent(UpstreamBillingRateCell).props('account').current_concurrency
+    wrapper.findComponent(EditAccountModalStub).vm.$emit('updated', { ...account, current_concurrency: undefined })
+    await flushPromises()
+    expect(displayed()).toBe(2)
+    wrapper.findComponent(EditAccountModalStub).vm.$emit('updated', { ...account, current_concurrency: null })
+    await flushPromises()
+    expect(displayed()).toBeNull()
+    wrapper.findComponent(EditAccountModalStub).vm.$emit('updated', { ...account, current_concurrency: 0 })
+    await flushPromises()
+    expect(displayed()).toBe(0)
+    wrapper.unmount()
+  })
+
   it.each([
     { label: 'name', edit: { name: 'Manual name' }, expected: { notes: 'Remote notes' } },
     { label: 'notes', edit: { notes: 'Manual notes' }, expected: { name: 'Remote name' } },
