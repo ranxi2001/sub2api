@@ -37,7 +37,7 @@ jobs:
         run: go test -tags=unit ./internal/handler/admin -run '^TestAccount(ConcurrencyDisplay|CurrentConcurrency|ConcurrencySummary)' -count=1 -v
 
   frontend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
       NODE_OPTIONS: --max-old-space-size=6144
