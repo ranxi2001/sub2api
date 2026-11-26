@@ -23,11 +23,9 @@ describe('observer own usage API', () => {
   })
   it('keeps detail, filter choice and export requests inside the own-usage surface', async () => {
     const signal = new AbortController().signal
-    await observerUsageAPI.getTiming(42, signal)
     await observerUsageAPI.getErrorDetail(43)
     await observerUsageAPI.filterOptions('account', 'name')
     await observerUsageAPI.list({ user_id: 99, page: 2, page_size: 100, exact_total: true }, { signal })
-    expect(get).toHaveBeenCalledWith('/usage/42/timing', { signal })
     expect(get).toHaveBeenCalledWith('/usage/errors/43')
     expect(get).toHaveBeenCalledWith('/usage/filter-options', { params: { kind: 'account', q: 'name' } })
     expect(get).toHaveBeenLastCalledWith('/usage', { params: { page: 2, page_size: 100, exact_total: true }, signal })

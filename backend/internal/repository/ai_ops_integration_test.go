@@ -158,7 +158,6 @@ func aiOpsFullPGFixture(t *testing.T) aiOpsPGFixture {
 				`DELETE FROM ai_ops_actions WHERE account_id=$1`,
 				`DELETE FROM ai_ops_proposals WHERE account_id=$1`,
 				`DELETE FROM scheduler_outbox WHERE account_id=$1`,
-				`DELETE FROM request_timing_details WHERE usage_log_id IN (SELECT id FROM usage_logs WHERE account_id=$1)`,
 				`DELETE FROM usage_logs WHERE account_id=$1`,
 				`DELETE FROM accounts WHERE id=$1`,
 			} {
@@ -200,12 +199,7 @@ func aiOpsFullPGFixture(t *testing.T) aiOpsPGFixture {
 		for n := 0; n < 12; n++ {
 			stamp := time.Now().UTC().Add(-30 * time.Second)
 			var usageID int64
-			require.NoError(t, integrationDB.QueryRow(`INSERT INTO usage_logs(user_id,api_key_id,account_id,group_id,request_id,model,reasoning_effort,input_tokens,output_tokens,stream,created_at) VALUES($1,$2,$3,$4,$5,$6,'high',100,10,true,$7) RETURNING id`, user.ID, key.ID, account.ID, group.ID, uuid.NewString(), model, stamp).Scan(&usageID))
-			trace := map[string]any{"version": 1, "started_at": stamp.Add(-time.Second).Format(time.RFC3339Nano), "outcome": "success", "status": 200, "body_complete": true, "canceled": false, "truncated": false, "client_disconnect": false, "downstream_error": false, "terminal": "completed", "protocol_decision": map[string]string{"upstream": "http"}}
-			raw, err := json.Marshal(trace)
-			require.NoError(t, err)
-			_, err = integrationDB.Exec(`INSERT INTO request_timing_details(usage_log_id,trace_id,created_at,detail) VALUES($1,$2::uuid,$3,$4::jsonb)`, usageID, uuid.NewString(), stamp, string(raw))
-			require.NoError(t, err)
+			require.NoError(t, integrationDB.QueryRow(`INSERT INTO usage_logs(user_id,api_key_id,account_id,group_id,request_id,model,reasoning_effort,input_tokens,output_tokens,stream,created_at) VALUES($1,$2,$3,$4,$5,$6,'high',100,10,false,$7) RETURNING id`, user.ID, key.ID, account.ID, group.ID, uuid.NewString(), model, stamp).Scan(&usageID))
 		}
 	}
 	p := service.DefaultAIOpsPolicy()

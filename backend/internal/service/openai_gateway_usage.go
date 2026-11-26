@@ -570,8 +570,6 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	}
 	if !s.DurableUsageBillingEnabled() {
 		writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
-	} else {
-		recordDurableUsageTiming(ctx, s.usageLogRepo, usageLog)
 	}
 
 	return nil

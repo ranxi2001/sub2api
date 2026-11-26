@@ -20,7 +20,7 @@ func (r *opsRepository) ReadNetworkSeries(ctx context.Context, start, end time.T
 	return readNetworkSeries(ctx, r.db, start, end)
 }
 func readNetworkSeries(ctx context.Context, db sqlExecutor, start, end time.Time) (*service.OpsNetworkSeries, error) {
-	out := &service.OpsNetworkSeries{Points: []service.OpsNetworkPoint{}, BodyPoints: []service.OpsBodyBytesPoint{}, Scope: "per_process_network_namespace; qdisc=root_egress_read_only_rtnetlink_deltas; body_bytes=global_application_observed; client_socket_and_upload_not_collected"}
+	out := &service.OpsNetworkSeries{Points: []service.OpsNetworkPoint{}, BodyPoints: []service.OpsBodyBytesPoint{}, Scope: "per_process_network_namespace; qdisc=root_egress_read_only_rtnetlink_deltas; body_bytes=not_collected; client_socket_and_upload_not_collected"}
 	rows, err := db.QueryContext(ctx, `SELECT date_trunc('minute',sampled_at),instance_id::text,AVG(egress_mbps),AVG(tcp_retrans_percent),SUM(qdisc_drops),
  CASE WHEN bool_and(egress_status='measured') THEN 'measured' ELSE string_agg(DISTINCT egress_status,',') END,
  CASE WHEN bool_and(tcp_status='measured') THEN 'measured' ELSE string_agg(DISTINCT tcp_status,',') END,
@@ -43,19 +43,5 @@ func readNetworkSeries(ctx context.Context, db sqlExecutor, start, end time.Time
 	if err != nil {
 		return nil, err
 	}
-	rows, err = db.QueryContext(ctx, `SELECT date_trunc('minute',started_at),SUM((detail->>'body_bytes')::bigint),COUNT(*)
- FROM request_connection_traces WHERE source='application' AND started_at >= $1 AND started_at < $2
- AND jsonb_typeof(detail->'body_bytes')='number' GROUP BY 1 ORDER BY 1`, start, end)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var p service.OpsBodyBytesPoint
-		if err = rows.Scan(&p.At, &p.Bytes, &p.Samples); err != nil {
-			return nil, err
-		}
-		out.BodyPoints = append(out.BodyPoints, p)
-	}
-	return out, rows.Err()
+	return out, nil
 }

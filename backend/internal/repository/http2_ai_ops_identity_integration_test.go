@@ -4,7 +4,7 @@ package repository
 
 import (
 	"context"
-	"encoding/json"
+
 	"testing"
 	"time"
 
@@ -35,17 +35,7 @@ func TestHTTP2AIOpsFailureIdentityScopedToAPIKey(t *testing.T) {
 			addUsage := func(key int64, id string) {
 				t.Helper()
 				var usageID int64
-				require.NoError(t, tx.QueryRowContext(ctx, `INSERT INTO usage_logs(user_id,api_key_id,account_id,request_id,model,reasoning_effort,input_tokens,output_tokens,stream,created_at) VALUES($1,$2,$3,$4,$5,'high',100,10,true,$6) RETURNING id`, userID, key, accountID, id, model, stamp).Scan(&usageID))
-				trace, marshalErr := json.Marshal(map[string]any{
-					"version": 1, "started_at": stamp.Add(-time.Second).Format(time.RFC3339Nano),
-					"outcome": "success", "status": 200, "body_complete": true,
-					"canceled": false, "truncated": false, "client_disconnect": false,
-					"downstream_error": false, "terminal": "completed",
-					"protocol_decision": map[string]string{"upstream": "http"},
-				})
-				require.NoError(t, marshalErr)
-				_, err = tx.ExecContext(ctx, `INSERT INTO request_timing_details(usage_log_id,trace_id,created_at,detail) VALUES($1,$2::uuid,$3,$4::jsonb)`, usageID, uuid.NewString(), stamp, string(trace))
-				require.NoError(t, err)
+				require.NoError(t, tx.QueryRowContext(ctx, `INSERT INTO usage_logs(user_id,api_key_id,account_id,request_id,model,reasoning_effort,input_tokens,output_tokens,stream,created_at) VALUES($1,$2,$3,$4,$5,'high',100,10,false,$6) RETURNING id`, userID, key, accountID, id, model, stamp).Scan(&usageID))
 			}
 			addFailure := func(key int64, failureModel string, at time.Time) {
 				t.Helper()

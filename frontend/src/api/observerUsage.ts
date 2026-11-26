@@ -3,7 +3,6 @@ import type { AdminUsageLog, PaginatedResponse } from '@/types'
 import type { AdminUsageQueryParams, AdminUsageStatsResponse } from './admin/usage'
 import type { ModelStatsParams, ModelStatsResponse, DashboardSnapshotV2Params, DashboardSnapshotV2Response } from './admin/dashboard'
 import type { OpsErrorLog, OpsErrorDetail } from './admin/ops'
-import type { RequestTiming } from './admin/usageTiming'
 
 // Identity is supplied by the authenticated backend, never by page filters.
 function ownParams<T extends { user_id?: number | null }>(params: T): Omit<T, 'user_id'> {
@@ -32,10 +31,6 @@ export const observerUsageAPI = {
   },
   async filterOptions(kind: 'api_key' | 'account' | 'group', q = '') {
     const { data } = await apiClient.get<UsageFilterOption[]>('/usage/filter-options', { params: { kind, q } })
-    return data
-  },
-  async getTiming(id: number, signal?: AbortSignal) {
-    const { data } = await apiClient.get<{ traces: RequestTiming[]; retention_days: number }>(`/usage/${id}/timing`, { signal })
     return data
   },
   async listErrors(params: Record<string, unknown>) {

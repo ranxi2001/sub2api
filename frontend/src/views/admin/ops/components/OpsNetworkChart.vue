@@ -3,7 +3,7 @@
     <h3 class="font-semibold">{{ t('latencyObservability.networkTitle') }}</h3>
     <p class="text-xs text-gray-500">{{ t('latencyObservability.networkScope') }}</p>
     <p v-if="error" role="alert">{{ t('latencyObservability.error') }}</p>
-    <p v-else-if="!data?.points.length && !data?.body_points.length">{{ t('latencyObservability.empty') }}</p>
+    <p v-else-if="!data?.points.length">{{ t('latencyObservability.empty') }}</p>
     <label v-if="instances.length" class="text-sm">{{ t('latencyObservability.instance') }}
       <select v-model="selected" class="input ml-2"><option v-for="(id, i) in instances" :key="id" :value="id">{{ i + 1 }} · {{ id.slice(0, 8) }}</option></select>
     </label>
@@ -34,7 +34,6 @@ const curves = computed(() => [
   { key: 'egress', values: points.value.map(p => ({ at: p.at, value: p.egress_mbps, status: p.egress_status })) },
   { key: 'retrans', values: points.value.map(p => ({ at: p.at, value: p.tcp_retrans_percent, status: p.tcp_status })) },
   { key: 'qdisc', values: points.value.map(p => ({ at: p.at, value: p.qdisc_drops, status: p.qdisc_status })) },
-  { key: 'bodyBytes', values: data.value?.body_points.map(p => ({ at: p.at, value: p.bytes, status: `n=${p.samples}` })) ?? [] }
 ])
 const x = (i: number, values: Value[]) => {
   const start = Date.parse(values[0]?.at ?? '')

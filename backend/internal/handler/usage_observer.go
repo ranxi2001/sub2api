@@ -78,36 +78,3 @@ func applyObserverUsageFilters(c *gin.Context, filters *usagestats.UsageLogFilte
 	}
 	return true
 }
-
-// ObserverTiming preserves the ownership boundary before loading diagnostic data.
-func (h *UsageHandler) ObserverTiming(c *gin.Context) {
-	subject, ok := middleware.GetAuthSubjectFromContext(c)
-	if !ok {
-		response.Unauthorized(c, "User not authenticated")
-		return
-	}
-	if !isObserverUsageRequest(c) {
-		response.Forbidden(c, "Observer role required")
-		return
-	}
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil || id <= 0 {
-		response.BadRequest(c, "Invalid usage ID")
-		return
-	}
-	record, err := h.usageService.GetByID(c.Request.Context(), id)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	if record.UserID != subject.UserID {
-		response.NotFound(c, "Usage record not found")
-		return
-	}
-	traces, err := h.usageService.RequestTimings(c.Request.Context(), id)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	response.Success(c, gin.H{"traces": traces, "retention_days": 30, "end_to_end_ms": nil, "end_to_end_status": "not_collected", "end_to_end_source": "none", "client_upload_ms": nil, "client_upload_status": "not_collected"})
-}

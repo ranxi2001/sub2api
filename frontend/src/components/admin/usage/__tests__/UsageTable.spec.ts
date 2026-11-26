@@ -9,11 +9,9 @@ const appStoreMocks = vi.hoisted(() => ({
   showError: vi.fn(),
   cachedPublicSettings: undefined as { usage_show_long_context_badge?: boolean; usage_show_cache_rate?: boolean; usage_show_cache_rate_to_users?: boolean; usage_show_upstream_response_model_to_users?: boolean } | undefined,
 }))
-const timingAPIMocks = vi.hoisted(() => ({ get: vi.fn() }))
 
 vi.mock('@/utils/ipGeoLookup', () => ipGeoMocks)
 vi.mock('@/stores/app', () => ({ useAppStore: () => appStoreMocks }))
-vi.mock('@/api/admin/usageTiming', () => ({ getUsageTiming: timingAPIMocks.get }))
 
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
@@ -1399,50 +1397,6 @@ for (const language of ['en', 'zh'] as const) {
   })
 }
 
-it('shares the timing notice between the usage table and details and preserves the dismissal after reload', async () => {
-  locale = 'en'
-  localStorage.clear()
-  timingAPIMocks.get.mockResolvedValue({ traces: [], retention_days: 30 })
-  let pinia = createPinia()
-  setActivePinia(pinia)
-  const oldNotice = NEW_FEATURE_NOTICES.protocolFeatureSwitches
-  useNewFeatureNoticeStore().dismiss(41, oldNotice)
-  const renderTable = (observer = false) => mount(UsageTable, {
-    props: { data: [{ ...baseImageRow, id: 41, stream: true }], columns: [{ key: 'latency', label: 'Latency' }], enableTimingDetails: true, noticeUserId: 41 },
-    global: {
-      plugins: [pinia],
-      provide: { [observerUsageContext as symbol]: observer },
-      stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true, BaseDialog: { template: '<section><slot /></section>' } },
-    },
-  })
-  const table = renderTable()
-  try {
-    expect(table.findAll('[data-testid="new-feature-badge"]')).toHaveLength(1)
-    await table.get('button[aria-label="requestTiming.title"]').trigger('click')
-    await flushPromises()
-    expect(table.findAll('[data-testid="new-feature-badge"]')).toHaveLength(2)
-    expect(table.findAllComponents(NewFeatureBadge).every(b => b.props('noticeId') === NEW_FEATURE_NOTICES.streamFirstEventTiming)).toBe(true)
-    await table.get('[data-testid="final-content-timing"] [data-testid="new-feature-badge"]').trigger('click')
-    expect(table.findAll('[data-testid="new-feature-badge"]')).toHaveLength(0)
-  } finally {
-    table.unmount()
-  }
-  pinia = createPinia()
-  setActivePinia(pinia)
-  const refreshed = renderTable()
-  const old = mount(NewFeatureBadge, { props: { noticeId: oldNotice, userId: 41 }, global: { plugins: [pinia] } })
-  const next = mount(NewFeatureBadge, { props: { noticeId: 'fixture-next-stream-feature-C', userId: 41 }, global: { plugins: [pinia] } })
-  const observer = renderTable(true)
-  try {
-    expect(refreshed.find('[data-testid="new-feature-badge"]').exists()).toBe(false)
-    expect(old.find('[data-testid="new-feature-badge"]').exists()).toBe(false)
-    expect(next.find('[data-testid="new-feature-badge"]').exists()).toBe(true)
-    expect(observer.findComponent(NewFeatureBadge).exists()).toBe(false)
-  } finally {
-    for (const wrapper of [refreshed, old, next, observer]) wrapper.unmount()
-    localStorage.clear()
-  }
-})
 
 describe('Free Fast customer cost snapshot', () => {
   it.each(['priority', 'ultrafast'])('renders saved Standard costs with an image minimum for %s', async (serviceTier) => {

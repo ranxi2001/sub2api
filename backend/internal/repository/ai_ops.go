@@ -204,20 +204,12 @@ func readAIOpsAccounts(ctx context.Context, tx *sql.Tx, ids []int64) (map[int64]
 // request: partial billable output must not add a second, successful sample.
 var aiOpsEvidenceSQL = `WITH success_candidates AS (
  SELECT u.request_id,u.api_key_id,u.model,COALESCE(u.reasoning_effort,'') AS effort,
- t.detail->'protocol_decision'->>'upstream' AS protocol,
+ CASE WHEN u.openai_ws_mode THEN 'ws' ELSE 'http' END AS protocol,
  CASE WHEN u.input_tokens+u.cache_read_tokens<4000 THEN 'small' WHEN u.input_tokens+u.cache_read_tokens<32000 THEN 'medium' ELSE 'large' END AS input_bucket,
  CASE WHEN u.cache_read_tokens>0 THEN 'cached' ELSE 'uncached' END AS cache_bucket,
  CASE WHEN u.output_tokens<1000 THEN 'small' WHEN u.output_tokens<8000 THEN 'medium' ELSE 'large' END AS output_bucket
- FROM usage_logs u JOIN LATERAL (
- SELECT (array_agg(detail))[1] AS detail FROM (SELECT detail FROM request_timing_details WHERE usage_log_id=u.id LIMIT 2) bounded HAVING COUNT(*)=1
- ) t ON true
- WHERE u.account_id=$1 AND u.created_at>=$2 AND u.created_at<$3
- AND t.detail->>'version'='1' AND t.detail->>'outcome'='success' AND t.detail->>'status'='200'
- AND t.detail->>'body_complete'='true' AND t.detail->>'canceled'='false' AND t.detail->>'truncated'='false'
- AND t.detail->>'client_disconnect'='false' AND t.detail->>'downstream_error'='false'
- AND (jsonb_path_query_first_tz(jsonb_build_object('at',regexp_replace(regexp_replace(t.detail->>'started_at','Z$','+00:00'),'(\.[0-9]{6})[0-9]+([+-])','\1\2')),'$.at.datetime()','{}',true)#>>'{}')::timestamptz >= $2
- AND (jsonb_path_query_first_tz(jsonb_build_object('at',regexp_replace(regexp_replace(t.detail->>'started_at','Z$','+00:00'),'(\.[0-9]{6})[0-9]+([+-])','\1\2')),'$.at.datetime()','{}',true)#>>'{}')::timestamptz < $3
- AND (NOT u.stream OR t.detail->>'terminal'='completed')
+ FROM usage_logs u
+ WHERE u.account_id=$1 AND u.created_at>=$2 AND u.created_at<$3 AND NOT u.stream
  AND COALESCE(u.image_count,0)=0 AND COALESCE(u.image_output_tokens,0)=0 AND COALESCE(u.billing_mode,'token') NOT IN ('image','video')
 ), failures AS (
  SELECT DISTINCT ON (api_key_id,COALESCE(NULLIF(request_id,''),'error:'||id::text))

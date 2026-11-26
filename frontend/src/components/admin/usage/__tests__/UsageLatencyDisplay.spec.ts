@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import UsageTable from '../UsageTable.vue'
-import UsageTimingDialog from '../UsageTimingDialog.vue'
 import enDashboard from '@/i18n/locales/en/dashboard'
 import zhDashboard from '@/i18n/locales/zh/dashboard'
 import enTiming from '@/i18n/locales/en/requestTiming'
@@ -12,7 +11,6 @@ import userPage from '@/views/user/UsageView.vue?raw'
 import { serverLatency } from './fixtures/serverLatency'
 
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({}) }))
-vi.mock('@/api/admin/usageTiming', () => ({ getUsageTiming: vi.fn(async () => ({ traces: [], retention_days: 30 })) }))
 
 const wrappers: ReturnType<typeof mount>[] = []
 afterEach(() => { wrappers.splice(0).forEach(wrapper => wrapper.unmount()); document.body.innerHTML = '' })
@@ -78,22 +76,5 @@ describe('server latency display without pre-forward wait disclosure', () => {
       expect(empty.text()).toContain(locales[locale].empty.noData)
     })
 
-    it(`uses concise server titles and no wait summary in the ${locale} timing dialog`, async () => {
-      const wrapper = mount(UsageTimingDialog, {
-        props: { record: serverLatency }, attachTo: document.body, global: global(locale),
-      })
-      wrappers.push(wrapper)
-      await flushPromises()
-      const body = document.body.querySelector('.modal-body')!
-      const labels = Array.from(body.querySelectorAll('.rounded-xl.border.p-4 > .text-sm')).map(node => node.textContent)
-      expect(labels).toContain(locale === 'zh' ? '服务端首字' : 'Server TTFT')
-      expect(labels).toContain(locale === 'zh' ? '服务端总耗时' : 'Server total')
-      expect(labels.join(' ')).not.toMatch(/pre-forward|转发前/)
-      expect(body.textContent).toContain('2.02s')
-      expect(body.textContent).toContain('18.95s')
-      expect(body.textContent).not.toContain('97ms')
-      expect(body.textContent).toContain(locales[locale].requestTiming.empty)
-      expect(body.textContent).toContain(locales[locale].requestTiming.missing)
-    })
   }
 })

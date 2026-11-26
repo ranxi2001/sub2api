@@ -40,48 +40,9 @@ func (r *usageLogRepository) ReadPriorityLatencySeries(ctx context.Context, quer
    AND group_id IS NOT DISTINCT FROM $4::bigint
    AND (actual_cost>0 OR total_cost>0 OR account_stats_cost>0
     OR input_tokens+output_tokens+cache_read_tokens+cache_creation_tokens>0)
- ), traces AS (
-  SELECT b.*, d.detail, a.attempt
-  FROM base_usage b
-  LEFT JOIN LATERAL (
-   SELECT (array_agg(detail))[1] AS detail FROM (
-    SELECT detail FROM request_timing_details WHERE usage_log_id=b.id LIMIT 2
-   ) bounded_traces HAVING COUNT(*)=1
-  ) d ON true
-  LEFT JOIN LATERAL (
-   SELECT value AS attempt FROM jsonb_array_elements(
-    CASE WHEN jsonb_typeof(d.detail->'attempts')='array' THEN d.detail->'attempts' ELSE '[]'::jsonb END
-   ) WITH ORDINALITY a(value,n)
-   WHERE value->>'kind'='http' AND n=jsonb_array_length(
-    CASE WHEN jsonb_typeof(d.detail->'attempts')='array' THEN d.detail->'attempts' ELSE '[]'::jsonb END
-   ) LIMIT 1
-  ) a ON true
- ), timings AS (
-  SELECT *,
-   CASE WHEN jsonb_typeof(attempt->'start_ms')='number'
-     AND length((attempt->'start_ms')::text)<32
-     THEN (attempt->>'start_ms')::double precision END AS attempt_start_ms,
-   CASE WHEN jsonb_typeof(attempt->'events'->'first_semantic')='number'
-     AND length((attempt->'events'->'first_semantic')::text)<32
-     THEN (attempt->'events'->>'first_semantic')::double precision END AS semantic_ms,
-   CASE WHEN jsonb_typeof(detail->'events'->'first_write')='number'
-     AND length((detail->'events'->'first_write')::text)<32
-     THEN (detail->'events'->>'first_write')::double precision END AS first_write_ms
-  FROM traces
  ), measured AS (
-  SELECT *, CASE WHEN $7='legacy_forward' THEN first_token_ms::double precision
-   WHEN detail->>'version'='1' AND detail->>'outcome'='success'
-    AND detail->>'terminal'='completed' AND detail->>'status'='200'
-    AND detail->>'truncated'='false' AND detail->>'canceled'='false'
-    AND detail->>'client_disconnect'='false' AND detail->>'downstream_error'='false'
-    AND detail->>'body_complete'='true'
-    AND attempt->>'account_id'=account_id::text
-    AND attempt->>'status'='200' AND COALESCE(attempt->>'error','')=''
-    AND attempt->>'terminal'='completed'
-    AND attempt_start_ms>=0 AND semantic_ms>attempt_start_ms
-    AND (detail->'events'->'first_write' IS NULL OR first_write_ms>=semantic_ms)
-    THEN semantic_ms-attempt_start_ms END AS latency_ms
-  FROM timings
+  SELECT *, CASE WHEN $7='legacy_forward' THEN first_token_ms::double precision END AS latency_ms
+  FROM base_usage
  ), usage_buckets AS (
   SELECT account_id,
    date_bin(make_interval(mins => $5), created_at, TIMESTAMPTZ '2026-01-01') AS bucket,

@@ -54,7 +54,6 @@ func observerUsageRouter(r *observerUsageRepo, role string) *gin.Engine {
 	router.GET("/usage/dashboard/models", h.DashboardModels)
 	router.GET("/usage/dashboard/snapshot-v2", h.DashboardSnapshotV2)
 	router.GET("/usage/filter-options", h.ObserverFilterOptions)
-	router.GET("/usage/:id/timing", h.ObserverTiming)
 	router.GET("/usage/:id", h.GetByID)
 	return router
 }
@@ -151,15 +150,7 @@ func TestObserverProcurementSnapshotFollowsExistingAccountCostScope(t *testing.T
 func TestObserverOwnUsageFiltersAndTiming(t *testing.T) {
 	r := &observerUsageRepo{record: &service.UsageLog{ID: 1, UserID: 999}}
 	router := observerUsageRouter(r, service.RoleObserver)
-	w := usageGET(router, "/usage/1/timing?user_id=999")
-	require.Equal(t, 404, w.Code)
-	require.Zero(t, r.timingCalls)
-	r.record.UserID = 42
-	w = usageGET(router, "/usage/1/timing")
-	require.Equal(t, 200, w.Code)
-	require.Contains(t, w.Body.String(), `"end_to_end_ms":null`)
-	require.Contains(t, w.Body.String(), `"end_to_end_source":"none"`)
-	require.Equal(t, 1, r.timingCalls)
+	require.Equal(t, 404, usageGET(router, "/usage/1/timing").Code)
 	require.Equal(t, 200, usageGET(router, "/usage/filter-options?kind=account&user_id=999&include_errors=true").Code)
 	require.Equal(t, int64(42), r.optionUserID)
 	require.False(t, r.includeErrors)
@@ -179,7 +170,6 @@ func TestObserverOwnUsageFiltersAndTiming(t *testing.T) {
 	}
 	for _, role := range []string{service.RoleUser, service.RoleAdmin, ""} {
 		denied := observerUsageRouter(r, role)
-		require.Equal(t, 403, usageGET(denied, "/usage/1/timing").Code)
 		require.Equal(t, 403, usageGET(denied, "/usage/filter-options?kind=group").Code)
 	}
 }
