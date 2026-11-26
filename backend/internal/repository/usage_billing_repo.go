@@ -37,37 +37,81 @@ func (r *usageBillingRepository) Apply(ctx context.Context, cmd *service.UsageBi
 		return nil, service.ErrUsageBillingRequestIDRequired
 	}
 
+	result, _, err := r.applyWithUsage(ctx, cmd, nil)
+	return result, err
+}
+
+// ApplyUsage settles a gateway request through the upstream deduplication tables.
+// The canonical usage row is committed with the debit so synchronous receipts
+// and retries observe the same amount, including after a lost response.
+func (r *usageBillingRepository) ApplyUsage(ctx context.Context, cmd *service.UsageBillingCommand, usage *service.UsageLog) (*service.UsageBillingRecovery, error) {
+	if cmd == nil || usage == nil || r == nil || r.db == nil {
+		return nil, service.ErrUsageBillingRequestConflict
+	}
+	cmd.Normalize()
+	if cmd.RequestID == "" || cmd.RequestID != usage.RequestID || cmd.APIKeyID != usage.APIKeyID ||
+		cmd.AccountID != usage.AccountID || cmd.UserID != usage.UserID {
+		return nil, service.ErrUsageBillingRequestConflict
+	}
+	release, err := r.admission.acquireSQL(ctx, r.db.Stats().MaxOpenConnections)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	result, canonical, err := r.applyWithUsage(ctx, cmd, usage)
+	if err != nil {
+		return nil, err
+	}
+	out := &service.UsageBillingRecovery{Result: *result, Settled: canonical != nil}
+	if canonical != nil {
+		out.Event = service.UsageBillingEvent{Command: *cmd, Usage: *canonical}
+	}
+	return out, nil
+}
+
+func (r *usageBillingRepository) applyWithUsage(ctx context.Context, cmd *service.UsageBillingCommand, usage *service.UsageLog) (*service.UsageBillingApplyResult, *service.UsageLog, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	defer func() {
-		if tx != nil {
-			_ = tx.Rollback()
-		}
-	}()
-
+	defer func() { _ = tx.Rollback() }()
 	applied, err := r.claimUsageBillingKey(ctx, tx, cmd)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	result := &service.UsageBillingApplyResult{Applied: applied}
 	if !applied {
-		return &service.UsageBillingApplyResult{Applied: false}, nil
+		if usage == nil {
+			return result, nil, nil
+		}
+		canonical, err := scanUsageLog(tx.QueryRowContext(ctx, "SELECT "+usageLogSelectColumns+" FROM usage_logs WHERE request_id=$1 AND api_key_id=$2 AND user_id=$3", cmd.RequestID, cmd.APIKeyID, cmd.UserID))
+		if errors.Is(err, sql.ErrNoRows) {
+			return result, nil, nil
+		}
+		return result, canonical, err
 	}
-
-	result := &service.UsageBillingApplyResult{Applied: true}
 	if err := r.applyUsageBillingEffects(ctx, tx, cmd, result); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := insertUsageBillingQuote(ctx, tx, cmd); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-
+	if usage != nil {
+		canonical := *usage
+		logs := usageLogRepository{sql: tx}
+		inserted, err := logs.createSingle(ctx, tx, &canonical)
+		if err != nil {
+			return nil, nil, err
+		}
+		if !inserted {
+			return nil, nil, service.ErrUsageBillingRequestConflict
+		}
+		usage = &canonical
+	}
 	if err := tx.Commit(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	tx = nil
-	return result, nil
+	return result, usage, nil
 }
 
 func insertUsageBillingQuote(ctx context.Context, tx *sql.Tx, cmd *service.UsageBillingCommand) error {
