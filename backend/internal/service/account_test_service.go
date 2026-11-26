@@ -751,7 +751,7 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
 		}
 
-		return s.sendErrorAndEnd(c, errMsg)
+		return s.sendHTTPErrorAndEnd(c, resp.StatusCode, errMsg)
 	}
 
 	// Process SSE stream
@@ -823,7 +823,7 @@ func (s *AccountTestService) testClaudeVertexServiceAccountConnection(c *gin.Con
 		if resp.StatusCode == http.StatusForbidden && !isOAuth429Execution(ctx) {
 			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
 		}
-		return s.sendErrorAndEnd(c, errMsg)
+		return s.sendHTTPErrorAndEnd(c, resp.StatusCode, errMsg)
 	}
 
 	return s.processClaudeStream(accountTestResponseContext(c, resp), resp.Body)
@@ -912,7 +912,7 @@ func (s *AccountTestService) testBedrockAccountConnection(c *gin.Context, ctx co
 	body, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
-		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
+		return s.sendHTTPErrorAndEnd(c, resp.StatusCode, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
 	}
 
 	// Bedrock non-streaming response is standard Claude JSON, extract the text
@@ -1172,7 +1172,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 
 	if resp.StatusCode != http.StatusOK {
 		if isCialloRequest(ctx) || isOAuth429Execution(ctx) {
-			return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d:", resp.StatusCode))
+			return s.sendHTTPErrorAndEnd(c, resp.StatusCode, fmt.Sprintf("API returned %d:", resp.StatusCode))
 		}
 		body, _ := io.ReadAll(resp.Body)
 		body = redactAgentIdentitySensitiveBodyForAccount(ctx, s.accountRepo, credentialAccount, body)
@@ -1205,7 +1205,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 				_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
 			}
 		}
-		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
+		return s.sendHTTPErrorAndEnd(c, resp.StatusCode, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
 	}
 
 	// Process SSE stream
@@ -1248,6 +1248,9 @@ func (s *AccountTestService) testResponsesGatewayAccountConnection(c *gin.Contex
 		// A single-account test has no other account to fail over to.
 		var failover *UpstreamFailoverError
 		if errors.As(err, &failover) && failover.ClientMessage != "" {
+			if failover.Reason == ExcelBPSRateLimitedReason && failover.StatusCode == http.StatusTooManyRequests {
+				return s.sendHTTPErrorAndEnd(c, failover.StatusCode, failover.ClientMessage)
+			}
 			return s.sendErrorAndEnd(c, failover.ClientMessage)
 		}
 		var local *excelBPSForwardError
@@ -1632,7 +1635,7 @@ func (s *AccountTestService) testGrokResponsesConnection(c *gin.Context, ctx con
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return s.sendErrorAndEnd(c, fmt.Sprintf("Grok Responses API returned %d: %s", resp.StatusCode, string(body)))
+		return s.sendHTTPErrorAndEnd(c, resp.StatusCode, fmt.Sprintf("Grok Responses API returned %d: %s", resp.StatusCode, string(body)))
 	}
 
 	return s.processOpenAIStream(accountTestResponseContext(c, resp), resp.Body)
@@ -1726,7 +1729,7 @@ func (s *AccountTestService) testGrokImageGeneration(c *gin.Context, ctx context
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to read Grok image response: %s", err.Error()))
 	}
 	if resp.StatusCode != http.StatusOK {
-		return s.sendErrorAndEnd(c, formatGrokImagesAPIError(resp.StatusCode, body, hasSourceImage))
+		return s.sendHTTPErrorAndEnd(c, resp.StatusCode, formatGrokImagesAPIError(resp.StatusCode, body, hasSourceImage))
 	}
 
 	var result struct {
@@ -1813,7 +1816,7 @@ func (s *AccountTestService) testGrokVideoGeneration(c *gin.Context, ctx context
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to read Grok video response: %s", err.Error()))
 	}
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted && resp.StatusCode != http.StatusCreated {
-		return s.sendErrorAndEnd(c, fmt.Sprintf("Grok videos API returned %d: %s", resp.StatusCode, string(body)))
+		return s.sendHTTPErrorAndEnd(c, resp.StatusCode, fmt.Sprintf("Grok videos API returned %d: %s", resp.StatusCode, string(body)))
 	}
 
 	requestID := strings.TrimSpace(gjson.GetBytes(body, "request_id").String())
@@ -1849,7 +1852,7 @@ func (s *AccountTestService) testGrokVideoGeneration(c *gin.Context, ctx context
 		statusBody, _ := io.ReadAll(statusResp.Body)
 		_ = statusResp.Body.Close()
 		if statusResp.StatusCode != http.StatusOK && statusResp.StatusCode != http.StatusAccepted {
-			return s.sendErrorAndEnd(c, fmt.Sprintf("Grok video status returned %d: %s", statusResp.StatusCode, string(statusBody)))
+			return s.sendHTTPErrorAndEnd(c, statusResp.StatusCode, fmt.Sprintf("Grok video status returned %d: %s", statusResp.StatusCode, string(statusBody)))
 		}
 		st := strings.ToLower(strings.TrimSpace(gjson.GetBytes(statusBody, "status").String()))
 		progress := gjson.GetBytes(statusBody, "progress")
@@ -1913,7 +1916,7 @@ func (s *AccountTestService) emitGrokVideoResult(c *gin.Context, ctx context.Con
 			s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
 			return nil
 		}
-		return s.sendErrorAndEnd(c, fmt.Sprintf("Grok video content returned %d: %s", resp.StatusCode, truncateString(string(body), 300)))
+		return s.sendHTTPErrorAndEnd(c, resp.StatusCode, fmt.Sprintf("Grok video content returned %d: %s", resp.StatusCode, truncateString(string(body), 300)))
 	}
 	ct := resp.Header.Get("Content-Type")
 	if ct == "" || strings.HasPrefix(ct, "application/octet-stream") {
@@ -1980,7 +1983,7 @@ User query:
 
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return s.sendErrorAndEnd(c, fmt.Sprintf("standalone web_search probe returned %d: %s", resp.StatusCode, string(body)))
+		return s.sendHTTPErrorAndEnd(c, resp.StatusCode, fmt.Sprintf("standalone web_search probe returned %d: %s", resp.StatusCode, string(body)))
 	}
 
 	// Normalize like gateway extractGrokWebSearchSources (URL-only sources are enough for connectivity).
@@ -2152,7 +2155,7 @@ func (s *AccountTestService) testGrokSTT(c *gin.Context, ctx context.Context, ac
 	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		// 4xx on synthetic audio still proves the STT endpoint is wired; report clearly.
-		return s.sendErrorAndEnd(c, fmt.Sprintf("Grok STT returned %d: %s", resp.StatusCode, string(respBody)))
+		return s.sendHTTPErrorAndEnd(c, resp.StatusCode, fmt.Sprintf("Grok STT returned %d: %s", resp.StatusCode, string(respBody)))
 	}
 	text := strings.TrimSpace(gjson.GetBytes(respBody, "text").String())
 	if text == "" {
@@ -2543,7 +2546,7 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 				_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
 			}
 		}
-		return s.sendErrorAndEnd(c, fmt.Sprintf("Chat Completions API (/v1/chat/completions) returned %d: %s", resp.StatusCode, string(body)))
+		return s.sendHTTPErrorAndEnd(c, resp.StatusCode, fmt.Sprintf("Chat Completions API (/v1/chat/completions) returned %d: %s", resp.StatusCode, string(body)))
 	}
 
 	return s.processOpenAIChatCompletionsStream(accountTestResponseContext(c, resp), resp.Body, account)
@@ -2710,7 +2713,7 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 				_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
 			}
 		}
-		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
+		return s.sendHTTPErrorAndEnd(c, resp.StatusCode, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
 	}
 
 	if !compactionFound {
@@ -2841,7 +2844,7 @@ func (s *AccountTestService) testGeminiAccountConnection(c *gin.Context, account
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
+		return s.sendHTTPErrorAndEnd(c, resp.StatusCode, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
 	}
 
 	// Process SSE stream
@@ -3573,7 +3576,7 @@ func (s *AccountTestService) testOpenAIImageAPIKey(c *gin.Context, ctx context.C
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
+		return s.sendHTTPErrorAndEnd(c, resp.StatusCode, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
 	}
 
 	// Parse {"data": [{"b64_json": "...", "revised_prompt": "..."}]}

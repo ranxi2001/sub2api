@@ -243,6 +243,15 @@ func (r *scheduledTestPlanRepository) finalizeQualityBatchRun(ctx context.Contex
 	// rules carry a persistent episode that can safely outlive collection.
 	run.Apply = run.Apply && (run.Trigger != "upstream_5xx" || run.Plan.PelicanConfig.Quality.Action == service.QualityActionRemoveModel)
 	outcome := service.EvaluateQualityBatch(run, peers)
+	if _, err = tx.ExecContext(ctx, "SAVEPOINT quality_batch_classification"); err != nil {
+		return err
+	}
+	if run.Apply {
+		outcome, _, err = markQuality429Tx(ctx, tx, run.Plan, run.Until, run.Results, outcome)
+		if err != nil {
+			return err
+		}
+	}
 	if _, err = tx.ExecContext(ctx, `SAVEPOINT quality_batch_action`); err != nil {
 		return err
 	}
@@ -257,6 +266,14 @@ func (r *scheduledTestPlanRepository) finalizeQualityBatchRun(ctx context.Contex
 	if !commitAction {
 		if _, err = tx.ExecContext(ctx, `ROLLBACK TO SAVEPOINT quality_batch_action`); err != nil {
 			return err
+		}
+	}
+	if action == "stale_run" || action == "account_deleted" {
+		if _, err = tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT quality_batch_classification"); err != nil {
+			return err
+		}
+		for _, result := range run.Results {
+			result.PelicanConfig.Quality429Streak = 0
 		}
 	}
 	deleted, err := completeQualityOAuth401RoundTx(ctx, tx, run.Plan, run.Until, run.OAuth401)

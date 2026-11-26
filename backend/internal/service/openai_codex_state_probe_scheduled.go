@@ -50,6 +50,13 @@ func (s *AccountTestService) runOpenAICodexStateProbeScheduled(ctx context.Conte
 
 	snapshot := *cfg
 	snapshot.ModelID = probe.Model
+	snapshot.QualityHTTPStatus, snapshot.Quality429Streak = 0, 0
+	if cfg.Quality != nil && ctx.Err() == nil && probe.Failure == OpenAICodexStateFailureRateLimited {
+		snapshot.QualityHTTPStatus = probe.ContinueStatus
+		if snapshot.QualityHTTPStatus == 0 && probe.MintStatus >= 400 {
+			snapshot.QualityHTTPStatus = probe.MintStatus
+		}
+	}
 	result := &ScheduledTestResult{
 		Status:        "failed",
 		ResponseText:  openAICodexStateScheduledSummary(probe),

@@ -1,4 +1,6 @@
 export default {
+  "rateLimitPending": "HTTP 429 · {n}/3 consecutive rounds",
+  "rateLimitDegraded": "HTTP 429 · counted as degraded under the three-round policy",
   "ciallo": {
     "ruleHint": "Run ciallo on the configured models, effort and schedule. The built-in judge matches a complete reply starting with a recognized greeting and emoticon. Outcomes feed the configured action. Select observation only to collect results without applying an action.",
     "title": "Ciallo test",

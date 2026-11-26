@@ -9,6 +9,7 @@ export async function runQualityPlan(id: number): Promise<void> {
 }
 
 export interface QualityOperation extends ScheduledTestResult {
+  quality_429_streak?: number
   account_id: number
   account_name: string
   passed_count: number

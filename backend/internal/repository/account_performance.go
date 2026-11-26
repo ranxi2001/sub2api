@@ -94,7 +94,7 @@ WITH source AS MATERIALIZED (
  FROM successful GROUP BY account_id
 ), rounds AS (
  SELECT p.account_id,p.id,r.quality_round_id,
- bool_or(r.quality_judgment->>'verdict'='incorrect' AND r.status='failed' AND r.error_message IN ('answer_mismatch','state_degraded')
+ bool_or(r.pelican_config @> '{"quality_429_streak":3,"quality_http_status":429}' OR r.quality_judgment->>'verdict'='incorrect' AND r.status='failed' AND r.error_message IN ('answer_mismatch','state_degraded')
     AND (COALESCE(r.pelican_config->>'question_kind','')<>'random_reasoning'
       OR r.pelican_config->'quality_batch'->>'decision'='peer_passed')) AS failed,
  bool_and(COALESCE(r.quality_judgment->>'verdict'='correct' AND r.status='success'

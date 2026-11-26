@@ -99,8 +99,9 @@ func (r *accountRepository) evaluateOAuthDegradation(ctx context.Context, id int
 		err = tx.QueryRowContext(ctx, `SELECT id FROM scheduled_test_plans WHERE id=$1 AND account_id=$2
  AND enabled AND updated_at=$3 AND running_until=$4 AND running_until>clock_timestamp()
  AND EXISTS (SELECT 1 FROM scheduled_test_results WHERE plan_id=$1 AND quality_round_id=$5
- AND pelican_config->>'model_id'=$6 AND status='failed' AND error_message='answer_mismatch'
- AND quality_judgment->>'verdict'='incorrect')
+ AND pelican_config->>'model_id'=$6 AND status='failed' AND
+ ((error_message='answer_mismatch' AND quality_judgment->>'verdict'='incorrect') OR
+ (pelican_config @> '{"quality_429_streak":3,"quality_http_status":429}' AND pelican_config->'quality'->>'action'<>'observe_only')))
  FOR SHARE`, review.PlanID, id, review.PlanUpdatedAt, review.LeaseUntil, review.LeaseUntil.Format(time.RFC3339Nano), review.ModelID).Scan(&planID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
