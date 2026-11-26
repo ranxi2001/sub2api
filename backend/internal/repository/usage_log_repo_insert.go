@@ -1228,12 +1228,7 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 }
 
 func execUsageLogInsertNoResult(ctx context.Context, sqlq sqlExecutor, prepared usageLogInsertPrepared) error {
-	_, err := execUsageLogInsertResult(ctx, sqlq, prepared)
-	return err
-}
-
-func execUsageLogInsertResult(ctx context.Context, sqlq sqlExecutor, prepared usageLogInsertPrepared) (sql.Result, error) {
-	return sqlq.ExecContext(ctx, `
+	_, err := sqlq.ExecContext(ctx, `
 		INSERT INTO usage_logs (
 			user_id,
 			api_key_id,
@@ -1314,6 +1309,7 @@ func execUsageLogInsertResult(ctx context.Context, sqlq sqlExecutor, prepared us
 		)
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 	`, prepared.args...)
+	return err
 }
 
 func prepareUsageLogInsert(log *service.UsageLog) usageLogInsertPrepared {

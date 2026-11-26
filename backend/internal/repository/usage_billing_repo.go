@@ -97,17 +97,16 @@ func (r *usageBillingRepository) applyWithUsage(ctx context.Context, cmd *servic
 		return nil, nil, err
 	}
 	if usage != nil {
-		inserted, err := execUsageLogInsertResult(ctx, tx, prepareUsageLogInsert(usage))
+		canonical := *usage
+		logs := usageLogRepository{sql: tx}
+		inserted, err := logs.createSingle(ctx, tx, &canonical)
 		if err != nil {
 			return nil, nil, err
 		}
-		rows, err := inserted.RowsAffected()
-		if err != nil {
-			return nil, nil, err
-		}
-		if rows != 1 {
+		if !inserted {
 			return nil, nil, service.ErrUsageBillingRequestConflict
 		}
+		usage = &canonical
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, nil, err
