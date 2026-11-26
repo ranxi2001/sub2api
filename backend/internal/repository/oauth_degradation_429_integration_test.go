@@ -28,7 +28,7 @@ func TestOAuthDegradationCandyReviewUsesCurrentRule(t *testing.T) {
 	revision, err := repo.ReviewOAuthDegradationCandy(ctx, a.ID, review)
 	require.NoError(t, err)
 	require.Equal(t, c.Revision, revision)
-	review.Incorrect, review.Revision = 2, "superseded-revision"
+	review.RateLimited, review.Revision = 2, "superseded-revision"
 	_, err = repo.ReviewOAuthDegradationCandy(ctx, a.ID, review)
 	require.NoError(t, err)
 	before, err := repo.GetByID(ctx, a.ID)
@@ -41,7 +41,7 @@ func TestOAuthDegradationCandyReviewUsesCurrentRule(t *testing.T) {
 	}
 	var count int
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT count(*) FROM account_auto_config_events WHERE account_id=$1 AND kind='degradation_applied'
- AND details->'degradation'->>'trigger_reason'=$2 AND details->'degradation'->'candy_review'->>'incorrect'='2'`, a.ID, service.OAuthDegradationCandyRetested).Scan(&count))
+ AND details->'degradation'->>'trigger_reason'=$2 AND details->'degradation'->'candy_review' @> '{"incorrect":0,"rate_limited":2}'`, a.ID, service.OAuthDegradationCandyRetested).Scan(&count))
 	require.Equal(t, 1, count)
 }
 
