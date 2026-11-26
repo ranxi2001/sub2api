@@ -139,7 +139,7 @@ function details(event: AutoConfigEvent) {
       return [t('autoConfig.logs.oauth429Reasons.' + e.trigger_reason), ...actions].join(' · ')
     }
     if (e.trigger_reason === 'probe_and_candy_retests' && e.candy_review) {
-      actions.unshift(t('autoConfig.degradation.candyEvent', { model: e.candy_review.model_id, wrong: e.candy_review.incorrect }))
+      actions.unshift(t('autoConfig.degradation.candyEvent', { model: e.candy_review.model_id, wrong: e.candy_review.incorrect, rateLimited: e.candy_review.rate_limited ?? 0 }))
     }
     if ((e.trigger_reason === 'upstream_429' || e.trigger_reason === 'probe_and_upstream_429') && e.upstream_error) {
       const http = e.upstream_error
