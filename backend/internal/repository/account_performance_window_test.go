@@ -33,7 +33,7 @@ func TestAccountPerformanceWindowChangesApplyToReadsAndEvaluation(t *testing.T) 
 			}
 			mock.ExpectQuery("SELECT value FROM settings").WithArgs(service.SettingKeyAccountPerformanceWindowMinutes).WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(window.value))
 			since := now.Add(-time.Duration(window.minutes) * time.Minute)
-			mock.ExpectQuery("WITH source").WithArgs("{7}", since, now).WillReturnRows(performanceRow(cfg))
+			mock.ExpectQuery("WITH usage").WithArgs("{7}", since, now).WillReturnRows(performanceRow(cfg))
 			if evaluate {
 				mock.ExpectRollback()
 				require.NoError(t, repo.Evaluate(context.Background(), 7, now))

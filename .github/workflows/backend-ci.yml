@@ -333,7 +333,6 @@ jobs:
       - name: Offline multi-host contract checks
         run: python -m unittest discover -s deploy/tests -p 'test_multihost_preflight.py'
       - run: python -m unittest discover -s deploy/tests -p 'test_migrate_reauth_managed.py'
-      - run: python -m unittest discover -s deploy/connection-diagnostics -p 'test_collect.py'
 
   prism-adapter:
     needs: changes

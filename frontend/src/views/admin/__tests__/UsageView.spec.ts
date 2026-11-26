@@ -241,37 +241,6 @@ describe('admin UsageView route filters', () => {
     vi.useRealTimers()
   })
 
-  it('mounts the latency panel only after selecting its tab and passes supported filters', async () => {
-    const wrapper = mountRouteFilteredUsageView()
-    await flushPromises()
-    expect(wrapper.find('[data-test="latency-tab"]').exists()).toBe(false)
-
-    const vm = wrapper.vm as any
-    vm.filters.model = 'gpt-5.6-sol'
-    vm.filters.user_id = 42
-    vm.filters.api_key_id = 8
-    vm.filters.account_id = 7
-    vm.filters.group_id = 3
-    await wrapper.vm.$nextTick()
-
-    const latencyTab = wrapper.findAll('[data-testid="usage-detail-tab"]').find(tab => tab.text() === 'latencyObservability.title')!
-    await latencyTab.trigger('click')
-    await flushPromises()
-
-    expect(wrapper.find('[data-test="latency-tab"]').exists()).toBe(true)
-    expect(wrapper.findComponent(LatencyObservabilityPanelStub).props()).toMatchObject({
-      startDate: expect.any(String),
-      endDate: expect.any(String),
-      model: 'gpt-5.6-sol',
-      userId: 42,
-      apiKeyId: 8,
-      accountId: 7,
-      groupId: 3,
-      flat: true,
-      hideTitle: true,
-    })
-    wrapper.unmount()
-  })
 
   it('gives the RPM/TPM card the range its stats were loaded for, not a newer pending range', async () => {
     const wrapper = mountRouteFilteredUsageView()
@@ -903,13 +872,10 @@ describe('admin UsageView ranking tab', () => {
     expect(wrapper.find('[data-test="ranking"]').exists()).toBe(false)
 
     const tabs = wrapper.findAll('[data-testid="usage-detail-tab"]')
-    expect(tabs).toHaveLength(5)
+    expect(tabs).toHaveLength(3)
     expect(wrapper.find('[data-test="connection-tab"]').exists()).toBe(false)
-    await tabs[2].trigger('click')
-    await flushPromises()
-    expect(wrapper.find('[data-test="connection-tab"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="ranking"]').exists()).toBe(false)
-    await tabs[3].trigger('click')
+    await tabs[2].trigger('click')
     await flushPromises()
     expect(wrapper.find('[data-test="ranking"]').exists()).toBe(true)
 
@@ -1260,7 +1226,6 @@ describe('admin UsageView rolling 24 hour requests', () => {
     expect(list.mock.lastCall?.[0]).toMatchObject({ ...range, page: 2 })
     await (wrapper.vm as any).exportToExcel()
     expect(exportList.mock.lastCall?.[0]).toMatchObject(range)
-    expect((wrapper.vm as any).connectionFilters).toMatchObject({ start_time: range.start_date, end_time: range.end_date })
     ;(wrapper.vm as any).switchTab('errors')
     await flushPromises()
     expect(listErrorLogs.mock.lastCall?.[0]).toMatchObject({ start_time: range.start_date, end_time: range.end_date })

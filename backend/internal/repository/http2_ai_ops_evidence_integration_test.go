@@ -5,7 +5,7 @@ package repository
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+
 	"testing"
 	"time"
 
@@ -39,18 +39,7 @@ func TestHTTP2AIOpsEvidenceIncludesCommittedTransportFailure(t *testing.T) {
 	addUsage := func(requestID, outcome string, usageKeyID int64) int64 {
 		t.Helper()
 		var usageID int64
-		require.NoError(t, tx.QueryRowContext(ctx, `INSERT INTO usage_logs(user_id,api_key_id,account_id,request_id,model,reasoning_effort,input_tokens,output_tokens,stream,created_at) VALUES($1,$2,$3,$4,$5,'high',100,10,true,$6) RETURNING id`, userID, usageKeyID, accountID, requestID, model, stamp).Scan(&usageID))
-		trace := map[string]any{
-			"version": 1, "started_at": stamp.Add(-time.Second).Format(time.RFC3339Nano),
-			"outcome": outcome, "status": 200, "body_complete": outcome == "success",
-			"canceled": false, "truncated": outcome != "success", "client_disconnect": false,
-			"downstream_error": false, "terminal": "completed",
-			"protocol_decision": map[string]string{"upstream": "http"},
-		}
-		raw, marshalErr := json.Marshal(trace)
-		require.NoError(t, marshalErr)
-		_, insertErr := tx.ExecContext(ctx, `INSERT INTO request_timing_details(usage_log_id,trace_id,created_at,detail) VALUES($1,$2::uuid,$3,$4::jsonb)`, usageID, uuid.NewString(), stamp, string(raw))
-		require.NoError(t, insertErr)
+		require.NoError(t, tx.QueryRowContext(ctx, `INSERT INTO usage_logs(user_id,api_key_id,account_id,request_id,model,reasoning_effort,input_tokens,output_tokens,stream,created_at) VALUES($1,$2,$3,$4,$5,'high',100,10,false,$6) RETURNING id`, userID, usageKeyID, accountID, requestID, model, stamp).Scan(&usageID))
 		return usageID
 	}
 	addError := func(requestID, phase, errorType, owner, source string, status int, upstream any, business, countTokens bool, account int64, at time.Time, errorModel string) int64 {
@@ -88,11 +77,6 @@ func TestHTTP2AIOpsEvidenceIncludesCommittedTransportFailure(t *testing.T) {
 
 	addError(resetRequestID, "network", "transport_error", "provider", "upstream_transport", 200, nil, false, false, accountID, stamp.Add(time.Second), model)
 	partialUsageID := addUsage("client:"+resetRequestID+"-client", "failed", keyID) // billable partial output is not success
-	assertResetPopulation()
-	// Even a conflicting completed usage trace cannot count the same failed
-	// request again as a successful sample in the error-rate denominator.
-	_, err = tx.ExecContext(ctx, `UPDATE request_timing_details SET detail=detail||'{"outcome":"success","body_complete":true,"truncated":false}'::jsonb WHERE usage_log_id=$1`, partialUsageID)
-	require.NoError(t, err)
 	assertResetPopulation()
 	for _, correlatedID := range []string{"local:" + resetRequestID, resetRequestID} {
 		_, err = tx.ExecContext(ctx, `UPDATE usage_logs SET request_id=$1 WHERE id=$2`, correlatedID, partialUsageID)

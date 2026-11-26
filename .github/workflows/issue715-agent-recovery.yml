@@ -197,9 +197,13 @@ jobs:
           bash .github/scripts/historical-ws-projection-types.sh "$original"
           python3 -m unittest discover -s .github/scripts -p 'test_openai_usage_red_compat.py' -v
           python3 .github/scripts/prepare-openai-usage-red-compat.py . "$original"
+          # The historical billing leaf calls a retired diagnostic hook.
+          compatibility=backend/internal/service/issue715_retired_timing_compat.go
+          printf '%s\n' 'package service' 'import "context"' 'func recordDurableUsageTiming(context.Context, UsageLogRepository, *UsageLog) {}' > "$compatibility"
           set +e
           (cd backend && go test -tags=unit ./internal/handler -run '^TestIssue715HTTPResumesSameTaskAcrossTwoTurns$' -count=1 -v -timeout=10m) > "$RUNNER_TEMP/issue715-recovery-red.log" 2>&1
           result=$?
+          rm "$compatibility"
           set -e
           cat "$RUNNER_TEMP/issue715-recovery-red.log"
           python3 .github/scripts/assert-readable-continuation.py --clean-log "$RUNNER_TEMP/issue715-recovery-red.log"

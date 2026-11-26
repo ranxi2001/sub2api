@@ -9,18 +9,9 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
-	"github.com/google/uuid"
+
 	"github.com/stretchr/testify/require"
 )
-
-func addPriorityAnalysisTiming(t *testing.T, db sqlExecutor, row *service.UsageLog) {
-	t.Helper()
-	_, err := db.ExecContext(context.Background(), `INSERT INTO request_timing_details(usage_log_id,trace_id,created_at,detail)
-VALUES($1,$2::uuid,$3,jsonb_build_object('version',1,'started_at',$4::text,'outcome','success','status',200,
-'body_complete',true,'canceled',false,'truncated',false,'client_disconnect',false,'downstream_error',false,'terminal','completed'))`,
-		row.ID, uuid.NewString(), row.CreatedAt, row.CreatedAt.Format(time.RFC3339Nano))
-	require.NoError(t, err)
-}
 
 func TestPriorityAnalysisPostgresScopeWindowAndCompletePool(t *testing.T) {
 	ctx := context.Background()
@@ -51,7 +42,6 @@ func TestPriorityAnalysisPostgresScopeWindowAndCompletePool(t *testing.T) {
 		row := &service.UsageLog{UserID: user.ID, APIKeyID: key.ID, AccountID: first.ID, RequestID: fmt.Sprintf("analysis-%d", time.Now().UnixNano()), Model: model, RequestedModel: model, GroupID: g, Stream: true, FirstTokenMs: &ms, DurationMs: &duration, InputTokens: 10, OutputTokens: 10, ActualCost: 1, TotalCost: 2, CreatedAt: at}
 		_, err := usage.Create(ctx, row)
 		require.NoError(t, err)
-		addPriorityAnalysisTiming(t, tx, row)
 	}
 	add("non-latest-model", &group.ID, now.Add(-time.Minute), 100)
 	add("non-latest-model", &group.ID, now.Add(-30*time.Minute), 1000)
@@ -78,7 +68,7 @@ func TestPriorityAnalysisPostgresScopeWindowAndCompletePool(t *testing.T) {
 		return service.PrioritySchedulingScore{}
 	}
 	require.Equal(t, 1, find(got).ProfitSamples)
-	require.Equal(t, 4, find(got).Samples, "account performance includes all models and groups in its global window")
+	require.Equal(t, 4, find(got).Samples)
 	require.NotNil(t, find(got).SelectedTTFTMs)
 	require.InDelta(t, 5274.5, *find(got).SelectedTTFTMs, .01)
 	q.Minutes = 60
@@ -134,7 +124,6 @@ func TestPriorityAnalysisPostgresPublicAliasAndRouteQuality(t *testing.T) {
 	row := &service.UsageLog{UserID: user.ID, APIKeyID: key.ID, AccountID: account.ID, RequestID: fmt.Sprintf("analysis-alias-%d", time.Now().UnixNano()), Model: "route-model", RequestedModel: "public-alias", GroupID: &group.ID, Stream: true, FirstTokenMs: &ms, DurationMs: &duration, InputTokens: 1, OutputTokens: 2, CreatedAt: now}
 	_, err := usage.Create(ctx, row)
 	require.NoError(t, err)
-	addPriorityAnalysisTiming(t, tx, row)
 	rows, err := tx.QueryContext(ctx, `INSERT INTO scheduled_test_plans(account_id,model_id,cron_expression,enabled,pelican_config,updated_at) VALUES($1,'route-model','*/30 * * * *',true,'{"quality":{},"parallel_count":1}',NOW()-INTERVAL '1 hour') RETURNING id`, account.ID)
 	require.NoError(t, err)
 	var plan int64

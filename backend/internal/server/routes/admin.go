@@ -352,7 +352,6 @@ func registerOpsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		// Dashboard (vNext - raw path for MVP)
 		ops.GET("/dashboard/snapshot-v2", h.Admin.Ops.GetDashboardSnapshotV2)
 		ops.GET("/dashboard/overview", h.Admin.Ops.GetDashboardOverview)
-		ops.GET("/dashboard/latency-report", h.Admin.Ops.LatencyReport)
 		ops.GET("/dashboard/network-series", h.Admin.Ops.NetworkSeries)
 		ops.GET("/dashboard/throughput-trend", h.Admin.Ops.GetDashboardThroughputTrend)
 		ops.GET("/dashboard/latency-histogram", h.Admin.Ops.GetDashboardLatencyHistogram)
@@ -903,10 +902,6 @@ func registerUsageRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	{
 		usage.GET("", h.Admin.Usage.List)
 		usage.GET("/stats", h.Admin.Usage.Stats)
-		usage.GET("/latency-report", h.Admin.Usage.LatencyReport)
-		usage.GET("/connections", h.Admin.Usage.Connections)
-		usage.POST("/connections/edge", h.Admin.Usage.ImportEdgeConnections)
-		usage.GET("/:id/timing", h.Admin.Usage.Timing)
 		usage.GET("/search-users", h.Admin.Usage.SearchUsers)
 		usage.GET("/search-api-keys", h.Admin.Usage.SearchAPIKeys)
 		usage.GET("/cleanup-tasks", h.Admin.Usage.ListCleanupTasks)

@@ -86,7 +86,7 @@ func TestPriorityLatencySeriesUsesSnapshotMeasurementAndPercentile(t *testing.T)
 	var query map[string]any
 	require.NoError(t, json.Unmarshal(raw, &query))
 	require.Equal(t, float64(50), query["LatencyPercentile"])
-	require.Equal(t, "attributed_v1", query["LatencyMeasurement"])
+	require.Equal(t, "legacy_forward", query["LatencyMeasurement"])
 }
 
 func TestPriorityRecomputeDoesNotTreatHistoryErrorAsSuccess(t *testing.T) {

@@ -69,7 +69,7 @@ func TestAccountPerformanceUpstreamErrorEvaluateUsesDisplayedEvidence(t *testing
 			read := func() {
 				mock.ExpectQuery("SELECT value FROM settings").WithArgs(service.SettingKeyAccountPerformanceWindowMinutes).
 					WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow("15"))
-				mock.ExpectQuery("WITH source").WithArgs("{7}", since, now).WillReturnRows(performanceRow(cfg))
+				mock.ExpectQuery("WITH usage").WithArgs("{7}", since, now).WillReturnRows(performanceRow(cfg))
 			}
 			read()
 			displayed, err := repo.Read(context.Background(), []int64{7}, now)
@@ -131,7 +131,7 @@ func TestAccountPerformanceUpstreamErrorEvaluateMissingAndBoundarySamples(t *tes
 			mock.ExpectQuery("SELECT config,revision,paused,pause_generation.*FOR UPDATE SKIP LOCKED").
 				WillReturnRows(sqlmock.NewRows([]string{"config", "revision", "paused", "pause_generation"}).AddRow(string(raw), 1, false, 0))
 			mock.ExpectQuery("SELECT value FROM settings").WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow("15"))
-			mock.ExpectQuery("WITH source").WillReturnRows(performanceRow(cfg))
+			mock.ExpectQuery("WITH usage").WillReturnRows(performanceRow(cfg))
 			mock.ExpectRollback()
 			require.NoError(t, (&accountPerformanceRepository{db: db}).Evaluate(context.Background(), 7, now))
 			require.NoError(t, mock.ExpectationsWereMet(), "no pause, audit or automatic release is allowed")

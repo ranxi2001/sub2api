@@ -55,19 +55,8 @@ func (r *opsRepository) GetAlertPlatformStats(ctx context.Context, filter servic
  ORDER BY e.id,k.priority,u.id
 ), observations AS (
  SELECT u.id AS business_id, u.platform, 1 AS priority, u.id AS source_id,
- CASE
-   WHEN t.n>1 THEN 'unknown'
-   WHEN t.detail->>'client_disconnect'='true' OR t.detail->>'outcome'='client_disconnected' THEN 'exclude'
-   WHEN t.detail->>'terminal' IN ('failed','incomplete') OR t.detail->>'outcome'='failed' THEN 'failed'
-   WHEN t.detail->>'downstream_error'='true' THEN 'failed'
-   WHEN t.detail->>'canceled'='true' THEN 'exclude'
-   WHEN u.stream THEN CASE WHEN t.detail->>'terminal'='completed' AND t.detail->>'outcome'='success' THEN 'success' ELSE 'unknown' END
-   ELSE 'success'
- END AS outcome
- FROM usage_rows u LEFT JOIN LATERAL (
-   SELECT COUNT(*) AS n, (array_agg(d.detail))[1] AS detail FROM
-   (SELECT detail FROM request_timing_details WHERE usage_log_id=u.id LIMIT 2) d
- ) t ON true
+ CASE WHEN u.stream THEN 'unknown' ELSE 'success' END AS outcome
+ FROM usage_rows u
  UNION ALL
  SELECT COALESCE(m.usage_id,-e.id), COALESCE(NULLIF(m.platform,''),NULLIF(a.platform,''),e.platform),
    CASE WHEN e.final THEN 2 ELSE 0 END,e.id,

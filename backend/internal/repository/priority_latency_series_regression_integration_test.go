@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
-	"github.com/google/uuid"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -50,7 +50,7 @@ func TestPriorityLatencySeriesUsesConfiguredMeasurementAndPercentile(t *testing.
 	account := mustCreateAccount(t, client, &service.Account{Name: "measured", Platform: service.PlatformOpenAI})
 	delays := []int{1000, 2000, 10000, 20000, 40000}
 	now := time.Now().UTC().Truncate(time.Hour).Add(-time.Hour)
-	for i, delay := range delays {
+	for i := range delays {
 		legacy := 99000
 		usage := &service.UsageLog{
 			UserID: user.ID, APIKeyID: key.ID, AccountID: account.ID,
@@ -59,19 +59,6 @@ func TestPriorityLatencySeriesUsesConfiguredMeasurementAndPercentile(t *testing.
 			CreatedAt: now.Add(-time.Duration(len(delays)-i) * time.Minute),
 		}
 		_, err := repo.Create(ctx, usage)
-		require.NoError(t, err)
-		detail, err := json.Marshal(map[string]any{
-			"version": 1, "status": "200", "outcome": "success", "terminal": "completed",
-			"truncated": false, "canceled": false, "client_disconnect": false,
-			"downstream_error": false, "body_complete": true,
-			"attempts": []any{map[string]any{
-				"kind": "http", "account_id": account.ID, "start_ms": 1000,
-				"status": "200", "error": "", "terminal": "completed",
-				"events": map[string]any{"first_semantic": 1000 + delay},
-			}},
-		})
-		require.NoError(t, err)
-		_, err = tx.ExecContext(ctx, `INSERT INTO request_timing_details(usage_log_id,trace_id,detail) VALUES($1,$2,$3)`, usage.ID, uuid.NewString(), string(detail))
 		require.NoError(t, err)
 	}
 
@@ -91,7 +78,5 @@ func TestPriorityLatencySeriesUsesConfiguredMeasurementAndPercentile(t *testing.
 	require.NoError(t, json.Unmarshal(encoded, &bucket))
 	selected, exists := bucket["selected_ttft_ms"]
 	require.True(t, exists, "latency series must expose the configured percentile")
-	selectedTTFTMs, ok := selected.(float64)
-	require.True(t, ok, "selected latency must be numeric for a measured bucket")
-	require.InDelta(t, 10000, selectedTTFTMs, .01, "legacy latency endpoint retains its configured percentile independently of account performance scoring")
+	require.Equal(t, float64(99000), selected, "historical preferences use the recorded first token time")
 }

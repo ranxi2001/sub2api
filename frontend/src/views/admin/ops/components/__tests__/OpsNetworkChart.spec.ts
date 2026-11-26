@@ -15,7 +15,6 @@ it('Issue603 renders real minute samples, measured zero and unsupported qdisc wi
   expect(w.get('[data-testid="network-egress"]').text()).toContain('0 · measured')
   expect(w.get('[data-testid="network-qdisc"]').text()).toContain('Not collected · unsupported_unprivileged_collector')
   expect(w.get('[data-testid="network-qdisc"] path').attributes('d')).toBe('')
-  expect(w.get('[data-testid="network-bodyBytes"]').text()).toContain('1048577')
   w.unmount()
 })
 

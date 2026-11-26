@@ -222,7 +222,6 @@ func (h *UsageHandler) List(c *gin.Context) {
 		return
 	}
 
-	h.usageService.EnrichContentTiming(c.Request.Context(), records)
 	response.Paginated(c, adminUsageLogResponses(c, records), result.Total, page, pageSize)
 }
 
@@ -662,19 +661,4 @@ func (h *UsageHandler) CancelCleanupTask(c *gin.Context) {
 	}
 	logger.LegacyPrintf("handler.admin.usage", "[UsageCleanup] 清理任务已取消: task=%d operator=%d", taskID, subject.UserID)
 	response.Success(c, gin.H{"id": taskID, "status": service.UsageCleanupStatusCanceled})
-}
-
-// Timing returns bounded diagnostic traces only after the usage record lookup.
-func (h *UsageHandler) Timing(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil || id <= 0 {
-		response.BadRequest(c, "Invalid usage ID")
-		return
-	}
-	traces, err := h.usageService.RequestTimings(c.Request.Context(), id)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	response.Success(c, gin.H{"traces": traces, "retention_days": 30, "end_to_end_ms": nil, "end_to_end_status": "not_collected", "end_to_end_source": "none", "client_upload_ms": nil, "client_upload_status": "not_collected"})
 }

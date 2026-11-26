@@ -32,7 +32,7 @@ func TestAccountPerformanceQueryBoundsAndMissingSamples(t *testing.T) {
 	}()
 	now := time.Date(2026, 11, 2, 1, 0, 0, 0, time.UTC)
 	mock.ExpectQuery("SELECT value FROM settings").WithArgs(service.SettingKeyAccountPerformanceWindowMinutes).WillReturnRows(sqlmock.NewRows([]string{"value"}))
-	mock.ExpectQuery("WITH source").WithArgs("{7}", now.Add(-60*time.Minute), now).WillReturnRows(performanceRow(service.PerformanceConfig{}))
+	mock.ExpectQuery("WITH usage").WithArgs("{7}", now.Add(-60*time.Minute), now).WillReturnRows(performanceRow(service.PerformanceConfig{}))
 	got, err := readAccountPerformance(context.Background(), db, []int64{7}, now)
 	require.NoError(t, err)
 	require.Nil(t, got[7].AvgCachePercent)
@@ -43,10 +43,9 @@ func TestAccountPerformanceQueryBoundsAndMissingSamples(t *testing.T) {
 	require.Equal(t, now.Add(-60*time.Minute), got[7].WindowStart)
 	require.NoError(t, mock.ExpectationsWereMet())
 	// SQL contract only; these assertions do not claim PostgreSQL execution.
-	require.Contains(t, performanceMetricsSQL, "u.created_at >= $2")
-	require.Contains(t, performanceMetricsSQL, "\u0027Z$\u0027,\u0027+00:00\u0027")
-	require.Contains(t, performanceMetricsSQL, "LIMIT 2")
-	require.Contains(t, performanceMetricsSQL, "event_at >= $2 AND event_at <= $3")
+	require.Contains(t, performanceMetricsSQL, "FROM usage_logs")
+	require.Contains(t, performanceMetricsSQL, "created_at >= $2 AND created_at <= $3")
+	require.Contains(t, performanceMetricsSQL, "first_token_ms BETWEEN 0 AND duration_ms")
 	require.Contains(t, performanceMetricsSQL, "MIN(r.started_at)>=$2")
 	require.Contains(t, performanceMetricsSQL, "NULLIF(COUNT(*) FILTER(WHERE passed OR failed),0)")
 }
@@ -71,7 +70,7 @@ func TestAccountPerformanceEvaluateNoSamplesAndHeldLock(t *testing.T) {
 			} else {
 				lock.WillReturnRows(sqlmock.NewRows([]string{"config", "revision", "paused", "pause_generation"}).AddRow(string(raw), 1, false, 0))
 				mock.ExpectQuery("SELECT value FROM settings").WillReturnRows(sqlmock.NewRows([]string{"value"}))
-				mock.ExpectQuery("WITH source").WillReturnRows(performanceRow(cfg))
+				mock.ExpectQuery("WITH usage").WillReturnRows(performanceRow(cfg))
 			}
 			mock.ExpectRollback()
 			require.NoError(t, repo.Evaluate(context.Background(), 7, time.Now()))
@@ -95,7 +94,7 @@ func TestAccountPerformanceEvaluatePauseAuditAtomicAndLatched(t *testing.T) {
 	mock.ExpectQuery("SELECT id FROM accounts.*FOR SHARE").WithArgs(int64(7)).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(7))
 	mock.ExpectQuery("SELECT config,revision,paused,pause_generation.*FOR UPDATE SKIP LOCKED").WithArgs(int64(7)).WillReturnRows(sqlmock.NewRows([]string{"config", "revision", "paused", "pause_generation"}).AddRow(string(raw), 1, false, 0))
 	mock.ExpectQuery("SELECT value FROM settings").WillReturnRows(sqlmock.NewRows([]string{"value"}))
-	mock.ExpectQuery("WITH source").WillReturnRows(sqlmock.NewRows(performanceColumns).AddRow(7, 5, 2, nil, 0, nil, 0, string(raw), 1, false, 0, nil, "", nil, 0))
+	mock.ExpectQuery("WITH usage").WillReturnRows(sqlmock.NewRows(performanceColumns).AddRow(7, 5, 2, nil, 0, nil, 0, string(raw), 1, false, 0, nil, "", nil, 0))
 	mock.ExpectExec("UPDATE account_performance_monitors SET paused=true").WithArgs(int64(7), now, "tps").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("INSERT INTO account_performance_events").WithArgs(int64(7), "pause", int64(0), int64(1), int64(1), sqlmock.AnyArg()).WillReturnError(errors.New("audit unavailable"))
 	mock.ExpectRollback()

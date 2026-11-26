@@ -49,49 +49,24 @@ func (r *accountPerformanceRepository) Stop() {
 	}
 }
 
-// Strict, completed instrumented requests only. Missing traces/ambiguous traces,
-// unsuccessful streams, media and unknown timings remain NULL, never zero.
-// The trace start is the actual event time, not the asynchronous usage insert.
-// Normalize Z and nanoseconds before jsonpath .datetime(): PostgreSQL 14-16
-// needs an explicit UTC offset; all supported versions accept microseconds.
+// Score billed text usage in the selected window. Quality rounds use their
+// own completion evidence; a latency sample does not establish stream success.
 const performanceMetricsSQL = `
-WITH source AS MATERIALIZED (
- SELECT u.account_id,u.output_tokens,u.duration_ms,u.first_token_ms,u.stream,
-  u.input_tokens,u.cache_read_tokens,u.cache_creation_tokens,
-  (jsonb_path_query_first_tz(jsonb_build_object('at',
-   regexp_replace(regexp_replace(d.started_at,'Z$','+00:00'),
-    '(\.[0-9]{6})[0-9]+([+-])','\1\2')),
-   '$.at.datetime()', '{}',true)#>>'{}')::timestamptz AS event_at
- FROM usage_logs u
- JOIN LATERAL (
-  SELECT detail, count(*) OVER () AS traces FROM (
-   SELECT detail FROM request_timing_details WHERE usage_log_id=u.id LIMIT 2
-  ) bounded_traces
- ) t ON t.traces=1
- -- Decode the potentially TOASTed JSON once instead of once per predicate.
- CROSS JOIN LATERAL jsonb_to_record(CASE WHEN jsonb_typeof(t.detail)='object' THEN t.detail ELSE '{}'::jsonb END) AS d(
-  version text,started_at text,outcome text,status text,body_complete text,
-  canceled text,truncated text,client_disconnect text,downstream_error text,terminal text)
- WHERE u.account_id=ANY($1) AND u.created_at >= $2
- AND COALESCE(u.image_count,0)=0 AND COALESCE(u.image_output_tokens,0)=0
- AND COALESCE(u.billing_mode,'token') NOT IN ('image','video')
- AND d.version='1' AND d.outcome='success' AND d.status='200' AND d.body_complete='true'
- AND d.canceled='false' AND d.truncated='false'
- AND d.client_disconnect='false' AND d.downstream_error='false'
- AND (NOT u.stream OR d.terminal='completed')
-), successful AS (
- SELECT * FROM source WHERE event_at >= $2 AND event_at <= $3
-), usage AS (
+WITH usage AS (
  SELECT account_id,
- AVG(output_tokens*1000.0/NULLIF(duration_ms,0)) FILTER(WHERE output_tokens>=2 AND duration_ms>0) AS tps,
- COUNT(*) FILTER(WHERE output_tokens>=2 AND duration_ms>0) AS tps_n,
- AVG(first_token_ms) FILTER(WHERE stream AND first_token_ms>=0 AND first_token_ms<=duration_ms AND output_tokens>=2) AS ttft,
- COUNT(*) FILTER(WHERE stream AND first_token_ms>=0 AND first_token_ms<=duration_ms AND output_tokens>=2) AS ttft_n,
- AVG(100.0*cache_read_tokens/NULLIF(input_tokens::numeric+cache_read_tokens+cache_creation_tokens,0))
-  FILTER(WHERE input_tokens>=0 AND cache_read_tokens>=0 AND cache_creation_tokens>=0) AS cache_percent,
- COUNT(*) FILTER(WHERE input_tokens>=0 AND cache_read_tokens>=0 AND cache_creation_tokens>=0
-  AND input_tokens::numeric+cache_read_tokens+cache_creation_tokens>0) AS cache_n
- FROM successful GROUP BY account_id
+   AVG(output_tokens * 1000.0 / NULLIF(duration_ms, 0)) FILTER (WHERE output_tokens >= 2 AND duration_ms > 0) AS tps,
+   COUNT(*) FILTER (WHERE output_tokens >= 2 AND duration_ms > 0) AS tps_n,
+   AVG(first_token_ms) FILTER (WHERE stream AND output_tokens >= 2 AND first_token_ms BETWEEN 0 AND duration_ms) AS ttft,
+   COUNT(*) FILTER (WHERE stream AND output_tokens >= 2 AND first_token_ms BETWEEN 0 AND duration_ms) AS ttft_n,
+   AVG(100.0 * cache_read_tokens / NULLIF(input_tokens::numeric + cache_read_tokens + cache_creation_tokens, 0))
+     FILTER (WHERE input_tokens >= 0 AND cache_read_tokens >= 0 AND cache_creation_tokens >= 0) AS cache_percent,
+   COUNT(*) FILTER (WHERE input_tokens >= 0 AND cache_read_tokens >= 0 AND cache_creation_tokens >= 0
+     AND input_tokens::numeric + cache_read_tokens + cache_creation_tokens > 0) AS cache_n
+ FROM usage_logs
+ WHERE account_id = ANY($1) AND created_at >= $2 AND created_at <= $3
+   AND COALESCE(image_count, 0) = 0 AND COALESCE(image_output_tokens, 0) = 0
+   AND COALESCE(billing_mode, 'token') NOT IN ('image','video')
+ GROUP BY account_id
 ), rounds AS (
  SELECT p.account_id,p.id,r.quality_round_id,
  bool_or(r.pelican_config @> '{"quality_429_streak":3,"quality_http_status":429}' OR r.quality_judgment->>'verdict'='incorrect' AND r.status='failed' AND r.error_message IN ('answer_mismatch','state_degraded')

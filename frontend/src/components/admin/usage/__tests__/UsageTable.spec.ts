@@ -9,20 +9,13 @@ const appStoreMocks = vi.hoisted(() => ({
   showError: vi.fn(),
   cachedPublicSettings: undefined as { usage_show_long_context_badge?: boolean; usage_show_cache_rate?: boolean; usage_show_cache_rate_to_users?: boolean; usage_show_upstream_response_model_to_users?: boolean } | undefined,
 }))
-const timingAPIMocks = vi.hoisted(() => ({ get: vi.fn() }))
 
 vi.mock('@/utils/ipGeoLookup', () => ipGeoMocks)
 vi.mock('@/stores/app', () => ({ useAppStore: () => appStoreMocks }))
-vi.mock('@/api/admin/usageTiming', () => ({ getUsageTiming: timingAPIMocks.get }))
 
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
-import { createPinia, setActivePinia } from 'pinia'
+import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
-import NewFeatureBadge from '@/components/common/NewFeatureBadge.vue'
-import { NEW_FEATURE_NOTICES } from '@/constants/newFeatureNotices'
-import { useNewFeatureNoticeStore } from '@/stores/newFeatureNotices'
-import { observerUsageContext } from '../observerUsageContext'
 
 import en from '@/i18n/locales/en/admin/resources'
 import zh from '@/i18n/locales/zh/admin/resources'
@@ -1314,12 +1307,12 @@ it('keeps queue-inclusive admin latency compact and explains server boundaries o
     },
   }
   const wrapper = mount(UsageTable, {
-    props: { data: [row], loading: false, enableTimingDetails: true, columns: [{ key: 'latency', label: 'Latency' }] },
+    props: { data: [row], loading: false, columns: [{ key: 'latency', label: 'Latency' }] },
     global: { stubs: { DataTable: DataTableStubWithLatency, EmptyState: true, Icon: true, Teleport: true } },
   })
 
-  expect(wrapper.text()).toContain('First token')
-  expect(wrapper.text()).toContain('Total')
+  expect(wrapper.text()).toContain('Server TTFT')
+  expect(wrapper.text()).toContain('Server total')
   expect(wrapper.text()).toContain('32.00s')
   expect(wrapper.text()).toContain('50.00s')
   expect(wrapper.text()).not.toContain('incl. pre-forward wait')
@@ -1377,7 +1370,7 @@ for (const language of ['en', 'zh'] as const) {
     const wrapper = mount(UsageTable, {
       props: { data: [{ ...baseImageRow, stream: true, first_token_ms: 300,
         content_timing: { sse_event_first_ms: 100, semantic_first_ms: 300, visible_text_first_ms: 800 } }],
-        loading: false, enableTimingDetails: true, columns: [{ key: 'latency', label: 'Latency' }] },
+        loading: false, columns: [{ key: 'latency', label: 'Latency' }] },
       global: { stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } },
     })
     expect(wrapper.find('[data-testid="latency-content-timing"]').exists()).toBe(false)
@@ -1392,57 +1385,12 @@ for (const language of ['en', 'zh'] as const) {
     await wrapper.setProps({ data: [{ ...baseImageRow, stream: false, first_token_ms: 300 }] })
     expect(wrapper.find('[data-testid="latency-content-timing"]').exists()).toBe(false)
     await wrapper.setProps({ data: [{ ...baseImageRow, stream: true, first_token_ms: 300 }] })
-    await wrapper.setProps({ enableTimingDetails: false })
     expect(wrapper.find('[data-testid="latency-content-timing"]').exists()).toBe(false)
     wrapper.unmount()
     locale = 'en'
   })
 }
 
-it('shares the timing notice between the usage table and details and preserves the dismissal after reload', async () => {
-  locale = 'en'
-  localStorage.clear()
-  timingAPIMocks.get.mockResolvedValue({ traces: [], retention_days: 30 })
-  let pinia = createPinia()
-  setActivePinia(pinia)
-  const oldNotice = NEW_FEATURE_NOTICES.protocolFeatureSwitches
-  useNewFeatureNoticeStore().dismiss(41, oldNotice)
-  const renderTable = (observer = false) => mount(UsageTable, {
-    props: { data: [{ ...baseImageRow, id: 41, stream: true }], columns: [{ key: 'latency', label: 'Latency' }], enableTimingDetails: true, noticeUserId: 41 },
-    global: {
-      plugins: [pinia],
-      provide: { [observerUsageContext as symbol]: observer },
-      stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true, BaseDialog: { template: '<section><slot /></section>' } },
-    },
-  })
-  const table = renderTable()
-  try {
-    expect(table.findAll('[data-testid="new-feature-badge"]')).toHaveLength(1)
-    await table.get('button[aria-label="requestTiming.title"]').trigger('click')
-    await flushPromises()
-    expect(table.findAll('[data-testid="new-feature-badge"]')).toHaveLength(2)
-    expect(table.findAllComponents(NewFeatureBadge).every(b => b.props('noticeId') === NEW_FEATURE_NOTICES.streamFirstEventTiming)).toBe(true)
-    await table.get('[data-testid="final-content-timing"] [data-testid="new-feature-badge"]').trigger('click')
-    expect(table.findAll('[data-testid="new-feature-badge"]')).toHaveLength(0)
-  } finally {
-    table.unmount()
-  }
-  pinia = createPinia()
-  setActivePinia(pinia)
-  const refreshed = renderTable()
-  const old = mount(NewFeatureBadge, { props: { noticeId: oldNotice, userId: 41 }, global: { plugins: [pinia] } })
-  const next = mount(NewFeatureBadge, { props: { noticeId: 'fixture-next-stream-feature-C', userId: 41 }, global: { plugins: [pinia] } })
-  const observer = renderTable(true)
-  try {
-    expect(refreshed.find('[data-testid="new-feature-badge"]').exists()).toBe(false)
-    expect(old.find('[data-testid="new-feature-badge"]').exists()).toBe(false)
-    expect(next.find('[data-testid="new-feature-badge"]').exists()).toBe(true)
-    expect(observer.findComponent(NewFeatureBadge).exists()).toBe(false)
-  } finally {
-    for (const wrapper of [refreshed, old, next, observer]) wrapper.unmount()
-    localStorage.clear()
-  }
-})
 
 describe('Free Fast customer cost snapshot', () => {
   it.each(['priority', 'ultrafast'])('renders saved Standard costs with an image minimum for %s', async (serviceTier) => {

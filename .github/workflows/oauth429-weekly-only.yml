@@ -87,6 +87,8 @@ jobs:
           # zero-value field after proving every original production blob above.
           bash .github/scripts/oauth429-weekly-only-bridge-compat.sh "$RUNNER_TEMP/oauth429-red" "$BASELINE" | tee evidence/bridge-compat.txt
           python3 .github/scripts/prepare-openai-usage-red-compat.py "$RUNNER_TEMP/oauth429-red" "$BASELINE" | tee evidence/usage-compat.json
+          # The pinned billing source predates retirement of the request diagnostic hook.
+          printf '%s\n' 'package service' 'import "context"' 'func recordDurableUsageTiming(context.Context, UsageLogRepository, *UsageLog) {}' > "$RUNNER_TEMP/oauth429-red/backend/internal/service/retired_timing_compat.go"
           # This later, unrelated regression requires the candidate-only WS
           # stream-phase helper. Exclude it only from this disposable old-source
           # checkout; GREEN explicitly runs all six tests with candidate sources.
@@ -125,6 +127,7 @@ jobs:
           BLOBS
           git -C "$RUNNER_TEMP/oauth429-cache-red" diff --exit-code -- '*_test.go'
           git -C "$RUNNER_TEMP/oauth429-cache-red" diff --stat > evidence/cache-red-diff.txt
+          cp "$RUNNER_TEMP/oauth429-red/backend/internal/service/retired_timing_compat.go" "$RUNNER_TEMP/oauth429-cache-red/backend/internal/service/retired_timing_compat.go"
           set +e
           (cd "$RUNNER_TEMP/oauth429-cache-red/backend" && go test -json -tags=unit ./internal/service -run '^TestOAuth429WeeklyOnly(SequentialCache|NonweeklyPersistenceRetainsEvidence)$' -count=1 -timeout=10m) > evidence/red-cache.jsonl 2> evidence/red-cache.stderr
           result=$?

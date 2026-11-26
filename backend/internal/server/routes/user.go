@@ -138,7 +138,6 @@ func RegisterUserRoutes(
 			usage.GET("/errors", h.Usage.ListErrors)
 			usage.GET("/errors/:id", h.Usage.GetErrorDetail)
 			usage.GET("/:id", h.Usage.GetByID)
-			usage.GET("/:id/timing", h.Usage.ObserverTiming)
 			usage.GET("/filter-options", h.Usage.ObserverFilterOptions)
 			usage.GET("/stats", h.Usage.Stats)
 			// User dashboard endpoints

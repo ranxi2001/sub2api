@@ -207,7 +207,6 @@ jobs:
         run: >-
           pnpm test:run
           src/components/admin/usage/__tests__/UsageTable.spec.ts
-          src/components/admin/usage/__tests__/UsageTimingDialog.spec.ts
           src/components/common/__tests__/NewFeatureBadge.spec.ts
           src/views/admin/__tests__/UsageView.spec.ts
           src/__tests__/integration/usage-reasoning-effort.spec.ts

@@ -73,7 +73,7 @@ func TestAccountPerformanceUpstreamWriterReader(t *testing.T) {
 			for _, id := range []int64{7, 8, 9} {
 				rows.AddRow(id, nil, 0, nil, 0, nil, 0, "{}", 0, false, 0, nil, "", nil, 0)
 			}
-			mock.ExpectQuery("WITH source").WithArgs("{7,8,9}", since, now).WillReturnRows(rows)
+			mock.ExpectQuery("WITH usage").WithArgs("{7,8,9}", since, now).WillReturnRows(rows)
 			data, err := (&accountPerformanceRepository{db: db}).Read(context.Background(), []int64{7, 8, 9}, now)
 			require.NoError(t, err)
 			for _, id := range []int64{7, 8} {
