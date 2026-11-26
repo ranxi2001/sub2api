@@ -96,6 +96,8 @@ jobs:
           # the old Free Fast producer so the selected assertions still fail.
           python3 .github/scripts/prepare-image-usage-free-fast-red.py usage "$baseline"
           python3 .github/scripts/prepare-image-usage-free-fast-red.py admin-usage "$baseline"
+          # Only the pinned billing implementation calls this retired diagnostic hook.
+          printf '%s\n' 'package service' 'import "context"' 'func recordDurableUsageTiming(context.Context, UsageLogRepository, *UsageLog) {}' > backend/internal/service/free_fast_retired_timing_compat.go
           # Tests stay byte-for-byte at candidate HEAD. Keep the new additive
           # DB column so a missing migration can never qualify as business RED.
           set +e
@@ -172,12 +174,16 @@ jobs:
           set -euo pipefail
           git fetch --no-tags --depth=1 origin 0e8e97aa23afd8e88a61ea64a84a8fb84f1bfdc6
           cp frontend/src/components/admin/usage/UsageTable.vue "$RUNNER_TEMP/free-fast-ui/UsageTable.vue"
-          git show 0e8e97aa23afd8e88a61ea64a84a8fb84f1bfdc6:frontend/src/components/admin/usage/UsageTable.vue > frontend/src/components/admin/usage/UsageTable.vue
+          baseline=0e8e97aa23afd8e88a61ea64a84a8fb84f1bfdc6
+          for file in frontend/src/components/admin/usage/{UsageTable,UsageTimingDialog}.vue frontend/src/api/admin/usageTiming.ts; do
+            git show "$baseline:$file" > "$file"
+          done
           set +e
           pnpm --dir frontend exec vitest run src/components/admin/usage/__tests__/UsageTable.spec.ts --maxWorkers=1 --minWorkers=1 --reporter=json --outputFile="$RUNNER_TEMP/free-fast-ui/red.json"
           code=$?
           set -e
           cp "$RUNNER_TEMP/free-fast-ui/UsageTable.vue" frontend/src/components/admin/usage/UsageTable.vue
+          rm frontend/src/components/admin/usage/UsageTimingDialog.vue frontend/src/api/admin/usageTiming.ts
           test "$code" -ne 0
           python3 - "$RUNNER_TEMP/free-fast-ui" <<'PY'
           import json,sys,pathlib
