@@ -25,7 +25,7 @@ export default {
   "yes": "是",
   "no": "否",
   "legacyFirst": "服务端首字（旧口径）",
-  "legacyTotal": "服务端总耗时（旧口径）",
+  "legacyTotal": "服务端总耗时",
   "serverFirst": "服务端首字",
   "serverTotal": "服务端总耗时",
   "requestTotal": "应用内完整请求耗时",
