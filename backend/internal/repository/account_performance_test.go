@@ -43,10 +43,9 @@ func TestAccountPerformanceQueryBoundsAndMissingSamples(t *testing.T) {
 	require.Equal(t, now.Add(-60*time.Minute), got[7].WindowStart)
 	require.NoError(t, mock.ExpectationsWereMet())
 	// SQL contract only; these assertions do not claim PostgreSQL execution.
-	require.Contains(t, performanceMetricsSQL, "u.created_at >= $2")
-	require.Contains(t, performanceMetricsSQL, "\u0027Z$\u0027,\u0027+00:00\u0027")
-	require.Contains(t, performanceMetricsSQL, "LIMIT 2")
-	require.Contains(t, performanceMetricsSQL, "event_at >= $2 AND event_at <= $3")
+	require.Contains(t, performanceMetricsSQL, "FROM usage_logs")
+	require.Contains(t, performanceMetricsSQL, "created_at >= $2 AND created_at <= $3")
+	require.Contains(t, performanceMetricsSQL, "first_token_ms BETWEEN 0 AND duration_ms")
 	require.Contains(t, performanceMetricsSQL, "MIN(r.started_at)>=$2")
 	require.Contains(t, performanceMetricsSQL, "NULLIF(COUNT(*) FILTER(WHERE passed OR failed),0)")
 }
