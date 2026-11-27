@@ -67,7 +67,6 @@ describe('NewFeatureBadge', () => {
     ['Mistral budget usage', NEW_FEATURE_NOTICES.mistralBudgetUsage],
     ['Qwen platform', NEW_FEATURE_NOTICES.qwenPlatform],
     ['image header timeout groups', NEW_FEATURE_NOTICES.openaiImageHeaderTimeoutGroups],
-    ['standard-tier account procurement', NEW_FEATURE_NOTICES.accountProcurement],
     ['provider profit reconciliation', NEW_FEATURE_NOTICES.providerProfit],
     ['profit operations time ranges', NEW_FEATURE_NOTICES.profitOperationsTimeRanges],
     ['quality retest rest', NEW_FEATURE_NOTICES.qualityRetestRest],

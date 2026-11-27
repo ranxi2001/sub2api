@@ -2225,8 +2225,6 @@ export default {
         requests: 'Requests',
         tokens: 'Tokens',
         lifetimeTokens: 'Total Tokens',
-        todayProcurement: 'Today’s procurement cost',
-        lifetimeProcurement: 'Lifetime procurement cost',
         lifetimeCost: 'Total Cost',
         highestCostDay: 'Highest Cost Day',
         highestRequestDay: 'Highest Request Day',

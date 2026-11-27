@@ -345,19 +345,18 @@ type AccountUsageHistory struct {
 
 // AccountUsageSummary represents summary statistics for an account
 type AccountUsageSummary struct {
-	Procurement       *ProcurementCoverage `json:"procurement,omitempty"`
-	Days              int                  `json:"days"`
-	ActualDaysUsed    int                  `json:"actual_days_used"`
-	TotalCost         float64              `json:"total_cost"`      // 账号口径费用
-	TotalUserCost     float64              `json:"total_user_cost"` // 用户口径费用
-	TotalStandardCost float64              `json:"total_standard_cost"`
-	TotalRequests     int64                `json:"total_requests"`
-	TotalTokens       int64                `json:"total_tokens"`
-	AvgDailyCost      float64              `json:"avg_daily_cost"` // 账号口径日均
-	AvgDailyUserCost  float64              `json:"avg_daily_user_cost"`
-	AvgDailyRequests  float64              `json:"avg_daily_requests"`
-	AvgDailyTokens    float64              `json:"avg_daily_tokens"`
-	AvgDurationMs     float64              `json:"avg_duration_ms"`
+	Days              int     `json:"days"`
+	ActualDaysUsed    int     `json:"actual_days_used"`
+	TotalCost         float64 `json:"total_cost"`      // 账号口径费用
+	TotalUserCost     float64 `json:"total_user_cost"` // 用户口径费用
+	TotalStandardCost float64 `json:"total_standard_cost"`
+	TotalRequests     int64   `json:"total_requests"`
+	TotalTokens       int64   `json:"total_tokens"`
+	AvgDailyCost      float64 `json:"avg_daily_cost"` // 账号口径日均
+	AvgDailyUserCost  float64 `json:"avg_daily_user_cost"`
+	AvgDailyRequests  float64 `json:"avg_daily_requests"`
+	AvgDailyTokens    float64 `json:"avg_daily_tokens"`
+	AvgDurationMs     float64 `json:"avg_duration_ms"`
 	Today             *struct {
 		Date     string  `json:"date"`
 		Cost     float64 `json:"cost"`

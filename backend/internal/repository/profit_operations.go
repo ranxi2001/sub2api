@@ -233,6 +233,7 @@ const profitOperationsBase = `WITH ` + profitOperationsCohort + `, event_rows AS
  e.amount AS upstream_reported,e.settled_amount AS upstream_debit,
  CASE WHEN u.procurement_cost_snapshot IS NOT NULL THEN 'request_procurement_snapshot' ELSE COALESCE(c.cost_basis,'account_missing') END AS cost_basis,
  COALESCE(NULLIF(u.requested_model,''),u.model) AS public_model,
+ usage_free_tier_quote(u.customer_cost_details,u.rate_multiplier) AS free_tier_quote,
  u.total_cost AS cost_base
  FROM usage_logs u LEFT JOIN accounts_config c ON c.id=u.account_id
  LEFT JOIN provider_profit_charges e ON e.usage_log_id=u.id AND e.account_id=u.account_id AND e.local_created_at=u.created_at
@@ -272,7 +273,7 @@ const profitOperationsBase = `WITH ` + profitOperationsCohort + `, event_rows AS
 ), scoped AS (
  SELECT * FROM event_rows WHERE ($11::bigint=0 OR explicit_channel_id=$11) AND ($4='' OR upstream_key=$4)
 ), bases AS (
- SELECT *,CASE WHEN cost_base>=0 AND cost_base<'Infinity'::numeric AND multiplier>=0 AND multiplier<'Infinity'::numeric THEN cost_base*multiplier END AS estimated,
+ SELECT *,CASE WHEN cost_base>=0 AND cost_base<'Infinity'::numeric AND multiplier>=0 AND multiplier<'Infinity'::numeric THEN COALESCE(free_tier_quote,cost_base)*multiplier END AS estimated,
  CASE WHEN total_cost>=0 AND total_cost<'Infinity'::numeric THEN total_cost END AS standard,
  CASE WHEN actual_cost>=0 AND actual_cost<'Infinity'::numeric THEN actual_cost END AS income,
  CASE WHEN stream AND first_token_ms>0 AND (actual_cost>0 OR total_cost>0 OR account_stats_cost>0 OR input_tokens>0 OR output_tokens>0 OR cache_read_tokens>0 OR cache_creation_tokens>0) THEN first_token_ms END AS ttft,

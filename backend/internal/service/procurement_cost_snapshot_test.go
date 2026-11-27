@@ -137,8 +137,8 @@ func TestProfitOperationsCapturesImagePriceAndSavedMultiplier(t *testing.T) {
 
 func TestProfitOperationsTokenBasisSnapshot(t *testing.T) {
 	account := &Account{Type: AccountTypeAPIKey, Extra: map[string]any{AccountCostMultiplierExtraKey: 0.35}}
-	for _, basis := range []string{TokenProcurementAccount, TokenProcurementStandard, TokenProcurementStandardTier} {
-		if basis != TokenProcurementAccount {
+	for _, basis := range []string{TokenProcurementAccount, TokenProcurementStandard} {
+		if basis == TokenProcurementStandard {
 			account.Extra[TokenProcurementBasisKey] = basis
 		}
 		require.NoError(t, ValidateAccountCostMultiplierExtra(account.Extra))

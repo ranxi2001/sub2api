@@ -12,15 +12,3 @@ type AccountStats struct {
 	StandardCost float64 `json:"standard_cost"`
 	UserCost     float64 `json:"user_cost"`
 }
-
-// ProcurementCoverage sums only priced requests in the selected reporting window.
-type ProcurementCoverage struct {
-	Amount   *float64 `json:"amount"`
-	Known    int64    `json:"known"`
-	Requests int64    `json:"requests"`
-}
-
-type AccountProcurementWindows struct {
-	Window   ProcurementCoverage
-	Lifetime ProcurementCoverage
-}

@@ -302,6 +302,11 @@ func applyAccountStatsCost(
 	if usageLog != nil && usageLog.ServiceTier != nil {
 		serviceTier = *usageLog.ServiceTier
 	}
+	// Use the same pre-discount Standard quote as the customer calculation.
+	// Custom account pricing still takes precedence in resolveAccountStatsCost.
+	if details := usageLog.CustomerCostDetails; details != nil && (details.FreeFast || details.FreeUltrafast) {
+		serviceTier = ""
+	}
 	if usageLog != nil && usageLog.ReasoningEffort != nil {
 		reasoningEffort = *usageLog.ReasoningEffort
 	}

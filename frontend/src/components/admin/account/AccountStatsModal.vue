@@ -68,7 +68,6 @@
                 }})
               </span>
             </p>
-            <AccountProcurementAmount v-if="stats.summary.procurement" :coverage="stats.summary.procurement" :label="t('profitOps.profitCost')" />
           </div>
 
           <!-- 30-Day Total Requests -->
@@ -449,7 +448,6 @@
 </template>
 
 <script setup lang="ts">
-import AccountProcurementAmount from '@/components/account/AccountProcurementAmount.vue'
 import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {

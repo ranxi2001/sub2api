@@ -1232,7 +1232,7 @@ func TestUsageLogRepositoryGetModelStatsAccountFilterKeepsActualCost(t *testing.
 	end := start.Add(24 * time.Hour)
 	accountID := int64(42)
 
-	mock.ExpectQuery("COALESCE\\(SUM\\(actual_cost\\), 0\\) as actual_cost,\\s+COALESCE\\(SUM\\(COALESCE\\(account_stats_cost, total_cost\\) \\* COALESCE\\(account_rate_multiplier, 1\\)\\), 0\\) as account_cost").
+	mock.ExpectQuery("COALESCE\\(SUM\\(actual_cost\\), 0\\) as actual_cost,\\s+COALESCE\\(SUM\\(COALESCE\\(account_stats_cost, usage_free_tier_quote\\(customer_cost_details, rate_multiplier\\), total_cost\\) \\* COALESCE\\(account_rate_multiplier, 1\\)\\), 0\\) as account_cost").
 		WithArgs(start, end, accountID).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"model", "requests", "input_tokens", "output_tokens",
@@ -1256,7 +1256,7 @@ func TestUsageLogRepositoryGetEndpointStatsAccountFilterKeepsActualCost(t *testi
 	end := start.Add(24 * time.Hour)
 	accountID := int64(42)
 
-	mock.ExpectQuery("COALESCE\\(SUM\\(actual_cost\\), 0\\) as actual_cost,\\s+COALESCE\\(SUM\\(COALESCE\\(account_stats_cost, total_cost\\) \\* COALESCE\\(account_rate_multiplier, 1\\)\\), 0\\) as account_cost").
+	mock.ExpectQuery("COALESCE\\(SUM\\(actual_cost\\), 0\\) as actual_cost,\\s+COALESCE\\(SUM\\(COALESCE\\(account_stats_cost, usage_free_tier_quote\\(customer_cost_details, rate_multiplier\\), total_cost\\) \\* COALESCE\\(account_rate_multiplier, 1\\)\\), 0\\) as account_cost").
 		WithArgs(start, end, accountID).
 		WillReturnRows(sqlmock.NewRows([]string{"endpoint", "requests", "total_tokens", "cost", "actual_cost", "account_cost"}).
 			AddRow("/v1beta/models", int64(3), int64(30), 6.0, 2.4, 0.9))
