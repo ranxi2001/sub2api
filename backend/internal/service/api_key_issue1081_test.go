@@ -29,7 +29,7 @@ func TestIssue1081WarmAuthCacheRoundTrip(t *testing.T) {
 			cache := &authCacheStub{}
 			cfg := &config.Config{APIKeyAuth: config.APIKeyAuthCacheConfig{L2TTLSeconds: 60}}
 			if l1 {
-				cfg.APIKeyAuth.L1Size = 10
+				cfg.APIKeyAuth.L1Size = 1000
 				cfg.APIKeyAuth.L1TTLSeconds = 60
 			}
 			calls := 0
@@ -189,4 +189,29 @@ func TestIssue1081UncachedAuthAndOldDataFailClosed(t *testing.T) {
 	original.GroupIDs = []int64{2}
 	_, err = svc.GetByKeyUncached(ctx, "fixture-key")
 	require.ErrorIs(t, err, ErrAPIKeyPrimaryGroupRequired)
+}
+
+type issue1081ChangingPolicy struct{ reads int }
+
+func (p *issue1081ChangingPolicy) APIKeyMultiGroupEnabled(context.Context) (bool, error) {
+	p.reads++
+	return p.reads == 1, nil
+}
+func TestIssue1081PinHasOnePolicySnapshotAndPreservesPrimaryIdentity(t *testing.T) {
+	id := int64(1)
+	fallback := int64(2)
+	groups := map[int64]*Group{1: {ID: 1, Status: StatusActive, FallbackGroupID: &fallback, FallbackGroupIDOnInvalidRequest: &fallback}, 2: {ID: 2, Status: StatusActive}}
+	key := &APIKey{GroupID: &id, GroupIDs: []int64{1, 2}, Group: groups[1], User: &User{ID: 7}}
+	policy := &issue1081ChangingPolicy{}
+	svc := &APIKeyService{groupRepo: multiGroupRepoStub{groups: groups}, groupPolicy: policy}
+	_, err := svc.PinAPIKeyGroup(context.Background(), key, 2)
+	require.NoError(t, err)
+	require.Equal(t, 1, policy.reads, "one atomic policy view before selecting a group")
+	_, err = svc.PinAPIKeyGroup(context.Background(), key, 2)
+	require.Error(t, err, "next pin sees disabled and refuses extra")
+	got, err := svc.PinAPIKeyGroup(context.Background(), key, 1)
+	require.NoError(t, err)
+	require.Nil(t, got.Group.FallbackGroupID)
+	require.Nil(t, got.Group.FallbackGroupIDOnInvalidRequest)
+	require.NotNil(t, key.Group.FallbackGroupID, "persistent/cache group is untouched")
 }

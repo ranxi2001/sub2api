@@ -79,10 +79,23 @@ func (s *APIKeyService) validateAPIKeyGroups(ctx context.Context, user *User, id
 // PinAPIKeyGroup preserves a request's chosen billing identity across queue/WS
 // revalidation. Never reselect underneath a request that already reserved funds.
 func (s *APIKeyService) PinAPIKeyGroup(ctx context.Context, key *APIKey, id int64) (*APIKey, error) {
-	var policyErr error
-	key, policyErr = s.applyGroupPolicy(ctx, key)
-	if policyErr != nil {
-		return nil, policyErr
+	// Read policy once for this pin operation, before changing GroupID to the
+	// selected request group. A second projection could mistake an extra for
+	// the primary if the switch changed between these reads.
+	enabled := true
+	if s.localAuth == nil {
+		var err error
+		enabled, err = s.multiGroupEnabled(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if !enabled {
+		var err error
+		key, err = primaryGroupOnly(key)
+		if err != nil {
+			return nil, err
+		}
 	}
 	bound := false
 	for _, candidate := range key.ConfiguredGroupIDs() {
@@ -105,7 +118,10 @@ func (s *APIKeyService) PinAPIKeyGroup(ctx context.Context, key *APIKey, id int6
 	if err != nil {
 		return nil, err
 	}
-	return s.applyGroupPolicy(ctx, selected)
+	if !enabled {
+		return primaryGroupOnly(selected)
+	}
+	return selected, nil
 }
 
 func (s *APIKeyService) apiKeyWithGroup(ctx context.Context, key *APIKey, group *Group) (*APIKey, error) {

@@ -1,11 +1,15 @@
 package middleware
 
 import (
+	"bytes"
 	"context"
+	"github.com/Wei-Shaw/sub2api/internal/regional"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -21,6 +25,10 @@ type issue1081AdminUsers struct {
 func (r issue1081AdminUsers) GetByID(context.Context, int64) (*service.User, error) {
 	return r.user, nil
 }
+func (r issue1081AdminUsers) GetUserAvatar(context.Context, int64) (*service.UserAvatar, error) {
+	return nil, nil
+}
+
 func TestIssue1081SettingRouteRequiresActiveAdmin(t *testing.T) {
 	for _, tc := range []struct {
 		role string
@@ -72,4 +80,116 @@ func TestIssue1081QueueRevalidationRejectsDormantExtra(t *testing.T) {
 	}, "fixture-key", "127.0.0.1", initial)
 	_, err = revalidate(context.Background())
 	require.NoError(t, err)
+}
+
+type issue1081LivePolicy struct{ enabled bool }
+
+func (p *issue1081LivePolicy) APIKeyMultiGroupEnabled(context.Context) (bool, error) {
+	return p.enabled, nil
+}
+
+type issue1081QueueKeys struct {
+	service.APIKeyRepository
+	key *service.APIKey
+}
+
+func (r issue1081QueueKeys) GetByKeyForAuth(context.Context, string) (*service.APIKey, error) {
+	k := *r.key
+	return &k, nil
+}
+
+type issue1081QueueGroups struct {
+	service.GroupRepository
+	groups map[int64]*service.Group
+}
+
+func (r issue1081QueueGroups) GetByIDLite(_ context.Context, id int64) (*service.Group, error) {
+	return r.groups[id], nil
+}
+func TestIssue1081QueueUsesAuthoritativePolicyBeforePinnedExtra(t *testing.T) {
+	id := int64(1)
+	groups := map[int64]*service.Group{1: {ID: 1, Status: service.StatusActive}, 2: {ID: 2, Status: service.StatusActive}}
+	saved := &service.APIKey{ID: 11, UserID: 7, Key: "fixture-key", GroupID: &id, GroupIDs: []int64{1, 2}, Status: service.StatusActive, User: &service.User{ID: 7, Status: service.StatusActive}, Group: groups[1]}
+	policy := &issue1081LivePolicy{enabled: true}
+	svc := service.NewAPIKeyService(issue1081QueueKeys{key: saved}, nil, issue1081QueueGroups{groups: groups}, nil, nil, nil, &config.Config{})
+	svc.SetGroupPolicy(policy)
+	initial, err := svc.PinAPIKeyGroup(context.Background(), saved, 2)
+	require.NoError(t, err)
+	revalidate := newAPIKeyAuthRevalidator(func(ctx context.Context, credential string) (*service.APIKey, error) {
+		latest, err := svc.GetByKeyUncached(ctx, credential)
+		if err != nil {
+			return nil, err
+		}
+		return svc.PinAPIKeyGroup(ctx, latest, 2)
+	}, saved.Key, "127.0.0.1", initial)
+	_, err = revalidate(context.Background())
+	require.NoError(t, err)
+	policy.enabled = false
+	_, err = revalidate(context.Background())
+	require.Error(t, err)
+	require.Equal(t, []int64{1, 2}, saved.GroupIDs)
+}
+
+type issue1081RegionalRecords struct {
+	enabled bool
+	records []service.RegionalAuthRecord
+}
+
+func (r *issue1081RegionalRecords) ListRegionalAuth(context.Context, []int64) ([]service.RegionalAuthRecord, error) {
+	return r.records, nil
+}
+func (r *issue1081RegionalRecords) APIKeyMultiGroupEnabled(context.Context) (bool, error) {
+	return r.enabled, nil
+}
+func TestIssue1081RegionalMiddlewareReadsSignedPolicyAndKeepsServingGate(t *testing.T) {
+	ctx := context.Background()
+	lookup := bytes.Repeat([]byte{1}, 32)
+	codec, err := regional.NewCodec(map[string][]byte{"test": bytes.Repeat([]byte{2}, 32)})
+	require.NoError(t, err)
+	replica, err := regional.OpenReplica(filepath.Join(t.TempDir(), "auth"), regional.Config{RegionID: "us", MaxSnapshotAgeSeconds: 60}, regional.SnapshotAuth, codec, service.RegionalAuthValidator([]int64{7}), true)
+	require.NoError(t, err)
+	reader, err := service.NewRegionalAuthReader(replica, lookup)
+	require.NoError(t, err)
+	id := int64(1)
+	key := &service.APIKey{ID: 11, UserID: 7, Key: "fixture-key", GroupID: &id, GroupIDs: []int64{1, 2}, Status: service.StatusActive, User: &service.User{ID: 7, Status: service.StatusActive}, Group: &service.Group{ID: 1, Status: service.StatusActive}}
+	source := &issue1081RegionalRecords{records: []service.RegionalAuthRecord{{APIKey: key}}}
+	publish := func(revision uint64) {
+		payload, err := service.ExportRegionalAuth(ctx, source, []int64{7}, lookup)
+		require.NoError(t, err)
+		now := time.Now()
+		require.NoError(t, replica.Publish(ctx, "test", revision, now, now.Add(time.Minute), payload))
+	}
+	observed := false
+	r := gin.New()
+	r.Use(RegionalAPIKeyAuth(regionalAuthAuthenticatorFunc(reader.GetByKey), &config.Config{}))
+	r.Use(func(c *gin.Context) {
+		observed = true
+		k, ok := GetAPIKeyFromContext(c)
+		require.True(t, ok)
+		require.Equal(t, []int64{1}, k.ConfiguredGroupIDs())
+		c.AbortWithStatusJSON(503, gin.H{"error": "regional gateway admission is not enabled"})
+	})
+	r.POST("/v1/responses", func(c *gin.Context) { t.Fatal("regional generation gate bypassed") })
+	request := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest("POST", "/v1/responses", strings.NewReader(`{"model":"fixture-model"}`))
+		req.Header.Set("Authorization", "Bearer fixture-key")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		return w
+	}
+	publish(1)
+	w := request()
+	require.True(t, observed)
+	require.Contains(t, w.Body.String(), "admission is not enabled")
+	source.enabled = true
+	publish(2)
+	observed = false
+	w = request()
+	require.False(t, observed)
+	require.Contains(t, w.Body.String(), "MULTI_GROUP_ROUTING_UNAVAILABLE")
+	source.enabled = false
+	source.records = nil
+	publish(3)
+	w = request()
+	require.Equal(t, 401, w.Code)
 }

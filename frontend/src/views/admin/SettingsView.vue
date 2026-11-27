@@ -10401,6 +10401,7 @@ type SettingsForm = Omit<
   | "openai_oauth_scheduling_rate_multiplier"
 > & {
   /** Form always binds a concrete boolean (SystemSettings marks this optional). */
+  api_key_multi_group_enabled: boolean;
   channel_monitor_hide_throughput: boolean;
   channel_monitor_show_quota: boolean;
   channel_monitor_hide_user_ranking: boolean;

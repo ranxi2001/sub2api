@@ -13,6 +13,9 @@ func (s *APIKeyRepoSuite) TestIssue1081StoredBindingsSurviveToggleAndLegacyEdits
 	extra := s.mustCreateGroup("issue1081-extra")
 	key := &service.APIKey{UserID: user.ID, Key: "sk-issue1081-fixture", Name: "fixture", Status: service.StatusActive, GroupID: &primary.ID, GroupIDs: []int64{primary.ID, extra.ID}, QuotaUsed: 12, Usage5h: 4}
 	s.Require().NoError(s.repo.Create(s.ctx, key))
+	// Create intentionally initializes rolling usage to zero; establish real
+	// persisted pre-existing usage before testing preservation.
+	s.Require().NoError(s.repo.Update(s.ctx, key, service.APIKeyUpdateFields{RateLimitUsage: true}))
 	settings := NewSettingRepository(s.client)
 	cfg := &config.Config{}
 	svc := service.NewAPIKeyService(s.repo, newUserRepositoryWithSQL(s.client, s.repo.sql), newGroupRepositoryWithSQL(s.client, s.repo.sql), nil, nil, nil, cfg)

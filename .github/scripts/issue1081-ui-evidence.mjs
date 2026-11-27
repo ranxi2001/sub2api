@@ -40,7 +40,7 @@ const key={id:11,user_id:7,key:'sk-fixture-masked-only',name:'Fixture key',statu
 const state={mode,view,requests:[],writes:[],settings,key};window.__issue1081=state;
 apiClient.defaults.adapter=async request=>{
  const path=request.url.split('?')[0],method=request.method||'get';state.requests.push({path,method});let data={};
- if(method!=='get'&&!(method==='put'&&(path==='/admin/settings'||path==='/keys/11'))&&!(method==='post'&&path==='/keys'))throw Error('Unexpected fixture mutation '+path);
+ if(method!=='get'&&!(method==='put'&&(path==='/admin/settings'||path==='/admin/settings/web-search-emulation'||path==='/keys/11'))&&!(method==='post'&&path==='/keys'))throw Error('Unexpected fixture mutation '+path);
  if(path==='/admin/settings'||path==='/settings/public'){
   if(method==='put'){const body=JSON.parse(request.data);Object.assign(settings,body);state.writes.push({path,body});localStorage.setItem(storage,String(settings.api_key_multi_group_enabled));}
   data=structuredClone(settings);
@@ -92,7 +92,7 @@ for(const mode of ['before','after']){
   await context.route('**/*',route=>new URL(route.request().url()).origin==='http://127.0.0.1:4198'?route.continue():route.abort())
   const page=await context.newPage();page.on('pageerror',e=>manifest.errors.push(e.message))
   const go=async view=>{await page.goto(`http://127.0.0.1:4198/${suffix}.html?view=${view}&mode=${mode}&tab=features`);await page.waitForFunction(()=>window.__issue1081?.requests.some(r=>r.path==='/settings/public'))}
-  const capture=async(name,locator)=>{await locator.scrollIntoViewIfNeeded();await page.evaluate(()=>document.fonts.ready);const file=`${mode}-${device}-${name}.png`;await locator.screenshot({path:join(output,file),animations:'disabled'});manifest.captures.push({mode,device,viewport,name,file,sha256:hash(readFileSync(join(output,file))),observed_at:new Date().toISOString(),layout:await locator.evaluate(el=>({width:el.getBoundingClientRect().width,scrollWidth:document.documentElement.scrollWidth,viewport:innerWidth,font:getComputedStyle(el).fontSize}))})}
+  const capture=async(name,locator)=>{await locator.scrollIntoViewIfNeeded();const bounds=await locator.boundingBox();assert(bounds&&bounds.width>0);assert(bounds.x>=-1&&bounds.x+bounds.width<=viewport.width+1,'component exceeds viewport');await page.evaluate(()=>document.fonts.ready);const file=`${mode}-${device}-${name}.png`;await locator.screenshot({path:join(output,file),animations:'disabled'});manifest.captures.push({mode,device,viewport,name,file,sha256:hash(readFileSync(join(output,file))),observed_at:new Date().toISOString(),layout:await locator.evaluate(el=>({width:el.getBoundingClientRect().width,scrollWidth:document.documentElement.scrollWidth,viewport:innerWidth,font:getComputedStyle(el).fontSize}))})}
   await go('settings');await page.locator('[data-testid="protocol-feature-switches"]').waitFor()
   if(mode==='before'){
    assert.equal(await page.locator('#api-key-multi-group-enabled').count(),0)
@@ -104,21 +104,33 @@ for(const mode of ['before','after']){
    await page.waitForFunction(()=>window.__issue1081.writes.some(w=>w.path==='/admin/settings'))
    assert.equal(await page.evaluate(()=>window.__issue1081.writes.find(w=>w.path==='/admin/settings').body.api_key_multi_group_enabled),false)
    await page.reload();await toggle.waitFor({state:'visible'});assert.equal(await toggle.getAttribute('aria-checked'),'false');await capture('settings-disabled',card)
-   const badges=page.locator('[data-notice-id="api-key-multi-group-policy-v1"]')
-   // Badge DOM carries test IDs only; dismissal is also checked in component regressions.
-   manifest.interactions.push({mode,device,save_false_and_reload:true,badge_count:await badges.count()})
+   const badges=()=>page.locator('#settings-tab-features + [data-testid="new-feature-badge"], [data-testid="api-key-multi-group-settings"] [data-testid="new-feature-badge"]')
+   assert.equal(await badges().count(),2)
+   await badges().nth(device==='desktop'?0:1).click();assert.equal(await badges().count(),0)
+   await page.reload();await toggle.waitFor({state:'visible'});assert.equal(await badges().count(),0)
+   manifest.interactions.push({mode,device,save_false_and_reload:true,both_badge_entries_dismissed_and_persisted:true})
   }
   await go('keys');await page.locator('[data-tour="keys-create-btn"]').waitFor()
   await page.locator('[data-tour="keys-create-btn"]').click();await page.locator('#key-form').waitFor()
   assert.equal(await page.locator('[data-testid="key-additional-groups"]').count(),mode==='before'?1:0)
   await capture('key-create',page.locator('#key-form'))
+  if(mode==='after'){
+   await page.locator('[data-tour="key-form-name"]').fill('Fixture created')
+   await page.locator('[data-tour="key-form-group"]').click()
+   await page.getByRole('option').filter({hasText:'Primary fixture'}).click()
+   await page.locator('[data-tour="key-form-submit"]').click()
+   await page.waitForFunction(()=>window.__issue1081.writes.some(w=>w.path==='/keys'))
+   const body=await page.evaluate(()=>window.__issue1081.writes.find(w=>w.path==='/keys').body)
+   assert.equal(body.group_id,1);assert(!Object.hasOwn(body,'group_ids'))
+   manifest.interactions.push({mode,device,disabled_create_omits_group_ids:true})
+  }
   await page.reload();await page.locator('.key-group-control').waitFor()
   // Existing Key editing uses the actual action button, identified by its text.
   await page.getByRole('button',{name:'编辑',exact:true}).first().click();await page.locator('#key-form').waitFor()
   assert.equal(await page.locator('[data-testid="key-additional-groups"]').count(),mode==='before'?1:0)
   await capture('key-edit',page.locator('#key-form'))
   if(mode==='after'){
-   await page.locator('#key-form button[type="submit"]').click().catch(async()=>page.getByRole('button',{name:'保存',exact:true}).last().click())
+   await page.locator('[data-tour="key-form-submit"]').click()
    await page.waitForFunction(()=>window.__issue1081.writes.some(w=>w.path==='/keys/11'))
    const payload=await page.evaluate(()=>window.__issue1081.writes.find(w=>w.path==='/keys/11').body);assert(!Object.hasOwn(payload,'group_ids'))
    manifest.interactions.push({mode,device,disabled_edit_omits_group_ids:true,group_id:payload.group_id})
@@ -134,4 +146,4 @@ for(const mode of ['before','after']){
 }
 assert.deepEqual(manifest.errors,[])
 writeFileSync(join(output,'manifest.json'),JSON.stringify(manifest,null,2)+'\n')
-}finally{await browser.close();rmSync(beforeTree,{recursive:true,force:true});for(const mode of ['before','after']){rmSync(join(output,mode+'-build'),{recursive:true,force:true});rmSync(join(output,mode+'-cache'),{recursive:true,force:true})}}
+}catch(error){manifest.errors.push(String(error));writeFileSync(join(output,'failure-manifest.json'),JSON.stringify(manifest,null,2)+'\n');throw error}finally{await browser.close();rmSync(beforeTree,{recursive:true,force:true});for(const mode of ['before','after']){rmSync(join(output,mode+'-build'),{recursive:true,force:true});rmSync(join(output,mode+'-cache'),{recursive:true,force:true})}}
