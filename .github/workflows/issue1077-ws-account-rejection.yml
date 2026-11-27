@@ -70,7 +70,7 @@ jobs:
           assert not any(r.get('Action') in ('fail','build-fail','skip') for r in rows)
           required=['TestIssue1077HandlerSamePOST/'+x for x in ('credential','quota','function','prewarm','metered','budget_zero','B_rejected','client_cancel','committed','relay','bare','proxy','quota_conflict','bound_vector_store','bound_container','cancel_hold_unknown','stream_quota')]
           required += ['TestIssue1077HandlerBridgeLater401/automatic='+a+'/'+c for a in ('false','true') for c in ('success','bound_tool','bound_reference','orphan_tool','after_output','cancel','relay')]
-          required += ['TestIssue1077HandshakeAccountRejection','TestIssue1077StreamQuotaHasOneSafeTerminal','TestIssue1077StreamQuotaPreservesObservedUsage','TestIssue1077RegionalFinalizerOnlyCertifiedUnsentHandshake']
+          required += ['TestIssue1077HandshakeAccountRejection','TestIssue1077StreamQuotaHasOneSafeTerminal','TestIssue1077StreamQuotaPreservesObservedUsage','TestIssue1077RegionalFinalizerOnlyCertifiedUnsentHandshake','TestIssue1077RegionalReplacementRequiresFreshBoundIdentity','TestIssue1077HandshakeContextGuards']
           for name in required:
               assert any(r.get('Test')==name and r.get('Action')=='pass' for r in rows),name
           PY

@@ -200,7 +200,7 @@ func TestIssue1077HandlerSamePOST(t *testing.T) {
 				}}))
 			}
 			up := &incompleteRegionalHTTP{}
-			gateway := service.NewOpenAIGatewayService(repo, nil, usage, nil, nil, nil, nil, nil, cfg, nil, nil, service.NewBillingService(cfg, nil), nil, nil, up, &service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil, options...)
+			gateway := service.NewOpenAIGatewayService(repo, nil, usage, nil, nil, nil, nil, nil, cfg, nil, nil, service.NewBillingService(cfg, nil), service.NewRateLimitService(repo, nil, cfg, nil, nil), nil, up, &service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil, options...)
 			t.Cleanup(gateway.CloseOpenAIWSPool)
 			billing := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
 			t.Cleanup(billing.Stop)
@@ -257,6 +257,9 @@ func TestIssue1077HandlerSamePOST(t *testing.T) {
 			}
 			require.Zero(t, aGenerations.Load(), "A handshake refusal receives zero generation/prewarm frames")
 			if !tc.wantB {
+				if tc.name == "relay" || tc.name == "bare" || tc.name == "proxy" {
+					require.Empty(t, repo.stateWrites, "relay/proxy refusal must not mutate selected credential state")
+				}
 				if tc.metered {
 					require.Len(t, meterLedger.reserved, 1)
 					require.Equal(t, []string{"same-post-account-1"}, meterLedger.canceled)
@@ -268,6 +271,9 @@ func TestIssue1077HandlerSamePOST(t *testing.T) {
 				return
 			}
 			require.EqualValues(t, 1, bHandshakes.Load(), "ISSUE1077_HANDLER_SAME_POST: B must be reached in the original POST")
+			if tc.status == 401 {
+				require.Contains(t, repo.stateWrites, int64(1), "explicit credential rejection applies the existing account policy")
+			}
 			if tc.failB {
 				require.Zero(t, bGenerations.Load())
 				return
