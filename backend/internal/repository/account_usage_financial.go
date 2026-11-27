@@ -67,15 +67,22 @@ const financialWindowBounds = `WITH bounds AS (
  GREATEST($1::timestamptz,LEAST(account_usage_bucket($2),account_usage_bucket(now())-interval '5 minutes')) AS hi
 )`
 
-const accountUsageWindow = financialWindowBounds + `, facts AS (
+const accountUsageWindow = financialWindowBounds + `, unconverted AS (
+ SELECT bucket FROM account_profit_legacy_buckets,bounds WHERE bucket>=lo AND bucket<hi
+), facts AS (
  SELECT bucket AS at,account_id,group_id,model,public_model,upstream_model,requests,tokens,standard_charge,user_charge,account_charge,duration_sum,duration_count,unit_rate_charge
- FROM account_usage_financial_rollups,bounds WHERE bucket>=lo AND bucket<hi AND ($3::bigint=0 OR account_id=$3)
+ FROM account_usage_financial_rollups r,bounds WHERE bucket>=lo AND bucket<hi AND ($3::bigint=0 OR account_id=$3)
+ AND NOT EXISTS (SELECT 1 FROM unconverted b WHERE b.bucket=r.bucket)
  UNION ALL
  SELECT created_at,account_id,group_id,model,public_model,upstream_model,requests,tokens,standard_charge,user_charge,account_charge,duration_sum,duration_count,unit_rate_charge
  FROM account_usage_financial_events,bounds WHERE created_at>=$1 AND created_at<lo AND ($3::bigint=0 OR account_id=$3)
  UNION ALL
  SELECT created_at,account_id,group_id,model,public_model,upstream_model,requests,tokens,standard_charge,user_charge,account_charge,duration_sum,duration_count,unit_rate_charge
  FROM account_usage_financial_events,bounds WHERE created_at>=GREATEST(lo,hi) AND created_at<$2 AND ($3::bigint=0 OR account_id=$3)
+ UNION ALL
+ SELECT created_at,account_id,group_id,model,public_model,upstream_model,requests,tokens,standard_charge,user_charge,account_charge,duration_sum,duration_count,unit_rate_charge
+ FROM unconverted JOIN account_usage_financial_events ON created_at>=bucket AND created_at<bucket+interval '5 minutes'
+ WHERE ($3::bigint=0 OR account_id=$3)
 )`
 
 func accountUsageReady(ctx context.Context, tx *sql.Tx, from, until time.Time) error {

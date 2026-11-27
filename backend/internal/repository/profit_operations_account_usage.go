@@ -28,7 +28,8 @@ func readAccountUsageProfit(ctx context.Context, tx *sql.Tx, f service.UpstreamO
  channel_remark text,assignment text,schedulable boolean,concurrency integer,status text,deleted boolean,cost_basis text,multiplier numeric,account_type text)
  LEFT JOIN accounts a ON a.id=c.id
 ), old_buckets AS (
- SELECT DISTINCT r.bucket FROM account_usage_financial_rollups r
+ SELECT bucket FROM account_profit_legacy_buckets,bounds WHERE bucket>=lo AND bucket<hi
+ UNION SELECT DISTINCT r.bucket FROM account_usage_financial_rollups r
  LEFT JOIN cfg c ON c.id=r.account_id CROSS JOIN bounds
  WHERE bucket>=lo AND bucket<hi AND ($3::bigint=0 OR r.account_id=$3)
    AND (procurement_source IS NULL OR procurement_source='account' OR
