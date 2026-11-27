@@ -57,15 +57,16 @@ type UpdateSettingsRequest struct {
 	LoginAgreementDocuments             []dto.LoginAgreementDocument `json:"login_agreement_documents"`
 
 	// 邮件服务设置
-	SMTPHost      string `json:"smtp_host"`
-	SMTPPort      int    `json:"smtp_port"`
-	SMTPUsername  string `json:"smtp_username"`
-	SMTPPassword  string `json:"smtp_password"`
-	SMTPFrom      string `json:"smtp_from_email"`
-	SMTPFromName  string `json:"smtp_from_name"`
-	SMTPUseTLS    bool   `json:"smtp_use_tls"`
-	EmailProvider string `json:"email_provider"`
-	ResendAPIKey  string `json:"resend_api_key"`
+	SMTPHost            string `json:"smtp_host"`
+	SMTPPort            int    `json:"smtp_port"`
+	SMTPUsername        string `json:"smtp_username"`
+	SMTPPassword        string `json:"smtp_password"`
+	SMTPFrom            string `json:"smtp_from_email"`
+	SMTPFromName        string `json:"smtp_from_name"`
+	SMTPUseTLS          bool   `json:"smtp_use_tls"`
+	EmailProvider       string `json:"email_provider"`
+	ResendAPIKey        string `json:"resend_api_key"`
+	ResendAPIKeyChanged bool   `json:"-"`
 
 	// Cloudflare Turnstile 设置
 	TurnstileEnabled   bool   `json:"turnstile_enabled"`
@@ -546,6 +547,7 @@ func omittedSettingKeys(sentFields map[string]json.RawMessage) service.OmittedSe
 }
 
 func settingsAuditRequest(req UpdateSettingsRequest) UpdateSettingsRequest {
+	req.ResendAPIKeyChanged = req.ResendAPIKey != ""
 	req.ResendAPIKey = ""
 	req.TencentCaptchaAppSecretKey = strings.TrimSpace(req.TencentCaptchaAppSecretKey)
 	req.TencentCaptchaCloudSecretID = strings.TrimSpace(req.TencentCaptchaCloudSecretID)

@@ -130,7 +130,7 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.SMTPUseTLS != after.SMTPUseTLS {
 		changed = append(changed, "smtp_use_tls")
 	}
-	if before.ResendAPIKeyConfigured != after.ResendAPIKeyConfigured || req.ResendAPIKey != "" {
+	if before.ResendAPIKeyConfigured != after.ResendAPIKeyConfigured || req.ResendAPIKeyChanged {
 		changed = append(changed, "resend_api_key")
 	}
 	if before.TurnstileEnabled != after.TurnstileEnabled {

@@ -5,7 +5,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -80,13 +79,11 @@ func TestSendEmailWithResendConfigRejectsInvalidAddressesBeforeHTTP(t *testing.T
 func TestSendEmailWithResendConfigMapsTimeoutToSafeError(t *testing.T) {
 	svc := NewEmailService(nil, nil)
 	svc.SetResendHTTPTransport(resendRoundTripperFunc(func(req *http.Request) (*http.Response, error) {
-		<-req.Context().Done()
-		return nil, req.Context().Err()
+		return nil, context.DeadlineExceeded
 	}))
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	err := svc.SendEmailWithResendConfig(ctx, &ResendConfig{APIKey: "re_test", From: "mail@example.com"}, "user@example.net", "Subject", "Body")
+	err := svc.SendEmailWithResendConfig(context.Background(), &ResendConfig{APIKey: "re_test", From: "mail@example.com"}, "user@example.net", "Subject", "Body")
 	require.Error(t, err)
+	require.Contains(t, err.Error(), "timed out")
 	require.NotContains(t, err.Error(), "re_test")
 }
 

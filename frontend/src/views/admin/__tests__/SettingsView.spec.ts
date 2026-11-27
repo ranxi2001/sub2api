@@ -180,6 +180,7 @@ vi.mock("@/composables/useClipboard", () => ({
 
 vi.mock("@/utils/apiError", () => ({
   extractApiErrorMessage: () => "error",
+  extractI18nErrorMessage: () => "error",
 }));
 
 vi.mock("vue-i18n", async () => {
@@ -715,7 +716,15 @@ describe("admin SettingsView Resend provider", () => {
     await flushPromises();
     expect(wrapper.find('[data-testid="resend-api-key"]').exists()).toBe(true);
     expect(wrapper.text()).toContain("Resend API Key");
-    expect(wrapper.find('[data-testid="new-feature-badge"]').exists()).toBe(true);
+    const emailNoticeBadges = () => wrapper.findAllComponents(NewFeatureBadge)
+      .filter((badge) => badge.props("noticeId") === NEW_FEATURE_NOTICES.resendEmailProvider)
+      .flatMap((badge) => badge.findAll('[data-testid="new-feature-badge"]'));
+    expect(emailNoticeBadges()).toHaveLength(2);
+    await emailNoticeBadges()[1]!.trigger("click");
+    await flushPromises();
+    expect(emailNoticeBadges()).toHaveLength(0);
+    expect(JSON.parse(localStorage.getItem("sub2api:new-feature-notices:v1:41") ?? "[]"))
+      .toContain(NEW_FEATURE_NOTICES.resendEmailProvider);
   });
 
   it("registers the new notice separately and provides English and Chinese setup guidance", () => {
@@ -958,8 +967,8 @@ describe("admin SettingsView payment visible method controls", () => {
     const tabBadge = (tab: string) => wrapper.find(`#settings-tab-${tab} + [data-testid="new-feature-badge"]`);
     const tabBar = wrapper.get(".settings-tabs").element;
 
-    expect(["features", "gateway", "payment"].filter((tab) => tabBadge(tab).exists())).toHaveLength(3);
-    expect(tabBadge("email").exists()).toBe(false);
+    expect(["features", "gateway", "payment", "email"].filter((tab) => tabBadge(tab).exists())).toHaveLength(4);
+    expect(tabBadge("email").exists()).toBe(true);
     expect(tabBar.querySelector("[style]")).toBeNull();
     expect(tabBar.querySelector(".absolute")).toBeNull();
 
