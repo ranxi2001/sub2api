@@ -7,13 +7,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"github.com/Wei-Shaw/sub2api/internal/regional/ledger"
-	"github.com/gin-gonic/gin"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/regional/ledger"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -116,9 +116,15 @@ func TestIssue1077HandshakeContextGuards(t *testing.T) {
 			case "turn_state":
 				c.Request.Header.Set(openAIWSTurnStateHeader, "fixture-bound-state")
 			case "cached_turn_state":
-				session := s.GenerateSessionHash(c, nil)
-				require.NotEmpty(t, session)
-				s.getOpenAIWSStateStore().BindSessionTurnState(0, session, "fixture-cached-state", time.Minute)
+				// The HTTP forwarder shares the WS thread scope, not the legacy
+				// session hash. Seed the binding that this request actually reads.
+				scope, _ := resolveOpenAIWSExecutionScope(c, []byte(wsSSETestRequest), getAPIKeyIDFromContext(c))
+				require.NotEmpty(t, scope)
+				store := s.getOpenAIWSStateStore()
+				store.BindSessionTurnState(0, scope, "fixture-cached-state", time.Minute)
+				state, found := store.GetSessionTurnState(0, scope)
+				require.True(t, found)
+				require.Equal(t, "fixture-cached-state", state)
 			case "cancel":
 				var cancel context.CancelFunc
 				ctx, cancel = context.WithCancel(ctx)

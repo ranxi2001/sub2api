@@ -118,15 +118,16 @@ type openAIWSHandshakeClientSourceKey struct{}
 func PreserveOpenAIWSHandshakeClientSource(c *gin.Context, raw []byte) {
 	if c != nil && c.Request != nil {
 		ctx := c.Request.Context()
-		c.Request = c.Request.WithContext(context.WithValue(ctx, openAIWSHandshakeClientSourceKey{}, openAIWSHandshakePayloadPortable(ctx, raw)))
+		c.Request = c.Request.WithContext(context.WithValue(ctx, openAIWSHandshakeClientSourceKey{}, openAIWSHandshakePayloadPortable(raw)))
 	}
 }
 
 // Capture this before any account projection or history normalization. Both
 // the immutable client request and the exact outgoing payload must be portable.
-func openAIWSHandshakePayloadPortable(ctx context.Context, raw []byte) bool {
-	if !OpenAIWSAgentRecoveryCanRetry(ctx) || OpenAIAgentRecoveryNoReplay(ctx) ||
-		codexWSAnchorFromContext(ctx) != nil || !openAIEncryptedJSONUnambiguous(raw) {
+// This predicate examines only payload bytes. Recovery/owner/anchor policy stays
+// at the live forwarding boundary, which owns those context APIs.
+func openAIWSHandshakePayloadPortable(raw []byte) bool {
+	if !openAIEncryptedJSONUnambiguous(raw) {
 		return false
 	}
 	root := gjson.ParseBytes(raw)

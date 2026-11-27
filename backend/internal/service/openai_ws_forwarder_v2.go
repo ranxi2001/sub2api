@@ -407,7 +407,8 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		if accelerateHTTPSSE && reqStream && ctx.Err() == nil && c != nil && c.Writer != nil &&
 			!c.Writer.Written() && !IsResponseCommitted(c) && turnState == "" &&
 			ctx.Value(openAIWSHandshakeReplayKey{}) == true &&
-			openAIWSHandshakePayloadPortable(ctx, payloadAsJSONBytes(payload)) &&
+			OpenAIWSAgentRecoveryCanRetry(ctx) && !OpenAIAgentRecoveryNoReplay(ctx) && codexWSAnchorFromContext(ctx) == nil &&
+			openAIWSHandshakePayloadPortable(payloadAsJSONBytes(payload)) &&
 			errors.As(err, &dialErr) && dialErr != nil &&
 			(isOpenAIExplicitAccountCredential401(dialErr.StatusCode, dialErr.ResponseHeaders, dialErr.ResponseBody) ||
 				isOpenAIExplicitQuota429(dialErr.StatusCode, dialErr.ResponseHeaders, dialErr.ResponseBody)) {

@@ -91,7 +91,8 @@ func prismBrowserResponsesURL(baseURL string) string {
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (result *OpenAIForwardResult, resultErr error) {
-	portable := openAIWSHandshakePayloadPortable(ctx, body)
+	portable := OpenAIWSAgentRecoveryCanRetry(ctx) && !OpenAIAgentRecoveryNoReplay(ctx) &&
+		codexWSAnchorFromContext(ctx) == nil && openAIWSHandshakePayloadPortable(body)
 	if original, ok := ctx.Value(openAIWSHandshakeClientSourceKey{}).(bool); ok {
 		portable = portable && original
 	}
