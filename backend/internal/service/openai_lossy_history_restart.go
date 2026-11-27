@@ -241,6 +241,44 @@ func openAILossyHasOpaqueField(value gjson.Result, depth int) bool {
 	return opaque
 }
 
+// Additional declarations are persistent protocol state, not messages or
+// execution evidence. Preserve only self-contained function schemas already
+// accepted by the portable-tools policy. Unknown extensions stay unsupported.
+func openAIWSPortableAdditionalTools(item gjson.Result) bool {
+	if !item.IsObject() || item.Get("type").String() != "additional_tools" ||
+		item.Get("role").Type != gjson.String || item.Get("role").String() != "developer" ||
+		!item.Get("tools").IsArray() || openAILossyHasOpaqueField(item, 0) ||
+		!openAIWSReplayToolsPortable(item.Get("tools")) {
+		return false
+	}
+	valid := true
+	item.ForEach(func(key, value gjson.Result) bool {
+		switch key.String() {
+		case "type", "role", "tools":
+		case "id":
+			valid = value.Type == gjson.String || value.Type == gjson.Null
+		default:
+			valid = false
+		}
+		return valid
+	})
+	for _, tool := range item.Get("tools").Array() {
+		if tool.Get("name").Type != gjson.String {
+			return false
+		}
+		if value := tool.Get("description"); value.Exists() && value.Type != gjson.String && value.Type != gjson.Null {
+			return false
+		}
+		for _, field := range []string{"strict", "defer_loading"} {
+			value := tool.Get(field)
+			if value.Exists() && value.Type != gjson.True && value.Type != gjson.False && value.Type != gjson.Null {
+				return false
+			}
+		}
+	}
+	return valid
+}
+
 func projectOpenAIWSToolHistory(body []byte, label string) ([]byte, error) {
 	if !openAIWSCompletedToolInputs(body) {
 		return nil, openAIAgentRecoveryError("owner_conflict")
@@ -278,6 +316,11 @@ func projectOpenAIWSToolHistory(body []byte, label string) ([]byte, error) {
 			// retaining it grants no function/custom-call execution provenance.
 			input = append(input, json.RawMessage(item.Raw))
 		case "", "message":
+			input = append(input, json.RawMessage(item.Raw))
+		case "additional_tools":
+			if !openAIWSPortableAdditionalTools(item) {
+				return nil, openAIAgentRecoveryError("readable_history_unsupported")
+			}
 			input = append(input, json.RawMessage(item.Raw))
 		default:
 			return nil, openAIAgentRecoveryError("readable_history_unsupported")

@@ -1,0 +1,114 @@
+name: Issue 1084 supported WS history
+
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/internal/service/openai_ws*'
+      - 'backend/internal/service/openai_lossy_history_restart.go'
+      - 'backend/internal/handler/openai_ws*'
+      - '.github/workflows/issue1084-history.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  history:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [RED, GREEN]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Restore only original production implementation for same-oracle RED
+        if: matrix.phase == 'RED'
+        run: |
+          set -euo pipefail
+          baseline=de34fb8c799966188a1afdc02da1458014bba81d
+          for file in backend/internal/service/openai_ws_agent_recovery.go backend/internal/service/openai_lossy_history_restart.go; do
+            git show "$baseline:$file" > "$file"
+            test "$(git hash-object "$file")" = "$(git rev-parse "$baseline:$file")"
+          done
+      - name: Supported declarations and uncertain history use identical oracles
+        env:
+          PHASE: ${{ matrix.phase }}
+        run: |
+          set -euo pipefail
+          set +e
+          (cd backend && go test -race -json -tags=unit ./internal/service -run '^TestOpenAIWSAdditionalTools(History|UnsafeHistory)$' -count=1 -timeout=3m) > "$RUNNER_TEMP/issue1084-history.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/issue1084-history.jsonl"
+          python3 .github/scripts/assert-readable-continuation.py --clean-log "$RUNNER_TEMP/issue1084-history.jsonl"
+          python3 - "$PHASE" "$result" "$RUNNER_TEMP/issue1084-history.jsonl" <<'PY'
+          import json, sys
+          phase, code, path = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+          rows = [json.loads(line) for line in open(path) if line.startswith('{')]
+          assert not any(row.get('Action') == 'skip' for row in rows), 'skip is not behavioral evidence'
+          assert any(row.get('Action') == 'pass' and row.get('Test') == 'TestOpenAIWSAdditionalToolsUnsafeHistory' for row in rows)
+          action = 'fail' if phase == 'RED' else 'pass'
+          assert any(row.get('Action') == action and row.get('Test') == 'TestOpenAIWSAdditionalToolsHistory' for row in rows)
+          if phase == 'RED':
+              assert code != 0
+              assert any('SUPPORTED_HISTORY_NOT_PRESERVED' in row.get('Output', '') for row in rows)
+          else:
+              assert code == 0
+              assert not any(row.get('Action') == 'fail' for row in rows)
+          PY
+      - name: Delivery provenance and current diagnostic controls
+        if: matrix.phase == 'GREEN'
+        working-directory: backend
+        run: go test -race -tags=unit,unsentdelta,followupcapture,continuationmissing ./internal/service -run '^TestOpenAIWS(UnsentDeltaDeliveryScope|UnsentDeltaInstructions|UnsentDeltaContinuationAnchor|UnsentHistoryDiagnostics|UnsentDeltaRequestsCanonicalHistory)$' -count=1 -timeout=3m
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: issue1084-history-${{ matrix.phase }}-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/issue1084-history.jsonl
+
+  socket:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Isolated Redis dependency
+        run: |
+          if ! command -v redis-server >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends redis-server
+          fi
+      - name: Same connection A to B followed by B's completed tool loop
+        run: |
+          set -euo pipefail
+          (cd backend && go test -race -json -tags=unit,unsentdelta ./internal/handler -run '^TestOpenAIWS(UnknownHistoryBoundary|UnsentDeltaFences)$' -count=1 -timeout=5m) | tee "$RUNNER_TEMP/issue1084-socket.jsonl"
+          python3 .github/scripts/assert-readable-continuation.py --clean-log "$RUNNER_TEMP/issue1084-socket.jsonl"
+          python3 - "$RUNNER_TEMP/issue1084-socket.jsonl" <<'PY'
+          import json, sys
+          rows = [json.loads(line) for line in open(sys.argv[1]) if line.startswith('{')]
+          assert not any(row.get('Action') in ('fail', 'skip') for row in rows)
+          for mode in ('http_bridge', 'ctx_pool', 'shared', 'dedicated', 'passthrough'):
+              for case in ('supported_declarations_tool_loop', 'unknown_content', 'compaction_control', 'uncertain_declarations', 'unknown_declaration_fields'):
+                  name = f'TestOpenAIWSUnknownHistoryBoundary/{mode}/{case}'
+                  assert any(row.get('Action') == 'pass' and row.get('Test') == name for row in rows), name
+          PY
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: issue1084-socket-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/issue1084-socket.jsonl

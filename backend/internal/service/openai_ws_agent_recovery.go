@@ -766,6 +766,8 @@ func openAIWSPlainItem(raw []byte) bool {
 	case "tool_search_output":
 		_, ok := openAIDiscoveryFingerprint(item, true)
 		return ok
+	case "additional_tools":
+		return openAIWSPortableAdditionalTools(item)
 	case "function_call_output", "custom_tool_call_output":
 		return item.Get("call_id").Type == gjson.String && item.Get("call_id").String() != "" && openAIReadableShadowTextOnly(item.Get("output"))
 	default:
@@ -798,9 +800,10 @@ func (r *openAIWSAgentRecovery) stageLocalHistory(source []byte) {
 		return
 	}
 	items, inputFailure := openAIWSReadableHistoryItems(source)
+	// A fresh supported frame must not inherit an older parser failure.
+	r.localHistory.inputFailure = inputFailure
 	ok := inputFailure == ""
 	if !ok || gjson.GetBytes(source, "conversation").Exists() {
-		r.localHistory.inputFailure = inputFailure
 		r.localHistory.diagnostic = "source_unsupported"
 		if gjson.GetBytes(source, "conversation").Exists() {
 			r.localHistory.diagnostic = "conversation_reference"
@@ -1267,6 +1270,12 @@ func openAIWSHistoryItemFailure(item gjson.Result) string {
 		return "web_search_history"
 	case "image_generation_call":
 		return "image_history"
+	case "compaction_trigger":
+		// This is an active remote-compaction control, not an inert marker.
+		return "compaction_control_history"
+	case "additional_tools":
+		// Declarations affect callable tools; preserving text alone is insufficient.
+		return "tool_declarations_history"
 	default:
 		return "unknown_item"
 	}

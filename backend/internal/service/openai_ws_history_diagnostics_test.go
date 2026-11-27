@@ -15,9 +15,13 @@ import (
 )
 
 func TestOpenAIWSUnsentHistoryDiagnostics(t *testing.T) {
-	for _, tc := range []struct{ name, input, state, reason string }{
-		{"unreadable_history", `[{"type":"agent_message","encrypted_content":"fixture-private-cipher"}]`, "source_unsupported", "history_unready"},
-		{"wrong_response", `[{"role":"user","content":"fixture-private-task"}]`, "ready", "response_anchor"},
+	for _, tc := range []struct{ name, input, state, reason, failure string }{
+		{"unreadable_history", `[{"type":"agent_message","encrypted_content":"fixture-private-cipher"}]`, "source_unsupported", "history_unready", "agent_envelope_unreadable"},
+		{"unknown_history", `[{"role":"user","content":"fixture-private-task"},{"type":"fixture-private-unknown","content":"fixture-private-content"}]`, "source_unsupported", "history_unready", "unknown_item"},
+		{"compaction_control", `[{"role":"user","content":"fixture-private-task"},{"type":"compaction_trigger"}]`, "source_unsupported", "history_unready", "compaction_control_history"},
+		{"tool_declarations", `[{"role":"user","content":"fixture-private-task"},{"type":"additional_tools","tools":[]}]`, "source_unsupported", "history_unready", "tool_declarations_history"},
+		{"wrong_response", `[{"role":"user","content":"fixture-private-task"}]`, "ready", "response_anchor", ""},
+		{"fresh_supported_history", `[{"role":"user","content":"fixture-private-task"}]`, "ready", "response_anchor", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			core, entries := observer.New(zap.WarnLevel)
@@ -27,6 +31,11 @@ func TestOpenAIWSUnsentHistoryDiagnostics(t *testing.T) {
 			defer manager.abort()
 			SetOpenAIWSRecoveryPrincipal(c, 715, 715)
 			manager.request = openAIAgentRecoveryFromContext(manager.ctx)
+			if tc.name == "fresh_supported_history" {
+				manager.stageLocalHistory([]byte(`{"input":[{"type":"fixture-private-unknown"}]}`))
+				require.Equal(t, "unknown_item", manager.localHistory.inputFailure)
+				manager.commitLocalHistory(true)
+			}
 			manager.stageLocalHistory([]byte(`{"model":"gpt-6-astra","input":` + tc.input + `}`))
 			manager.completedBridge.response = "resp_fixture_private"
 			manager.commitLocalHistory(true)
@@ -38,6 +47,7 @@ func TestOpenAIWSUnsentHistoryDiagnostics(t *testing.T) {
 			fields := logs[0].ContextMap()
 			require.Equal(t, tc.state, fields["history_state"])
 			require.Equal(t, tc.reason, fields["restore_reason"])
+			require.Equal(t, tc.failure, fields["history_input_failure"], "STALE_HISTORY_INPUT_FAILURE")
 			require.Equal(t, int64(7), fields["turn"])
 			for name := range fields {
 				require.Contains(t, []string{"restore_reason", "history_state", "history_input_failure", "turn", "history_items", "history_bytes", "history_ready", "delivery_pending", "source_previous_present"}, name)
