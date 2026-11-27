@@ -45,7 +45,7 @@ jobs:
         run: |
           set -euo pipefail
           set +e
-          (cd backend && go test -race -json -tags=unit ./internal/service -run '^TestOpenAIWSAdditionalTools(History|UnsafeHistory)$' -count=1 -timeout=3m) > "$RUNNER_TEMP/issue1084-history.jsonl" 2>&1
+          (cd backend && go test -race -json -tags=unit,issue1084history ./internal/service -run '^TestOpenAIWSAdditionalTools(History|UnsafeHistory)$' -count=1 -timeout=3m) > "$RUNNER_TEMP/issue1084-history.jsonl" 2>&1
           result=$?
           set -e
           cat "$RUNNER_TEMP/issue1084-history.jsonl"

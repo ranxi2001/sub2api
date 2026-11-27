@@ -1,4 +1,4 @@
-//go:build unit
+//go:build unit && issue1084history
 
 package service
 
