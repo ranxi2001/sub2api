@@ -68,16 +68,33 @@ apiClient.defaults.adapter=async config=>{
 `
 const shell=`import {h} from 'vue';export default {setup(_,ctx){return()=>h('main',{class:'mx-auto max-w-7xl p-4'},ctx.slots.default?.())}}`
 const html=`<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><div id="app"></div><script type="module">
-import 'virtual:entity-fixture';import {createApp} from 'vue';import {createPinia} from 'pinia';import {createRouter,createWebHistory,RouterView} from 'vue-router';import {createI18n} from 'vue-i18n';import {useAuthStore} from '/src/stores/auth.ts';
+import 'virtual:entity-fixture';import {createApp,h} from 'vue';import {createPinia} from 'pinia';import {createRouter,createWebHistory,RouterView} from 'vue-router';import {createI18n} from 'vue-i18n';import {useAuthStore} from '/src/stores/auth.ts';
 import Config from '/src/views/admin/ChannelConfigView.vue';import Profit from '/src/views/admin/ProfitOperationsView.vue';import Channels from '/src/views/admin/UpstreamChannelsView.vue';const Accounts=()=>import('/src/views/admin/AccountsView.vue');import zh from '/src/i18n/locales/zh/index.ts';import '/src/style.css';
-const pinia=createPinia();const router=createRouter({history:createWebHistory(),routes:[{path:'/admin/channel-config',component:Config},{path:'/admin/profit-operations',component:Profit},{path:'/admin/upstream-channels',component:Channels},{path:'/admin/accounts',component:Accounts}]});
+import AccountTodayStatsCell from '/src/components/account/AccountTodayStatsCell.vue';
+const AccountCostExample={setup(){const stats={cost:15,requests:4,tokens:1000,lifetime_cost:40,lifetime_tokens:9000};
+ if(location.search==='?procurement')Object.assign(stats,{procurement:{amount:2.5,known:3,requests:4},lifetime_procurement:{amount:7.5,known:5,requests:6}});
+ return ()=>h('main',{class:'max-w-md p-4'},[h(AccountTodayStatsCell,{stats})]);}};
+const pinia=createPinia();const router=createRouter({history:createWebHistory(),routes:[{path:'/preview/account-procurement',component:AccountCostExample},{path:'/admin/channel-config',component:Config},{path:'/admin/profit-operations',component:Profit},{path:'/admin/upstream-channels',component:Channels},{path:'/admin/accounts',component:Accounts}]});
 const app=createApp(RouterView);app.use(pinia);const auth=useAuthStore();auth.user={id:1,email:'synthetic@test.invalid',role:'admin',status:'active',balance:0,concurrency:1};app.use(router).use(createI18n({legacy:false,locale:'zh',messages:{zh}})).mount('#app');</script></html>`
 process.chdir(frontend)
-const server=await createServer({root:frontend,configFile:false,plugins:[vue(),{name:'entity-offline',resolveId(id){if(id.startsWith('virtual:entity-'))return '\0'+id},load(id){if(id==='\0virtual:entity-fixture')return fixture;if(id==='\0virtual:entity-shell')return shell},configureServer(vite){vite.middlewares.use((req,res,next)=>{if(['/admin/channel-config','/admin/profit-operations','/admin/upstream-channels','/admin/accounts'].includes(req.url?.split('?')[0])){res.setHeader('Content-Type','text/html');void vite.transformIndexHtml(req.url,html).then(v=>res.end(v));return}next()})}}],resolve:{alias:[{find:'@/components/layout/AppLayout.vue',replacement:'virtual:entity-shell'},{find:'@',replacement:path.join(frontend,'src')}]},css:{postcss:{plugins:[tailwind({config:path.join(frontend,'tailwind.config.js')}),autoprefixer()]}},server:{host:'127.0.0.1',port:4185,strictPort:true},optimizeDeps:{noDiscovery:true,include:['vue','vue-i18n','pinia','vue-router','axios','@vueuse/core','@tanstack/vue-virtual','chart.js','vue-chartjs','dompurify','qrcode','driver.js']}})
+const server=await createServer({root:frontend,configFile:false,plugins:[vue(),{name:'entity-offline',resolveId(id){if(id.startsWith('virtual:entity-'))return '\0'+id},load(id){if(id==='\0virtual:entity-fixture')return fixture;if(id==='\0virtual:entity-shell')return shell},configureServer(vite){vite.middlewares.use((req,res,next)=>{if(['/preview/account-procurement','/admin/channel-config','/admin/profit-operations','/admin/upstream-channels','/admin/accounts'].includes(req.url?.split('?')[0])){res.setHeader('Content-Type','text/html');void vite.transformIndexHtml(req.url,html).then(v=>res.end(v));return}next()})}}],resolve:{alias:[{find:'@/components/layout/AppLayout.vue',replacement:'virtual:entity-shell'},{find:'@',replacement:path.join(frontend,'src')}]},css:{postcss:{plugins:[tailwind({config:path.join(frontend,'tailwind.config.js')}),autoprefixer()]}},server:{host:'127.0.0.1',port:4185,strictPort:true},optimizeDeps:{noDiscovery:true,include:['vue','vue-i18n','pinia','vue-router','axios','@vueuse/core','@tanstack/vue-virtual','chart.js','vue-chartjs','dompurify','qrcode','driver.js']}})
 await server.listen();const browser=await chromium.launch({headless:true})
 const page=await browser.newPage({viewport:{width:1440,height:1100}}),errors=[],network=[]
 page.on('pageerror',e=>errors.push(e.message));await page.route('**/*',r=>{const url=new URL(r.request().url());if(url.pathname.startsWith('/api/')||url.hostname!=='127.0.0.1'){network.push(r.request().url());return r.abort()}return r.continue()})
 try{
+ const example='http://127.0.0.1:4185/preview/account-procurement'
+ await page.goto(example,{waitUntil:'networkidle'})
+ await page.getByText('今日计费',{exact:false}).first().waitFor()
+ await page.locator('main').screenshot({path:path.join(output,'account-procurement-before.png')})
+ await page.goto(example+'?procurement',{waitUntil:'networkidle'})
+ await page.getByText('已知成本 3 / 4 笔',{exact:true}).waitFor()
+ await page.getByText('已知成本 5 / 6 笔',{exact:true}).waitFor()
+ await page.locator('main').screenshot({path:path.join(output,'account-procurement-after.png')})
+ const badges=page.getByTestId('new-feature-badge')
+ if(await badges.count()!==2)throw new Error('expected both procurement notices')
+ await badges.first().click()
+ await page.reload({waitUntil:'networkidle'})
+ if(await badges.count())throw new Error('procurement notice dismissal did not persist')
  await page.goto('http://127.0.0.1:4185/admin/profit-operations',{waitUntil:'networkidle'})
  await page.getByTestId('profit-summary').waitFor();await page.getByText('显式渠道',{exact:false}).first().waitFor()
  const row = page.getByTestId('profit-drilldown').locator('tbody tr').first()
