@@ -8,7 +8,7 @@
 
 沿用已有 `cost_multiplier`，例如普通基价的 0.25 倍。批量接口 `/api/v1/admin/accounts/bulk-update` 应同时指定明确的 `account_ids`。这是 API-only 选项，账号编辑器会保留它；不是客户售价开关。保存后应回读账号，并使用利润运维 `basis=account_usage` 的固定窗口刷新报表。
 
-对于带有效 `customer_cost_details.free_fast` 或 `free_ultrafast` 的文本用量，使用冻结的 `customer_cost_details.total_cost` 作为普通档位基数，乘该请求保存的采购倍率。普通档位记录保留原基数。历史已记录的快照不改写；选择该口径时，历史估算可以使用它自己的普通价证据重新计算。
+对于带有效 `customer_cost_details.free_fast` 或 `free_ultrafast` 的文本用量，使用冻结的 `customer_cost_details.total_cost` 作为普通档位基数，乘该请求保存的采购倍率。提交过的响应头超时附加次数按冻结的客户报价倍率与请求倍率之比保留，必须为有效整数；不从客户实扣金额反推。普通档位记录保留原基数。历史已记录的快照不改写；选择该口径时，历史估算可以使用它自己的普通价证据重新计算。
 
 有加速档位但没有普通价快照的历史记录，成本保持未知并计入未覆盖请求。不会猜测除以 3、6 或 8，也不会从客户实扣金额反推采购价。图片、按次、视频、gateway 与已对账的供应商采购金额不受该文本估算开关影响。
 

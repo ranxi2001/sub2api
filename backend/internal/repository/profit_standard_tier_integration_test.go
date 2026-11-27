@@ -19,9 +19,11 @@ func TestProfitStandardTierRecordedBase(t *testing.T) {
 		total               float64
 		want                *float64
 	}{
-		{"six_times", "ultrafast", `{"free_ultrafast":true,"total_cost":10}`, 60, numberPtr(10)},
-		{"three_times", "ultrafast", `{"free_ultrafast":true,"total_cost":10}`, 30, numberPtr(10)},
-		{"fast", "priority", `{"free_fast":true,"total_cost":10}`, 20, numberPtr(10)},
+		{"six_times", "ultrafast", `{"free_ultrafast":true,"total_cost":10,"multiplier":0.27}`, 60, numberPtr(10)},
+		{"submitted_retry", "ultrafast", `{"free_ultrafast":true,"total_cost":10,"multiplier":0.54}`, 120, numberPtr(20)},
+		{"invalid_retry_units", "ultrafast", `{"free_ultrafast":true,"total_cost":10,"multiplier":0.4}`, 120, nil},
+		{"three_times", "ultrafast", `{"free_ultrafast":true,"total_cost":10,"multiplier":0.27}`, 30, numberPtr(10)},
+		{"fast", "priority", `{"free_fast":true,"total_cost":10,"multiplier":0.27}`, 20, numberPtr(10)},
 		{"ordinary", "default", `{}`, 10, numberPtr(10)},
 		{"missing_tier", "", `{}`, 10, numberPtr(10)},
 		{"no_proof", "ultrafast", `{}`, 60, nil},
@@ -29,11 +31,11 @@ func TestProfitStandardTierRecordedBase(t *testing.T) {
 		{"wrong_amount_type", "ultrafast", `{"free_ultrafast":true,"total_cost":"10"}`, 60, nil},
 		{"negative", "ultrafast", `{"free_ultrafast":true,"total_cost":-10}`, 60, nil},
 		{"too_large", "ultrafast", `{"free_ultrafast":true,"total_cost":100}`, 60, nil},
-		{"zero", "ultrafast", `{"free_ultrafast":true,"total_cost":0}`, 60, numberPtr(0)},
+		{"zero", "ultrafast", `{"free_ultrafast":true,"total_cost":0,"multiplier":0.27}`, 60, numberPtr(0)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var actual sql.NullFloat64
-			require.NoError(t, integrationDB.QueryRow(`SELECT profit_standard_tier_base($1,$2::jsonb,$3)`, tc.total, tc.details, tc.tier).Scan(&actual))
+			require.NoError(t, integrationDB.QueryRow(`SELECT profit_standard_tier_base($1,$2::jsonb,$3,0.27)`, tc.total, tc.details, tc.tier).Scan(&actual))
 			require.Equal(t, tc.want != nil, actual.Valid)
 			if tc.want != nil {
 				require.Equal(t, *tc.want, actual.Float64)
@@ -49,11 +51,11 @@ func TestProfitStandardTierAccountOverrideAndFrozenSnapshot(t *testing.T) {
 	_, err := integrationDB.Exec(`UPDATE accounts SET type='apikey',extra='{"cost_multiplier":0.25}' WHERE id=$1`, f.account)
 	require.NoError(t, err)
 	_, err = integrationDB.Exec(`INSERT INTO usage_logs(user_id,api_key_id,account_id,request_id,model,total_cost,actual_cost,
- account_rate_multiplier,billing_mode,service_tier,customer_cost_details,procurement_cost_snapshot,created_at)
- SELECT $1,$2,$3,'standard-tier-'||v.label,'fixture',v.amount,2.7,1,'token',v.tier,v.details::jsonb,
+ account_rate_multiplier,rate_multiplier,billing_mode,service_tier,customer_cost_details,procurement_cost_snapshot,created_at)
+ SELECT $1,$2,$3,'standard-tier-'||v.label,'fixture',v.amount,2.7,1,.27,'token',v.tier,v.details::jsonb,
  '{"version":2,"basis":"account_usage","token_basis":"account_stats","cost_multiplier":0.25}'::jsonb,$4
- FROM (VALUES ('six',60,'ultrafast','{"free_ultrafast":true,"total_cost":10}'),
- ('three',30,'ultrafast','{"free_ultrafast":true,"total_cost":10}'),
+ FROM (VALUES ('six',60,'ultrafast','{"free_ultrafast":true,"total_cost":10,"multiplier":0.27}'),
+ ('three',30,'ultrafast','{"free_ultrafast":true,"total_cost":10,"multiplier":0.27}'),
  ('ordinary',10,'default','{}'),('unknown',60,'ultrafast','{}'))v(label,amount,tier,details)`, f.user, f.key, f.account, from.Add(time.Minute))
 	require.NoError(t, err)
 	filter := service.UpstreamOperationsFilter{From: from, Until: from.Add(5 * time.Minute), AccountID: f.account,
@@ -108,9 +110,9 @@ func TestProfitStandardTierNewSnapshotDoesNotTouchNonTokens(t *testing.T) {
 	_, err := integrationDB.Exec(`UPDATE accounts SET type='apikey',extra='{"cost_multiplier":0.25,"token_procurement_basis":"standard_tier"}' WHERE id=$1`, f.account)
 	require.NoError(t, err)
 	_, err = integrationDB.Exec(`INSERT INTO usage_logs(user_id,api_key_id,account_id,request_id,model,total_cost,actual_cost,
- account_stats_cost,account_rate_multiplier,billing_mode,platform,service_tier,customer_cost_details,procurement_cost_snapshot,created_at)
- SELECT $1,$2,$3,'standard-tier-new-'||v.label,'fixture',60,2.7,v.stats,v.rate,v.mode,'openai','ultrafast',
- '{"free_ultrafast":true,"total_cost":10}'::jsonb,v.snap::jsonb,$4
+ account_stats_cost,account_rate_multiplier,rate_multiplier,billing_mode,platform,service_tier,customer_cost_details,procurement_cost_snapshot,created_at)
+ SELECT $1,$2,$3,'standard-tier-new-'||v.label,'fixture',60,2.7,v.stats,v.rate,.27,v.mode,'openai','ultrafast',
+ '{"free_ultrafast":true,"total_cost":10,"multiplier":0.27}'::jsonb,v.snap::jsonb,$4
  FROM (VALUES
  ('frozen','token',NULL::numeric,1,'{"version":2,"basis":"account_usage","token_basis":"standard_tier","cost_multiplier":0.25}'),
  ('zero','token',NULL::numeric,1,'{"version":2,"basis":"account_usage","token_basis":"standard_tier","cost_multiplier":0}'),

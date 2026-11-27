@@ -6,17 +6,22 @@ ALTER TABLE account_usage_financial_rollups
     ADD COLUMN standard_tier_projected boolean,
     ADD COLUMN standard_tier_eligible boolean;
 
-CREATE FUNCTION profit_standard_tier_base(total numeric, details jsonb, tier text)
+CREATE FUNCTION profit_standard_tier_base(total numeric, details jsonb, tier text, recorded_rate numeric)
 RETURNS numeric LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
  SELECT CASE
    WHEN details->'free_fast'='true'::jsonb OR details->'free_ultrafast'='true'::jsonb THEN
      CASE WHEN jsonb_typeof(details->'total_cost')='number' THEN
        CASE WHEN (details->>'total_cost')::numeric>=0 AND (details->>'total_cost')::numeric<=total
             AND (details->>'total_cost')::numeric<'Infinity'::numeric
-         THEN (details->>'total_cost')::numeric END END
+         THEN CASE WHEN (details->>'total_cost')::numeric=0 THEN 0
+           WHEN units.amount>=1 AND units.amount<1000000 AND abs(units.amount-round(units.amount))<0.000001
+             AND (details->>'total_cost')::numeric*round(units.amount)<=total
+           THEN (details->>'total_cost')::numeric*round(units.amount) END END END
    WHEN COALESCE(lower(tier),'') IN ('','default','standard','auto','scale')
         AND total>=0 AND total<'Infinity'::numeric THEN total
  END
+ FROM LATERAL (SELECT CASE WHEN recorded_rate>0 AND jsonb_typeof(details->'multiplier')='number'
+   THEN (details->>'multiplier')::numeric/recorded_rate END AS amount) units
 $$;
 
 CREATE OR REPLACE VIEW account_profit_events AS
@@ -57,7 +62,7 @@ CROSS JOIN LATERAL (SELECT CASE WHEN jsonb_typeof(snap.data->'cost_multiplier')=
 CROSS JOIN LATERAL (SELECT profit_image_quantities(u.image_size,u.image_count,u.image_size_breakdown) AS quantities,
     COALESCE(u.billing_mode='image',false) OR (u.image_count>0 AND u.image_size IS NOT NULL AND COALESCE(u.billing_mode,'')<>'video') AS is_image) img
 CROSS JOIN LATERAL (SELECT COALESCE(u.billing_mode,'') IN ('','token') AND COALESCE(u.image_count,0)=0 AS eligible) token
-CROSS JOIN LATERAL (SELECT profit_standard_tier_base(u.total_cost,u.customer_cost_details,u.service_tier) AS amount) tier
+CROSS JOIN LATERAL (SELECT profit_standard_tier_base(u.total_cost,u.customer_cost_details,u.service_tier,u.rate_multiplier) AS amount) tier
 CROSS JOIN LATERAL (SELECT CASE
     WHEN c.settled_amount IS NOT NULL THEN 'settled'
     WHEN snap.data->>'version'='1' AND snap.data->>'basis'='total_cost' AND snap.data->>'account_type'='gateway'
