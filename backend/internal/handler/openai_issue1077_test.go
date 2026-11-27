@@ -206,7 +206,7 @@ func TestIssue1077HandlerSamePOST(t *testing.T) {
 			t.Cleanup(billing.Stop)
 			h := NewOpenAIGatewayHandler(gateway, service.NewConcurrencyService(nil), billing, service.NewAPIKeyService(nil, nil, nil, nil, nil, nil, cfg), nil, nil, nil, nil, cfg)
 			h.maxAccountSwitches = tc.switches
-			key := &service.APIKey{ID: 7772, UserID: 7773, GroupID: &groupID, User: &service.User{ID: 7773, Status: service.StatusActive}, Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive}}
+			key := &service.APIKey{ID: 7772, UserID: 7773, AllowLongContext: true, GroupID: &groupID, User: &service.User{ID: 7773, Status: service.StatusActive}, Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive}}
 			router := gin.New()
 			if tc.streamQuota {
 				setupOpsErrorLogTestQueue(t, 4)
@@ -469,6 +469,7 @@ func TestIssue1077HandlerBridgeLater401(t *testing.T) {
 				}
 				require.Equal(t, []int64{1, 1, 2}, up.accounts, "only current turn may execute on B once")
 				require.False(t, gjson.GetBytes(up.bodies[2], "previous_response_id").Exists())
+				require.JSONEq(t, gjson.GetBytes(first, "tools").Raw, gjson.GetBytes(up.bodies[2], "tools").Raw, "B must receive the original client function declarations")
 				input := gjson.GetBytes(up.bodies[2], "input").Array()
 				require.Len(t, input, 4)
 				require.Equal(t, text, input[0].Get("content").String())
