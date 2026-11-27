@@ -24,8 +24,11 @@ func captureGatewayProcurementCost(log *UsageLog, account *Account) {
 		snapshot := &ProcurementCostSnapshot{Version: 2, Basis: "account_usage", AccountType: account.Type, TargetPlatform: log.Platform}
 		// Older v2 snapshots only recorded the rate. Freeze both operands for new usage.
 		snapshot.TokenBasis = TokenProcurementAccount
-		if account.Extra[TokenProcurementBasisKey] == TokenProcurementStandard {
+		switch account.Extra[TokenProcurementBasisKey] {
+		case TokenProcurementStandard:
 			snapshot.TokenBasis = TokenProcurementStandard
+		case TokenProcurementStandardTier:
+			snapshot.TokenBasis = TokenProcurementStandardTier
 		}
 		if rate, ok := accountCostMultiplierNumber(account.Extra[AccountCostMultiplierExtraKey]); ok {
 			snapshot.CostMultiplier = &rate

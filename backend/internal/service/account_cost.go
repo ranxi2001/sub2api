@@ -14,6 +14,10 @@ const AccountCostAutoSyncExtraKey = "cost_multiplier_auto_sync"
 const TokenProcurementBasisKey = "token_procurement_basis"
 const TokenProcurementStandard = "standard_charge"
 const TokenProcurementAccount = "account_stats"
+
+// TokenProcurementStandardTier excludes acceleration only when the recorded
+// customer Standard snapshot proves that price; it never divides a tier heuristic.
+const TokenProcurementStandardTier = "standard_tier"
 const ImagePurchasePricesKey = "image_purchase_prices"
 const DefaultAccountCostMultiplier = 0.1
 
@@ -76,8 +80,8 @@ func ValidateAccountCostMultiplierExtra(extra map[string]any) error {
 	}
 	if raw := extra[TokenProcurementBasisKey]; raw != nil {
 		basis, ok := raw.(string)
-		if !ok || (basis != TokenProcurementAccount && basis != TokenProcurementStandard) {
-			return infraerrors.BadRequest("INVALID_TOKEN_PROCUREMENT_BASIS", "token_procurement_basis must be account_stats or standard_charge")
+		if !ok || (basis != TokenProcurementAccount && basis != TokenProcurementStandard && basis != TokenProcurementStandardTier) {
+			return infraerrors.BadRequest("INVALID_TOKEN_PROCUREMENT_BASIS", "token_procurement_basis must be account_stats, standard_charge or standard_tier")
 		}
 	}
 	if raw := extra[ImagePurchasePricesKey]; raw != nil {
