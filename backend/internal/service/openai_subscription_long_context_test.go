@@ -337,7 +337,7 @@ func TestOpenAIGatewayServiceRecordUsage_GPT61SolExemptionSurvivesRepricing(t *t
 	require.InDelta(t, standardCost*1.1, userRepo.lastAmount, 1e-12)
 	require.False(t, usageRepo.lastLog.LongContextBillingApplied)
 	require.NotNil(t, usageRepo.lastLog.AccountStatsCost)
-	require.InDelta(t, standardCost*2, *usageRepo.lastLog.AccountStatsCost, 1e-12)
+	require.InDelta(t, standardCost, *usageRepo.lastLog.AccountStatsCost, 1e-12)
 }
 
 func TestOpenAIGatewayServiceRecordUsage_GPT61TerraLongContextBoundary(t *testing.T) {
