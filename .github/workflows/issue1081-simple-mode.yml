@@ -72,6 +72,8 @@ jobs:
           required=['TestIssue1081SimpleModeActualAuthSupportedModel/http','TestIssue1081SimpleModeActualAuthSupportedModel/google','TestIssue1081SimpleModeSupportedModelRouting','TestIssue1081SimpleModeConstraintDoesNotMutateSharedCandidates','TestIssue1081SimpleModeQueueConstraintIdentityChange','TestIssue1081SimpleGeminiForcedPlatformNeverFallsBackToExtraGroup','TestIssue1081SimpleGeminiRejectsBetterExtraStickyAndUsageProbe','TestIssue1081SimpleGeminiPrimaryAndLegacyRequestsStillWrite','TestIssue1081SimpleSiblingAdmissionStopsBeforeFirstUpstreamWrite','TestIssue1081OpenAISimpleModeRouting','TestIssue1081OpenAISimpleModeFirstWrite/http','TestIssue1081OpenAISimpleModeFirstWrite/ws','TestIssue1081OpenAISimpleModePreviousOwnerCannotMove','TestIssue1081WarmAuthCacheRoundTrip']
           for name in required:
               assert any(row.get('Test')==name and row.get('Action')=='pass' for row in rows), name
+          for name in ['TestIssue1081SimpleModeSharedSnapshotRouting','TestIssue1081OpenAISimpleModeLatestAdmission','TestIssue1081OpenAISimpleModeDiagnosis','TestIssue1081OpenAISimpleModeStickyAndAcquisition','TestIssue1081OpenAISimpleModeContinuationStaysOnPrimaryOwner','TestIssue1081OpenAISimpleModeVideoFirstWrite','TestIssue1081OpenAISimpleModeSiblingFirstWrite','TestIssue1081OpenAISimpleModeWSIngress']:
+              assert any(row.get('Test')==name and row.get('Action')=='pass' for row in rows), name
           PY
       - uses: actions/upload-artifact@v6
         if: always()

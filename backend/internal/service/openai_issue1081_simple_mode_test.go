@@ -253,3 +253,67 @@ func TestIssue1081OpenAISimpleModeSiblingFirstWrite(t *testing.T) {
 		})
 	}
 }
+
+func TestIssue1081OpenAISimpleModeWSIngress(t *testing.T) {
+	for _, mode := range []string{OpenAIWSIngressModeCtxPool, OpenAIWSIngressModeDedicated, OpenAIWSIngressModePassthrough} {
+		for _, scenario := range []string{"extra_denied", "primary_allowed", "single_legacy", "enabled_legacy"} {
+			t.Run(mode+"/"+scenario, func(t *testing.T) {
+				groups, disabled := []int64{7, 8}, true
+				if scenario == "single_legacy" {
+					groups = []int64{7}
+				}
+				if scenario == "enabled_legacy" {
+					disabled = false
+				}
+				base, key := issue1081OpenAIContext(t, groups, disabled)
+				ctx, cancel := context.WithTimeout(base, 8*time.Second)
+				defer cancel()
+				cfg := passthroughLifecycleConfig()
+				cfg.RunMode = config.RunModeSimple
+				cfg.Gateway.OpenAIWS.OAuthEnabled = true
+				cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 3
+				cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 1
+				cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 1
+				account := groupAdmissionAccount(8)
+				if scenario == "primary_allowed" {
+					account.GroupIDs = []int64{7}
+				}
+				account.Credentials["model_mapping"] = map[string]any{"gpt-5.1": "gpt-5.1"}
+				account.Extra = map[string]any{"openai_oauth_responses_websockets_v2_mode": mode}
+				upstream := newStagedPassthroughConn()
+				defer upstream.Close()
+				svc := newPassthroughLifecycleService(cfg, upstream)
+				svc.accountRepo = &groupAdmissionRepo{first: account}
+				svc.requireLatestTurnAdmission = true
+				pool := newOpenAIWSConnPool(cfg)
+				pool.setClientDialerForTest(&stagedPassthroughDialer{conn: &turnAdmissionNativeConn{upstream}})
+				svc.openaiWSPool = pool
+				defer pool.Close()
+				errs := startGroupAdmissionIngressServer(t, ctx, svc, account, key)
+				if scenario == "extra_denied" {
+					select {
+					case err := <-errs:
+						requireGroupMembershipDenied(t, err)
+					case <-upstream.writes:
+						t.Fatal("ISSUE1081_WS_INGRESS_EXTRA_WRITE")
+					case <-ctx.Done():
+						t.Fatal("constrained WS did not reject extra account")
+					}
+					select {
+					case <-upstream.writes:
+						t.Fatal("rejected WS wrote upstream")
+					default:
+					}
+				} else {
+					select {
+					case <-upstream.writes:
+					case err := <-errs:
+						t.Fatalf("allowed WS ended before first upstream write: %v", err)
+					case <-ctx.Done():
+						t.Fatal("allowed WS never reached upstream")
+					}
+				}
+			})
+		}
+	}
+}
