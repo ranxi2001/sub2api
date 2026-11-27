@@ -38,7 +38,7 @@ func TestAdminAPIKeyModelPolicyRequiresAdminAuthentication(t *testing.T) {
 			users := service.NewUserService(&modelPolicyAdminAuthUserRepo{user: user}, nil, nil, nil)
 			svc := newStubAdminService()
 			svc.apiKeys = []service.APIKey{{ID: 10}}
-			h := NewAdminAPIKeyHandler(svc)
+			h := NewAdminAPIKeyHandler(svc, nil)
 			router := gin.New()
 			admin := router.Group("/api/v1/admin", gin.HandlerFunc(middleware.NewAdminAuthMiddleware(auth, users, nil, nil)))
 			admin.PUT("/api-keys/:id", h.UpdateGroup)

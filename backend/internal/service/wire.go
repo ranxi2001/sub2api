@@ -1042,11 +1042,12 @@ func ProvideAPIKeyServiceWithGroupProtection(
 	userSubRepo UserSubscriptionRepository, userGroupRateRepo UserGroupRateRepository,
 	cache APIKeyCache, cfg *config.Config, billingCacheService *BillingCacheService,
 	concurrencyService *ConcurrencyService, authority RegionalAuthAuthority,
-	autoCredit AutoCreditRepository, protection *GroupAntiDistillationService,
+	autoCredit AutoCreditRepository, protection *GroupAntiDistillationService, settings SettingRepository,
 ) (*APIKeyService, error) {
 	svc, err := ProvideAPIKeyService(apiKeyRepo, userRepo, groupRepo, userSubRepo, userGroupRateRepo, cache, cfg, billingCacheService, concurrencyService, authority, autoCredit)
 	if err == nil {
 		svc.groupAntiDistillation = protection
+		svc.SetGroupPolicy(NewSettingService(settings, nil))
 	}
 	return svc, err
 }

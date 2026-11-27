@@ -21,8 +21,9 @@ var ErrRegionalAuthUnavailable = errors.New("regional authorization unavailable"
 // API keys and password hashes never enter this document. Monetary fields in the
 // reused projection are informational, never a regional spending authorization.
 type RegionalAuthDocument struct {
-	Version int                 `json:"version"`
-	Entries []RegionalAuthEntry `json:"entries"`
+	APIKeyMultiGroupEnabled *bool               `json:"api_key_multi_group_enabled,omitempty"`
+	Version                 int                 `json:"version"`
+	Entries                 []RegionalAuthEntry `json:"entries"`
 }
 type RegionalAuthEntry struct {
 	Digest       string                    `json:"digest"`
@@ -63,6 +64,13 @@ func ExportRegionalAuth(ctx context.Context, source RegionalAuthSource, allowed 
 		return nil, err
 	}
 	doc := RegionalAuthDocument{Version: 1, Entries: make([]RegionalAuthEntry, 0, len(records))}
+	if policy, ok := source.(APIKeyGroupPolicy); ok {
+		enabled, err := policy.APIKeyMultiGroupEnabled(ctx)
+		if err != nil {
+			return nil, err
+		}
+		doc.APIKeyMultiGroupEnabled = &enabled
+	}
 	mapper := &APIKeyService{}
 	for _, record := range records {
 		key := record.APIKey
@@ -193,6 +201,12 @@ func (r *RegionalAuthReader) GetByKey(ctx context.Context, key string) (*APIKey,
 					return nil, ErrAPIKeyNotFound
 				}
 			} else if !auth.User.CanBindGroup(auth.Group.ID, auth.Group.IsExclusive) {
+				return nil, ErrAPIKeyNotFound
+			}
+		}
+		if doc.APIKeyMultiGroupEnabled != nil && !*doc.APIKeyMultiGroupEnabled {
+			auth, err = primaryGroupOnly(auth)
+			if err != nil {
 				return nil, ErrAPIKeyNotFound
 			}
 		}

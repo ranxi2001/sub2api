@@ -17,6 +17,12 @@ export default {
         payment: 'Payment',
       },
       features: {
+        apiKeyMultiGroup: {
+          title: 'API key multi-group routing',
+          description: 'Enabled by default. When disabled, keys select and route through their primary group only. Existing additional bindings are preserved and resume when enabled again. Historical usage stays unchanged.',
+          enabled: 'Allow API keys to use multiple groups',
+        },
+
         smartOpsSidebar: {
           title: 'Smart operations sidebar',
           description: 'Choose which smart operations entries appear in the sidebar. Saving applies to all administrators. Hiding a menu does not stop background jobs, change feature settings, or block direct page access.',

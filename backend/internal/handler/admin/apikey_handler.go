@@ -13,17 +13,20 @@ import (
 // AdminAPIKeyHandler handles admin API key management
 type AdminAPIKeyHandler struct {
 	adminService service.AdminService
+	settings     *service.SettingService
 }
 
 // NewAdminAPIKeyHandler creates a new admin API key handler
-func NewAdminAPIKeyHandler(adminService service.AdminService) *AdminAPIKeyHandler {
+func NewAdminAPIKeyHandler(adminService service.AdminService, settings *service.SettingService) *AdminAPIKeyHandler {
 	return &AdminAPIKeyHandler{
 		adminService: adminService,
+		settings:     settings,
 	}
 }
 
 // AdminUpdateAPIKeyGroupRequest represents the request to update an API key.
 type AdminUpdateAPIKeyGroupRequest struct {
+	GroupIDs            *[]int64           `json:"group_ids"`
 	GroupID             *int64             `json:"group_id"`               // nil=不修改, 0=解绑, >0=绑定到目标分组
 	ResetRateLimitUsage *bool              `json:"reset_rate_limit_usage"` // true=重置 5h/1d/7d 限速用量
 	ModelMapping        *map[string]string `json:"model_mapping"`
@@ -45,6 +48,30 @@ func (h *AdminAPIKeyHandler) UpdateGroup(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
+	}
+	if req.GroupIDs != nil {
+		ids := *req.GroupIDs
+		if len(ids) > 1 || (req.GroupID != nil && len(ids) == 1 && *req.GroupID != ids[0]) {
+			if h.settings != nil {
+				enabled, err := h.settings.APIKeyMultiGroupEnabled(c.Request.Context())
+				if err != nil {
+					response.ErrorFrom(c, err)
+					return
+				}
+				if !enabled {
+					response.ErrorFrom(c, service.ErrAPIKeyMultiGroupDisabled)
+					return
+				}
+			}
+			response.BadRequest(c, "Admin API key editing accepts only one primary group")
+			return
+		}
+		if len(ids) == 1 {
+			req.GroupID = &ids[0]
+		} else if req.GroupID == nil {
+			unbind := int64(0)
+			req.GroupID = &unbind
+		}
 	}
 	input := service.AdminUpdateAPIKeySettingsInput{GroupID: req.GroupID, ModelMapping: req.ModelMapping, ReasoningEffort: req.ReasoningEffort, AllowLongContext: req.AllowLongContext, ContextTokenLimit: req.ContextTokenLimit}
 	hasModelPolicy := req.ContextTokenLimit != nil || req.ModelMapping != nil || req.ReasoningEffort != nil || req.AllowLongContext != nil

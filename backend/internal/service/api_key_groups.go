@@ -79,6 +79,24 @@ func (s *APIKeyService) validateAPIKeyGroups(ctx context.Context, user *User, id
 // PinAPIKeyGroup preserves a request's chosen billing identity across queue/WS
 // revalidation. Never reselect underneath a request that already reserved funds.
 func (s *APIKeyService) PinAPIKeyGroup(ctx context.Context, key *APIKey, id int64) (*APIKey, error) {
+	// Read policy once for this pin operation, before changing GroupID to the
+	// selected request group. A second projection could mistake an extra for
+	// the primary if the switch changed between these reads.
+	enabled := true
+	if s.localAuth == nil {
+		var err error
+		enabled, err = s.multiGroupEnabled(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if !enabled {
+		var err error
+		key, err = primaryGroupOnly(key)
+		if err != nil {
+			return nil, err
+		}
+	}
 	bound := false
 	for _, candidate := range key.ConfiguredGroupIDs() {
 		if candidate == id {
@@ -96,7 +114,14 @@ func (s *APIKeyService) PinAPIKeyGroup(ctx context.Context, key *APIKey, id int6
 	if key.User == nil || !group.IsActive() || !s.canUserBindGroup(ctx, key.User, group) {
 		return nil, ErrGroupNotAllowed
 	}
-	return s.apiKeyWithGroup(ctx, key, group)
+	selected, err := s.apiKeyWithGroup(ctx, key, group)
+	if err != nil {
+		return nil, err
+	}
+	if !enabled {
+		return primaryGroupOnly(selected)
+	}
+	return selected, nil
 }
 
 func (s *APIKeyService) apiKeyWithGroup(ctx context.Context, key *APIKey, group *Group) (*APIKey, error) {
@@ -124,6 +149,11 @@ func (s *APIKeyService) apiKeyWithGroup(ctx context.Context, key *APIKey, group 
 // BillingGroups exposes only groups bound to this key and still permitted for
 // its owner. Inactive groups remain visible with their status in the declaration.
 func (s *APIKeyService) BillingGroups(ctx context.Context, key *APIKey) ([]*APIKey, error) {
+	var policyErr error
+	key, policyErr = s.applyGroupPolicy(ctx, key)
+	if policyErr != nil {
+		return nil, policyErr
+	}
 	var out []*APIKey
 	for _, id := range key.ConfiguredGroupIDs() {
 		group, err := s.groupRepo.GetByIDLite(ctx, id)
@@ -154,6 +184,11 @@ type apiKeyGroupCandidate struct {
 // group, probes capacity, loads prices, or recovers credit. Each candidate owns
 // its User snapshot so per-group restrictions cannot contaminate auth caches.
 func (s *APIKeyService) ModelListingGroups(ctx context.Context, key *APIKey, accepts func(*APIKey) bool) ([]*APIKey, error) {
+	var policyErr error
+	key, policyErr = s.applyGroupPolicy(ctx, key)
+	if policyErr != nil {
+		return nil, policyErr
+	}
 	if key == nil || key.User == nil || s.groupRepo == nil || s.userGroupRateRepo == nil || s.localAuth != nil {
 		return nil, infraerrors.ServiceUnavailable("MODEL_LISTING_UNAVAILABLE", "Model listing authorization is unavailable")
 	}
@@ -205,6 +240,11 @@ func (s *APIKeyService) ModelListingGroups(ctx context.Context, key *APIKey, acc
 // effective token multiplier (including user overrides and peak hours). Equal
 // rates prefer lower load, with randomized ties to avoid a permanent hot group.
 func (s *APIKeyService) SelectRequestGroup(ctx context.Context, key *APIKey, models []string, kind string, subscriptions *SubscriptionService, accepts func(*APIKey) bool, checkBilling bool) (*APIKey, error) {
+	var policyErr error
+	key, policyErr = s.applyGroupPolicy(ctx, key)
+	if policyErr != nil {
+		return nil, policyErr
+	}
 	if key == nil || len(key.ConfiguredGroupIDs()) < 2 {
 		return key, nil
 	}

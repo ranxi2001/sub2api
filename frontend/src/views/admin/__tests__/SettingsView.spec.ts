@@ -1159,6 +1159,44 @@ describe("admin SettingsView payment visible method controls", () => {
     wrapper.unmount();
   });
 
+  it.each([undefined, true, false])("Issue1081 defaults, saves and reloads multi-group policy %s", async enabled => {
+    getSettings.mockResolvedValueOnce({ ...baseSettingsResponse, ...(enabled === undefined ? {} : { api_key_multi_group_enabled: enabled }) });
+    const wrapper = mountView();
+    await flushPromises();
+    const input = wrapper.get<HTMLInputElement>('#api-key-multi-group-enabled');
+    expect(input.element.checked).toBe(enabled !== false);
+    await input.setValue(false);
+    await wrapper.find('form').trigger('submit.prevent');
+    await flushPromises();
+    expect(updateSettings.mock.calls[0]?.[0]).toMatchObject({ api_key_multi_group_enabled: false });
+    wrapper.unmount();
+    getSettings.mockResolvedValueOnce({ ...baseSettingsResponse, api_key_multi_group_enabled: false });
+    const loaded = mountView();
+    await flushPromises();
+    expect(loaded.get<HTMLInputElement>('#api-key-multi-group-enabled').element.checked).toBe(false);
+    loaded.unmount();
+  });
+
+  it.each([0, 1])("Issue1081 dismisses either real settings badge entry %s persistently", async index => {
+    localStorage.setItem('sub2api:new-feature-notices:v1:41', JSON.stringify([NEW_FEATURE_NOTICES.protocolFeatureSwitches]));
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.get('#settings-tab-features').trigger('click');
+    const badges = () => wrapper.findAllComponents(NewFeatureBadge)
+      .filter(b => b.props('noticeId') === NEW_FEATURE_NOTICES.apiKeyMultiGroupPolicy)
+      .flatMap(b => b.findAll('[data-testid="new-feature-badge"]'));
+    expect(badges()).toHaveLength(2);
+    await badges()[index]!.trigger('click');
+    expect(badges()).toHaveLength(0);
+    wrapper.unmount();
+    const reloaded = mountView();
+    await flushPromises();
+    expect(reloaded.findAllComponents(NewFeatureBadge)
+      .filter(b => [NEW_FEATURE_NOTICES.apiKeyMultiGroupPolicy, NEW_FEATURE_NOTICES.protocolFeatureSwitches].includes(b.props('noticeId')))
+      .flatMap(b => b.findAll('[data-testid="new-feature-badge"]'))).toHaveLength(0);
+    reloaded.unmount();
+  });
+
   it("saves the BPS and Prism protocol switches", async () => {
     const wrapper = mountView();
     await flushPromises();

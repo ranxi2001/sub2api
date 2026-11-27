@@ -3,6 +3,7 @@ package middleware
 import (
 	"errors"
 	"fmt"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -86,6 +87,10 @@ func APIKeyAuthWithSubscriptionGoogle(apiKeyService *service.APIKeyService, subs
 			if errors.Is(err, service.ErrAPIKeyAuthOverloaded) {
 				MarkIngressRejected(c, IngressRejectAPIKeyAuthOverloaded)
 				abortWithGoogleError(c, 503, "API key authentication is temporarily unavailable")
+				return
+			}
+			if errors.Is(err, service.ErrAPIKeyPrimaryGroupRequired) || errors.Is(err, service.ErrAPIKeyGroupPolicyUnavailable) {
+				abortWithGoogleError(c, infraerrors.Code(err), infraerrors.Message(err))
 				return
 			}
 			if abortIfAPIKeyLookupClientGone(c, err) {
