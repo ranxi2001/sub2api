@@ -379,7 +379,8 @@ type UpdateSettingsRequest struct {
 	PelicanShowcase        *service.PelicanShowcaseConfig `json:"pelican_showcase_config"`
 
 	// Subscription feature switch (user-facing subscription surface; see SettingKeySubscriptionEnabled)
-	SubscriptionEnabled *bool `json:"subscription_enabled"`
+	SubscriptionEnabled     *bool `json:"subscription_enabled"`
+	APIKeyMultiGroupEnabled *bool `json:"api_key_multi_group_enabled"`
 
 	// Model Plaza feature switches + description
 	ModelPlazaEnabled      *bool                               `json:"model_plaza_enabled"`
@@ -2381,6 +2382,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.PelicanShowcase
 		}(),
+		APIKeyMultiGroupEnabled: func() bool {
+			if req.APIKeyMultiGroupEnabled != nil {
+				return *req.APIKeyMultiGroupEnabled
+			}
+			return previousSettings.APIKeyMultiGroupEnabled
+		}(),
 		SubscriptionEnabled: func() bool {
 			if req.SubscriptionEnabled != nil {
 				return *req.SubscriptionEnabled
@@ -2900,6 +2907,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		PelicanShowcaseEnabled:   updatedSettings.PelicanShowcaseEnabled,
 		PelicanShowcase:          updatedSettings.PelicanShowcase,
 		SubscriptionEnabled:      updatedSettings.SubscriptionEnabled,
+		APIKeyMultiGroupEnabled:  updatedSettings.APIKeyMultiGroupEnabled,
 
 		ModelPlazaEnabled:       updatedSettings.ModelPlazaEnabled,
 		ModelPlazaRequireAuth:   updatedSettings.ModelPlazaRequireAuth,

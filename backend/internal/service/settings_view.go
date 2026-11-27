@@ -239,7 +239,8 @@ type SystemSettings struct {
 	// (sidebar entries, purchase-page subscription tab, header progress badge,
 	// usage billing-type filter, /subscriptions route). Pairs with PaymentBalanceDisabled
 	// to form the admin-facing "site billing mode" selector.
-	SubscriptionEnabled bool `json:"subscription_enabled"`
+	SubscriptionEnabled     bool `json:"subscription_enabled"`
+	APIKeyMultiGroupEnabled bool `json:"api_key_multi_group_enabled"`
 
 	// Model Plaza feature (public group/model pricing showcase)
 	ModelPlazaEnabled       bool                       `json:"model_plaza_enabled"`
@@ -470,7 +471,8 @@ type PublicSettings struct {
 	PelicanShowcaseEnabled bool `json:"pelican_showcase_enabled"`
 
 	// Subscription feature switch (see SystemSettings.SubscriptionEnabled)
-	SubscriptionEnabled bool `json:"subscription_enabled"`
+	SubscriptionEnabled     bool `json:"subscription_enabled"`
+	APIKeyMultiGroupEnabled bool `json:"api_key_multi_group_enabled"`
 
 	// Model Plaza feature (public group/model pricing showcase)
 	ModelPlazaEnabled       bool `json:"model_plaza_enabled"`

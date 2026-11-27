@@ -355,7 +355,8 @@ type SystemSettings struct {
 
 	// Subscription feature switch: gates the whole user-facing subscription surface
 	// (sidebar entries, purchase-page subscription tab, header badge, /subscriptions route).
-	SubscriptionEnabled bool `json:"subscription_enabled"`
+	SubscriptionEnabled     bool `json:"subscription_enabled"`
+	APIKeyMultiGroupEnabled bool `json:"api_key_multi_group_enabled"`
 
 	// Model Plaza feature (public group/model pricing showcase)
 	ModelPlazaEnabled       bool                               `json:"model_plaza_enabled"`
@@ -502,7 +503,8 @@ type PublicSettings struct {
 	AvailableChannelsEnabled bool `json:"available_channels_enabled"`
 	PelicanShowcaseEnabled   bool `json:"pelican_showcase_enabled"`
 
-	SubscriptionEnabled bool `json:"subscription_enabled"`
+	SubscriptionEnabled     bool `json:"subscription_enabled"`
+	APIKeyMultiGroupEnabled bool `json:"api_key_multi_group_enabled"`
 
 	ModelPlazaEnabled       bool `json:"model_plaza_enabled"`
 	ModelPlazaRequireAuth   bool `json:"model_plaza_require_auth"`
