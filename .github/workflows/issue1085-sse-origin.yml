@@ -5,6 +5,7 @@ on:
     paths:
       - 'backend/internal/handler/ops_error_logger.go'
       - 'backend/internal/handler/openai_issue1085*'
+      - 'backend/internal/handler/anthropic_413_review_test.go'
       - 'backend/internal/service/ops_upstream_sse_terminal*'
       - 'backend/internal/service/ops_upstream_sse_delivery_test.go'
       - 'backend/internal/testutil/sse1085/**'
@@ -106,6 +107,7 @@ jobs:
                       for case in ('http400', 'sse', 'stale_account_auth', 'stale_skip', 'current_skip', 'request_override', 'malformed', 'unknown', 'success_after_attempt', 'hidden_history_success', 'privacy')]
           required += ['TestIssue1085LocalSSEAttribution/stale=' + mode for mode in ('false', 'true')]
           required += ['TestOpsUpstreamSSETerminalAttemptScope', 'TestOpsUpstreamSSETerminalRejectsMalformed']
+          required += ['TestIssue1085RequestSizeRecoveredHistory/' + history for history in ('none', 'visible', 'hidden')]
           required += [test + '/' + reader + '/' + outcome
                        for test in ('TestIssue1085TerminalDelivery', 'TestIssue1085DeliveryMiddleware')
                        for reader in ('native_async', 'passthrough')
@@ -114,6 +116,23 @@ jobs:
                        for reader in ('native', 'passthrough') for outcome in ('success', 'flush_failure')]
           for name in required:
               assert any(row.get('Test') == name and row.get('Action') == 'pass' for row in rows), name
+          PY
+      - name: Exact head direct Anthropic413 monitoring and earlier-attempt controls
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          (cd backend && go test -race -json -tags=unit,issue1085 ./internal/handler -run '^TestAnthropic413Review(AutoConfigNoCooldown|PreservesEarlierFailures|BudgetRepairMonitoring)$' -count=1 -timeout=5m) | tee "$RUNNER_TEMP/issue1085-413-green.jsonl"
+      - name: Require original Anthropic413 positive and history assertions
+        if: ${{ !cancelled() }}
+        run: |
+          python3 - "$RUNNER_TEMP/issue1085-413-green.jsonl" <<'PY'
+          import json, sys
+          rows = [json.loads(line) for line in open(sys.argv[1]) if line.startswith('{')]
+          assert not any(row.get('Action') in ('fail', 'build-fail', 'skip') for row in rows)
+          for case in ('AutoConfigNoCooldown', 'PreservesEarlierFailures', 'BudgetRepairMonitoring'):
+              for boundary in ('json', 'sse'):
+                  name = 'TestAnthropic413Review' + case + '/' + boundary
+                  assert any(row.get('Test') == name and row.get('Action') == 'pass' for row in rows), name
           PY
       - uses: actions/upload-artifact@v7
         if: always()

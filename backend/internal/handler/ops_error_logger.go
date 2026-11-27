@@ -1365,6 +1365,12 @@ func logOpsRecoveredUpstream(c *gin.Context, ops *service.OpsService, finalStatu
 
 	entry := &service.OpsInsertErrorLogInput{StatusCode: finalStatus}
 	applyOpsUpstreamFieldsFromContext(c, entry)
+	// A request-size rejection also records its current upstream 413 in the
+	// top-level fields. Only explicit earlier attempts justify a separate
+	// recovered row; the current rejection already has its request-scoped row.
+	if isOpsRequestSizeRejection(c) && len(entry.UpstreamErrors) == 0 {
+		return
+	}
 	if len(entry.UpstreamErrors) > 0 {
 		visibleEvents := make([]*service.OpsUpstreamErrorEvent, 0, len(entry.UpstreamErrors))
 		for _, event := range entry.UpstreamErrors {
