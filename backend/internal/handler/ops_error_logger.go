@@ -1162,11 +1162,9 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 			logOpsStreamError(c, ops, status)
 			return
 		}
-		// A complete context rejection has already been classified at the
-		// semantic boundary. The captured terminal's generic message cannot
-		// discard its request ownership or SLA exclusion.
-		if marked, ok := service.GetOpsStreamError(c); ok && marked.RequestScoped &&
-			service.IsOpsContextLimitRejection(marked.IntendedStatus, 0, marked.Code+" "+marked.Message) {
+		// A request-scoped rejection has already been classified at the semantic
+		// boundary. Captured SSE cannot override that explicit local decision.
+		if marked, ok := service.GetOpsStreamError(c); ok && marked.RequestScoped {
 			logOpsStreamError(c, ops, status)
 			if opsStreamErrorsAllRequestScoped(service.GetOpsStreamErrors(c)) {
 				logOpsRecoveredUpstream(c, ops, status)
@@ -1322,6 +1320,11 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 			if status >= 400 {
 				finalStatus := status
 				entry.UpstreamStatusCode = &finalStatus
+			}
+			if service.HasOpsUpstreamSSETerminal(c) {
+				// Earlier attempt diagnostics remain in UpstreamErrors, not in
+				// the final terminal's top-level detail.
+				entry.UpstreamErrorDetail = nil
 			}
 		}
 		suppressOpsUpstreamAttributionForClientRejection(entry)
@@ -2409,8 +2412,9 @@ func classifyOpsErrorLog(c *gin.Context, errType, message, code string, status i
 	routingCapacityLimited := isOpsRoutingCapacityLimited(c)
 	clientBusinessLimited := service.HasOpsClientBusinessLimited(c)
 	localModelConfiguration := clientBusinessLimited && service.OpsClientBusinessLimitedReason(c) == service.OpsClientBusinessLimitedReasonLocalModelConfiguration
-	upstreamError := hasOpsUpstreamErrorContext(c)
-	accountAuthFailure := hasOpsAccountAuthFailure(c)
+	upstreamTerminal := service.HasOpsUpstreamSSETerminal(c)
+	upstreamError := upstreamTerminal || hasOpsUpstreamErrorContext(c)
+	accountAuthFailure := !upstreamTerminal && hasOpsAccountAuthFailure(c)
 	if localModelConfiguration {
 		// The requested model is outside this group's configured capabilities.
 		// This is a client rejection, not a platform or account failure.

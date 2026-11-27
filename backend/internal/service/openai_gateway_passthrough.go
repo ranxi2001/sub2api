@@ -2311,6 +2311,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithImage(
 	reasoningEfforts ...string,
 ) (*openaiStreamingResultPassthrough, error) {
 	ctx = bindOpenAI429ResponseObservation(ctx, resp, c)
+	upstreamTerminal := beginOpsUpstreamSSETerminal(c)
 	earlyPluginEvents := s.openAIPluginSSEEarlyEvents(resp, account)
 	pluginEarlyCommitted := false
 	earlyMetadataPending := false
@@ -2685,6 +2686,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithImage(
 					}
 				}
 				forceFlushFailedEvent = true
+				upstreamTerminal.observe(dataBytes, eventType)
 				sawFailedEvent = true
 			}
 			if trimmedData == "[DONE]" {
@@ -2821,6 +2823,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithImage(
 		if line == "" && responseFailedPending {
 			responseFailedPending = false
 			failureDelivered = true
+			if !clientDisconnected {
+				upstreamTerminal.complete()
+			}
 		}
 		// Terminal 事件（response.completed / [DONE] 等）随空行完整刷出后不再等上游
 		// EOF：上游在 keep-alive/HTTP2 复用连接上可能拖延关闭连接（观测到 8~46s 不等），

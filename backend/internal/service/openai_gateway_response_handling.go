@@ -55,6 +55,7 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 }
 
 func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel, reasoningEffort string) (*openaiStreamingResult, error) {
+	upstreamTerminal := beginOpsUpstreamSSETerminal(c)
 	ctx = bindOpenAI429ResponseObservation(ctx, resp, c)
 	observer := upstreamResponseModelObserverFromContext(c)
 	if observer == nil {
@@ -794,6 +795,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 					}
 				}
 				forceFlushFailedEvent = true
+				upstreamTerminal.observe(dataBytes, eventType)
 				sawFailedEvent = true
 				terminalFailurePending = !codexFailureTerminal || eventType == "response.failed"
 			}
@@ -1000,6 +1002,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			if terminalFailurePending && streamEarlyErr == nil {
 				terminalFailurePending = false
 				failureDelivered = true
+				if !clientDisconnected {
+					upstreamTerminal.complete()
+				}
 			}
 			return
 		}
@@ -1043,6 +1048,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			if line == "" && terminalFailurePending && streamEarlyErr == nil {
 				terminalFailurePending = false
 				failureDelivered = true
+				if !clientDisconnected {
+					upstreamTerminal.complete()
+				}
 			}
 		}
 	}
