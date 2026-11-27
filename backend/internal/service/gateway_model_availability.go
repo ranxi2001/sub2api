@@ -4,8 +4,6 @@ import (
 	"context"
 	"strings"
 	"time"
-
-	"github.com/Wei-Shaw/sub2api/internal/config"
 )
 
 // ModelAvailabilityDiagnosis describes whether the requested model can be
@@ -115,14 +113,20 @@ func (s *GatewayService) DiagnoseModelAvailabilityForPlatform(
 	}
 
 	queryGroupID := groupID
+	if primary, restricted := primaryOnlyGroupFromContext(ctx); restricted {
+		if groupID != nil && *groupID != primary {
+			return ModelAvailabilityDiagnosis{Complete: true}
+		}
+		queryGroupID = &primary
+	}
 	includeGrouped := false
 	if useMixed {
 		// Preserve the generic scheduler's scope rules: an explicit group wins
 		// for mixed scheduling, while group-less simple mode scans all accounts.
-		if groupID == nil && s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
+		if groupID == nil && simpleModeAccountScope(ctx, s.cfg) {
 			includeGrouped = true
 		}
-	} else if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
+	} else if simpleModeAccountScope(ctx, s.cfg) {
 		queryGroupID = nil
 		includeGrouped = true
 	}
@@ -138,6 +142,9 @@ func (s *GatewayService) DiagnoseModelAvailabilityForPlatform(
 	diag := ModelAvailabilityDiagnosis{Complete: true}
 	now := time.Now()
 	for i := range accounts {
+		if !accountAllowedByAPIKeyGroup(ctx, &accounts[i]) {
+			continue
+		}
 		if useMixed && accounts[i].Platform == PlatformAntigravity && !accounts[i].IsMixedSchedulingEnabled() {
 			continue
 		}

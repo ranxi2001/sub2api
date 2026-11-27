@@ -8,6 +8,9 @@ import (
 // ProbeAPIKeyGroup checks scheduler eligibility without reserving slots,
 // registering sessions, setting account errors, or binding sticky accounts.
 func (s *GatewayService) ProbeAPIKeyGroup(ctx context.Context, group *Group, model, kind string) (APIKeyGroupAvailability, error) {
+	if primary, restricted := primaryOnlyGroupFromContext(ctx); restricted && (group == nil || group.ID != primary) {
+		return APIKeyGroupAvailability{}, nil
+	}
 	ctx = s.withGroupContext(ctx, group)
 	platform, forced, err := s.resolvePlatform(ctx, &group.ID, group, model)
 	if err != nil {

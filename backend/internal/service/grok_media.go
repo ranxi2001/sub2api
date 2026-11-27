@@ -675,6 +675,9 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 	body []byte,
 	contentType string,
 ) (*OpenAIForwardResult, error) {
+	if !accountAllowedByAPIKeyGroup(ctx, account) {
+		return nil, denyOpenAITurn("group_membership_changed")
+	}
 	if err := CheckUpstreamModeration(ctx, c, account); err != nil {
 		return nil, err
 	}

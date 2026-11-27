@@ -121,6 +121,9 @@ func sleepWithContext(ctx context.Context, d time.Duration) error {
 
 // Forward 转发请求到Claude API
 func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, parsed *ParsedRequest) (result *ForwardResult, err error) {
+	if !accountAllowedByAPIKeyGroup(ctx, account) {
+		return nil, ErrAPIKeyPrimaryGroupRequired
+	}
 	if account.gatewayProtocolsPending() {
 		if parsed != nil && parsed.GroupID != nil {
 			if group, ok := ctx.Value(ctxkey.Group).(*Group); !ok || group == nil || group.ID != *parsed.GroupID {

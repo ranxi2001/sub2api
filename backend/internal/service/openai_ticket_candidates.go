@@ -52,7 +52,7 @@ func (s *OpenAIGatewayService) listSchedulableAccountsForRequest(
 		account := &accounts[i]
 		if _, needed := hydrate[account.ID]; needed {
 			account = full[account.ID]
-			if account == nil || !s.openAIAccountMatchesSchedulingGroup(account, groupID) {
+			if account == nil || !s.openAIAccountMatchesRequestGroup(ctx, account, groupID) {
 				continue
 			}
 		}

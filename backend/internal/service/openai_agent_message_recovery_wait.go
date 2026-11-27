@@ -63,7 +63,7 @@ func (s *defaultOpenAIAccountScheduler) checkOpenAIAgentRecoveryCooldown(ctx con
 		(account.TempUnschedulableUntil != nil && account.TempUnschedulableUntil.After(now)) ||
 		(account.SupportsAccountQuota() && account.IsQuotaExceeded()) ||
 		account.HasManagedOpenAIConnections() || account.AuthConnectionID != "" ||
-		!account.IsOpenAI() || !s.service.openAIAccountMatchesSchedulingGroup(account, req.GroupID) ||
+		!account.IsOpenAI() || !s.service.openAIAccountMatchesRequestGroup(ctx, account, req.GroupID) ||
 		(req.RequirePrivacySet && !account.IsPrivacySet()) ||
 		!supportsOpenAIRequestModel(account, req.RequestedModel, req.RequireCompact) ||
 		!account.IsModelAllowedInGroup(req.GroupID, req.RequestedModel) ||

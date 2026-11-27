@@ -424,6 +424,15 @@ func (s *defaultOpenAIAccountScheduler) Select(
 	ctx context.Context,
 	req OpenAIAccountScheduleRequest,
 ) (selection *AccountSelectionResult, decision OpenAIAccountScheduleDecision, err error) {
+	if s.service != nil {
+		if err := s.service.checkPrimaryOnlyPreviousResponseOwner(ctx, req.GroupID, req.PreviousResponseID); err != nil {
+			return nil, decision, err
+		}
+	}
+	if _, restricted := primaryOnlyGroupFromContext(ctx); restricted && strings.TrimSpace(req.PreviousResponseID) != "" {
+		req.PreviousResponseCanMove = false
+		req.StickyWeighted = false
+	}
 	recovery := openAIAgentRecoveryFromContext(ctx)
 	// Preserve the public refusal and admission policy, while allowing operators
 	// to identify the exact owner check without capturing conversation state.
@@ -737,7 +746,7 @@ func (s *defaultOpenAIAccountScheduler) Select(
 			hasGroupMetadata := len(selection.Account.GroupIDs) > 0 || len(selection.Account.AccountGroups) > 0
 			groupCompatible := !hasGroupMetadata || openAIStickyAccountMatchesGroup(selection.Account, req.GroupID)
 			if hasGroupMetadata && s.service != nil {
-				groupCompatible = s.service.openAIAccountMatchesSchedulingGroup(selection.Account, req.GroupID)
+				groupCompatible = s.service.openAIAccountMatchesRequestGroup(ctx, selection.Account, req.GroupID)
 			}
 			if !groupCompatible ||
 				!compatible || !s.isAccountTransportCompatible(selection.Account, req.RequiredTransport, req.RequestedModel) {
@@ -779,6 +788,9 @@ func (s *defaultOpenAIAccountScheduler) Select(
 
 	if previousResponseID != "" && req.priorityLatencyPool != nil {
 		return nil, decision, priorityLatencyAdmissionError(false)
+	}
+	if _, restricted := primaryOnlyGroupFromContext(ctx); restricted && previousResponseID != "" {
+		return nil, decision, denyOpenAITurn("group_membership_changed")
 	}
 
 	if req.GuardianParentAccountID > 0 {
@@ -893,7 +905,7 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 		return nil, false, nil
 	}
 	account = s.service.recheckSelectedOpenAIAccountFromDB(ctx, account, req.GroupID, req.Platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
-	if account == nil || !s.service.openAIAccountMatchesSchedulingGroup(account, req.GroupID) || !s.isAccountRequestCompatible(ctx, account, req) || !s.isAccountTransportCompatible(account, req.RequiredTransport, req.RequestedModel) {
+	if account == nil || !s.service.openAIAccountMatchesRequestGroup(ctx, account, req.GroupID) || !s.isAccountRequestCompatible(ctx, account, req) || !s.isAccountTransportCompatible(account, req.RequiredTransport, req.RequestedModel) {
 		clearBinding()
 		return nil, false, nil
 	}
@@ -1806,7 +1818,7 @@ func (s *defaultOpenAIAccountScheduler) tryFallbackToWeightedSticky(
 			}
 			continue
 		}
-		if !s.service.openAIAccountMatchesSchedulingGroup(account, req.GroupID) {
+		if !s.service.openAIAccountMatchesRequestGroup(ctx, account, req.GroupID) {
 			if accountID == req.StickyAccountID && strings.TrimSpace(req.SessionHash) != "" {
 				_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, req.SessionHash)
 			}
@@ -2031,7 +2043,7 @@ func (s *defaultOpenAIAccountScheduler) loadOpenAIEligibleAccounts(ctx context.C
 			// Use the existing scheduling authority here; selected-account primary
 			// rechecks remain after acquisition, avoiding a full-pool SQL fanout.
 			account = s.service.resolveFreshSchedulableOpenAIAccount(ctx, account, req.GroupID, req.Platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
-			if account == nil || !s.service.openAIAccountMatchesSchedulingGroup(account, req.GroupID) || !s.isAccountRequestCompatible(ctx, account, req) || !s.isAccountTransportCompatible(account, req.RequiredTransport, req.RequestedModel) {
+			if account == nil || !s.service.openAIAccountMatchesRequestGroup(ctx, account, req.GroupID) || !s.isAccountRequestCompatible(ctx, account, req) || !s.isAccountTransportCompatible(account, req.RequiredTransport, req.RequestedModel) {
 				filterStats.exclude("fresh_ineligible")
 				continue
 			}
@@ -2409,6 +2421,9 @@ func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatibleReason(ctx con
 	ctx = withOpenAIProxyQuarantineTransport(ctx, req.RequiredTransport)
 	if account == nil {
 		return false, "account_nil"
+	}
+	if !accountAllowedByAPIKeyGroup(ctx, account) {
+		return false, "group_membership_changed"
 	}
 	if s != nil && s.service != nil && !s.service.openAI409AccountRouteSupported(ctx, account, req.RequestedModel) {
 		return false, "readable_rebuild_route_unsupported"
@@ -2946,9 +2961,12 @@ func (s *OpenAIGatewayService) selectLegacyAccountByPreviousResponse(
 		ExcludedIDs:             excludedIDs,
 		RequirePrivacySet:       s.openAIGroupRequiresPrivacySet(ctx, groupID),
 	})
-	if !s.openAIAccountMatchesSchedulingGroup(account, groupID) || !compatible || !scheduler.isAccountTransportCompatible(account, requiredTransport, requestedModel) {
+	if !s.openAIAccountMatchesRequestGroup(ctx, account, groupID) || !compatible || !scheduler.isAccountTransportCompatible(account, requiredTransport, requestedModel) {
 		if selection.ReleaseFunc != nil {
 			selection.ReleaseFunc()
+		}
+		if _, restricted := primaryOnlyGroupFromContext(ctx); restricted {
+			return nil, false, denyOpenAITurn("group_membership_changed")
 		}
 		return nil, false, nil
 	}
@@ -2973,6 +2991,12 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 	previousResponseCanMove bool,
 	useUpstreamTokenCost bool,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+	if err := s.checkPrimaryOnlyPreviousResponseOwner(ctx, groupID, previousResponseID); err != nil {
+		return nil, OpenAIAccountScheduleDecision{}, err
+	}
+	if _, restricted := primaryOnlyGroupFromContext(ctx); restricted && strings.TrimSpace(previousResponseID) != "" {
+		previousResponseCanMove = false
+	}
 	ctx = withOpenAIProxyQuarantineTransport(ctx, requiredTransport)
 	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
 	ctx = s.withOpenAIGroupPrivacyRequirement(ctx, groupID)

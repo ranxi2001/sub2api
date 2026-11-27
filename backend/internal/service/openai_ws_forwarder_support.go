@@ -554,8 +554,14 @@ func (s *OpenAIGatewayService) selectAccountByPreviousResponseIDForCapability(
 	if s == nil {
 		return nil, nil
 	}
+	if err := s.checkPrimaryOnlyPreviousResponseOwner(ctx, groupID, previousResponseID); err != nil {
+		return nil, err
+	}
 	accountID, account, responseID, store := s.resolveAccountByPreviousResponseIDForCapability(ctx, groupID, previousResponseID, requestedModel, excludedIDs, requiredCapability, requireCompact)
 	if accountID <= 0 || account == nil || store == nil {
+		if _, restricted := primaryOnlyGroupFromContext(ctx); restricted && strings.TrimSpace(previousResponseID) != "" {
+			return nil, denyOpenAITurn("group_membership_changed")
+		}
 		return nil, nil
 	}
 
@@ -638,7 +644,12 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 		return 0, nil, "", nil
 	}
 	if account == nil {
-		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
+		if _, restricted := primaryOnlyGroupFromContext(ctx); !restricted {
+			_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
+		}
+		return 0, nil, "", nil
+	}
+	if _, restricted := primaryOnlyGroupFromContext(ctx); restricted && !s.openAIAccountMatchesRequestGroup(ctx, account, groupID) {
 		return 0, nil, "", nil
 	}
 	// OAuth/SetupToken continuation state lives on the WSv2 session and cannot
@@ -649,7 +660,9 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 		return 0, nil, "", nil
 	}
 	if shouldClearStickySession(account, requestedModel) || !account.IsOpenAI() || !account.IsSchedulable() {
-		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
+		if _, restricted := primaryOnlyGroupFromContext(ctx); !restricted {
+			_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
+		}
 		return 0, nil, "", nil
 	}
 	if !parentHealthyForShadow(account, s.parentAccountLookup(ctx)) {
@@ -697,7 +710,7 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 			_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
 			return 0, nil, "", nil
 		}
-		if !s.openAIAccountMatchesSchedulingGroup(latest, groupID) {
+		if !s.openAIAccountMatchesRequestGroup(ctx, latest, groupID) {
 			return 0, nil, "", nil
 		}
 		if s.openAIGroupRequiresPrivacySet(ctx, groupID) && !latest.IsPrivacySet() {

@@ -52,6 +52,12 @@ func TestIssue1081WarmAuthCacheRoundTrip(t *testing.T) {
 					want = []int64{1, 2}
 				}
 				require.Equal(t, want, got.ConfiguredGroupIDs())
+				wantPrimaryConstraint := int64(1)
+				if enabled {
+					wantPrimaryConstraint = 0
+				}
+				require.Equal(t, wantPrimaryConstraint, got.PrimaryOnlyGroupID())
+				require.Zero(t, key.PrimaryOnlyGroupID(), "shared source must not retain request policy")
 				require.Equal(t, []int64{1, 2}, entry.Snapshot.GroupIDs)
 				if svc.authCacheL1 != nil {
 					svc.authCacheL1.Wait()

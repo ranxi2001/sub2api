@@ -40,6 +40,7 @@ func nextWithAPIKeyAdmissionOwner(c *gin.Context, apiKeyService *service.APIKeyS
 // owner/revalidation lifecycle preserves revocation and key-slot cancellation
 // without introducing the primary-backed API Key middleware.
 func nextWithAPIKeyAdmissionLookup(c *gin.Context, lookup func(context.Context, string) (*service.APIKey, error), credential string, trustedClientIP string, key *service.APIKey, googleStyle bool) {
+	c.Request = c.Request.WithContext(service.WithAPIKeyGroupConstraint(c.Request.Context(), key))
 	var writer *apiKeyAdmissionWriter
 	// A WS connection outlives one capacity decision: install the revalidator
 	// (and its lightweight control owner) even when the handshake key is
@@ -165,6 +166,7 @@ type apiKeyQueueInitialIdentity struct {
 	forcedReasoning    string
 	contextTokenLimit  int
 	allowLongContext   bool
+	primaryOnlyGroupID int64
 }
 
 func captureAPIKeyQueueIdentity(initial *service.APIKey) apiKeyQueueInitialIdentity {
@@ -173,6 +175,7 @@ func captureAPIKeyQueueIdentity(initial *service.APIKey) apiKeyQueueInitialIdent
 		return identity
 	}
 	identity.keyID = initial.ID
+	identity.primaryOnlyGroupID = initial.PrimaryOnlyGroupID()
 	identity.userID = initial.UserID
 	identity.modelMapping = maps.Clone(initial.ModelMapping)
 	identity.forcedReasoning = initial.ReasoningEffort
@@ -200,6 +203,9 @@ func captureAPIKeyQueueIdentity(initial *service.APIKey) apiKeyQueueInitialIdent
 // identity. A WS session opened before enforcement must re-enter admission.
 func apiKeyQueueCoreIdentityChanged(initial apiKeyQueueInitialIdentity, latest *service.APIKey) bool {
 	if latest == nil {
+		return true
+	}
+	if initial.primaryOnlyGroupID != latest.PrimaryOnlyGroupID() {
 		return true
 	}
 	// A queued request or persistent socket has already resolved its route

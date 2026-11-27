@@ -248,6 +248,7 @@ func (s *SchedulerSnapshotService) Stop() {
 func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, groupID *int64, platform string, hasForcePlatform bool) (accountsResult []Account, mixedResult bool, resultErr error) {
 	defer func() {
 		if resultErr == nil {
+			accountsResult = filterAPIKeyGroupAccounts(ctx, accountsResult)
 			accountsResult, resultErr = s.filterPerformanceAccounts(ctx, accountsResult)
 		}
 	}()
@@ -301,6 +302,7 @@ func (s *SchedulerSnapshotService) readSnapshotAccounts(ctx context.Context, buc
 		if err != nil || !hit {
 			return nil, false, err
 		}
+		accounts = filterAPIKeyGroupAccounts(ctx, accounts)
 		return compactSchedulableAccounts(accounts), true, nil
 	}
 	cached, hit, err := s.cache.GetSnapshot(ctx, bucket)

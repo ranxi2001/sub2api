@@ -1,0 +1,85 @@
+name: Issue1081 simple-mode primary routing
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/issue1081-simple-mode.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: issue1081-simple-mode-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  behavioral-red-green:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Freeze candidate and preserve the same real-auth oracle
+        env:
+          EXPECTED: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED"
+          test -z "$(git status --porcelain)"
+          git rev-parse HEAD > "$RUNNER_TEMP/issue1081-simple-head.txt"
+          git worktree add --detach "$RUNNER_TEMP/issue1081-simple-old" 91aa5964529117ef8b60508b8d2349c5427d0ff1
+          cp backend/internal/server/middleware/api_key_simple_mode_routing_test.go "$RUNNER_TEMP/issue1081-simple-old/backend/internal/server/middleware/"
+          sha256sum backend/internal/server/middleware/api_key_simple_mode_routing_test.go "$RUNNER_TEMP/issue1081-simple-old/backend/internal/server/middleware/api_key_simple_mode_routing_test.go" > "$RUNNER_TEMP/issue1081-simple-oracle.txt"
+          cmp backend/internal/server/middleware/api_key_simple_mode_routing_test.go "$RUNNER_TEMP/issue1081-simple-old/backend/internal/server/middleware/api_key_simple_mode_routing_test.go"
+      - name: Old production must fail named behavior with a supported nonempty model
+        run: |
+          set -euo pipefail
+          set +e
+          (cd "$RUNNER_TEMP/issue1081-simple-old/backend" && go test -json -tags=unit ./internal/server/middleware -run '^TestIssue1081SimpleModeActualAuthSupportedModel$' -count=1 -timeout=5m) > "$RUNNER_TEMP/issue1081-simple-red.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/issue1081-simple-red.jsonl"
+          python3 - "$result" "$RUNNER_TEMP/issue1081-simple-red.jsonl" <<'PY'
+          import json,sys
+          rows=[json.loads(line) for line in open(sys.argv[2]) if line.startswith('{')]
+          output=''.join(row.get('Output','') for row in rows)
+          assert int(sys.argv[1])==1, 'old source must fail'
+          assert not any(row.get('Action') in ('build-fail','skip') for row in rows), 'compile/setup/skip is not RED'
+          assert '[build failed]' not in output and 'no tests to run' not in output
+          for style in ('http','google'):
+              name='TestIssue1081SimpleModeActualAuthSupportedModel/'+style
+              assert any(row.get('Test')==name and row.get('Action')=='fail' for row in rows), name
+          assert 'ISSUE1081_AUTH_PRIMARY_POOL' in output, 'must fail the preserved routing oracle'
+          PY
+      - name: Exact candidate targeted regressions with race detector
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          (cd backend && go test -race -json -tags=unit ./internal/service ./internal/server/middleware -run '^TestIssue1081' -count=1 -timeout=10m) 2>&1 | tee "$RUNNER_TEMP/issue1081-simple-green.jsonl"
+      - name: Require named behavioral acceptance cases without skips
+        if: ${{ !cancelled() }}
+        run: |
+          python3 - "$RUNNER_TEMP/issue1081-simple-green.jsonl" <<'PY'
+          import json,sys
+          rows=[json.loads(line) for line in open(sys.argv[1]) if line.startswith('{')]
+          assert not any(row.get('Action') in ('fail','build-fail','skip') for row in rows)
+          required=['TestIssue1081SimpleModeActualAuthSupportedModel/http','TestIssue1081SimpleModeActualAuthSupportedModel/google','TestIssue1081SimpleModeSupportedModelRouting','TestIssue1081SimpleModeConstraintDoesNotMutateSharedCandidates','TestIssue1081SimpleModeQueueConstraintIdentityChange','TestIssue1081SimpleGeminiForcedPlatformNeverFallsBackToExtraGroup','TestIssue1081SimpleGeminiRejectsBetterExtraStickyAndUsageProbe','TestIssue1081SimpleGeminiPrimaryAndLegacyRequestsStillWrite','TestIssue1081SimpleSiblingAdmissionStopsBeforeFirstUpstreamWrite','TestIssue1081OpenAISimpleModeRouting','TestIssue1081OpenAISimpleModeFirstWrite/http','TestIssue1081OpenAISimpleModeFirstWrite/ws','TestIssue1081OpenAISimpleModePreviousOwnerCannotMove','TestIssue1081WarmAuthCacheRoundTrip']
+          for name in required:
+              assert any(row.get('Test')==name and row.get('Action')=='pass' for row in rows), name
+          for name in ['TestIssue1081SimpleModeSharedSnapshotRouting','TestIssue1081OpenAISimpleModeLatestAdmission','TestIssue1081OpenAISimpleModeDiagnosis','TestIssue1081OpenAISimpleModeStickyAndAcquisition','TestIssue1081OpenAISimpleModeContinuationStaysOnPrimaryOwner','TestIssue1081OpenAISimpleModeVideoFirstWrite','TestIssue1081OpenAISimpleModeSiblingFirstWrite','TestIssue1081OpenAISimpleModeWSIngress']:
+              assert any(row.get('Test')==name and row.get('Action')=='pass' for row in rows), name
+          PY
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: issue1081-simple-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            ${{ runner.temp }}/issue1081-simple-*.txt
+            ${{ runner.temp }}/issue1081-simple-*.jsonl
+          if-no-files-found: error

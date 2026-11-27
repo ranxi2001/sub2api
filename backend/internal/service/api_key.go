@@ -72,6 +72,10 @@ type APIKey struct {
 	Window5hStart *time.Time // Start of current 5h window
 	Window1dStart *time.Time // Start of current 1d window
 	Window7dStart *time.Time // Start of current 7d window
+
+	// Request-local policy state, derived before bindings are projected. Never
+	// persisted or included in shared auth snapshots / public JSON.
+	primaryOnlyGroupID int64
 }
 
 // RequiresContextCheck includes explicit ceilings even when long context is allowed.

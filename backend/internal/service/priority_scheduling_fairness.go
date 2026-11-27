@@ -131,7 +131,7 @@ func (s *defaultOpenAIAccountScheduler) shouldRebalancePrioritySticky(ctx contex
 	for i := range accounts {
 		account := &accounts[i]
 		if account.ID == sticky.ID || !account.IsSchedulable() || (!quotaSticky && account.Priority > sticky.Priority) ||
-			!s.service.openAIAccountMatchesSchedulingGroup(account, req.GroupID) ||
+			!s.service.openAIAccountMatchesRequestGroup(ctx, account, req.GroupID) ||
 			!s.isAccountRequestCompatible(ctx, account, req) || !s.isAccountTransportCompatible(account, req.RequiredTransport, req.RequestedModel) ||
 			s.service.isExcelBPSCoolingDown(account, req.RequestedModel) {
 			continue

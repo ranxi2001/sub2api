@@ -139,7 +139,8 @@ func (s *GeminiMessagesCompatService) SelectAccountForModelWithExclusions(ctx co
 		return nil, fmt.Errorf("query accounts failed: %w", err)
 	}
 	// 强制平台模式下，分组中找不到账户时回退查询全部
-	if len(accounts) == 0 && groupID != nil && hasForcePlatform {
+	_, primaryOnly := primaryOnlyGroupFromContext(ctx)
+	if len(accounts) == 0 && groupID != nil && hasForcePlatform && !primaryOnly {
 		accounts, err = s.listSchedulableAccountsOnce(ctx, nil, platform, hasForcePlatform)
 		if err != nil {
 			return nil, fmt.Errorf("query accounts failed: %w", err)
@@ -270,6 +271,9 @@ func (s *GeminiMessagesCompatService) isAccountUsableForRequestWithPrecheck(
 	useMixedScheduling bool,
 	precheckResult map[int64]bool,
 ) bool {
+	if !accountAllowedByAPIKeyGroup(ctx, account) {
+		return false
+	}
 	// 检查模型调度能力
 	// Check model scheduling capability
 	if !account.IsSchedulableForModelWithContext(ctx, requestedModel) {
@@ -387,7 +391,12 @@ func (s *GeminiMessagesCompatService) buildPreCheckUsageResultMap(ctx context.Co
 
 	candidates := make([]*Account, 0, len(accounts))
 	for i := range accounts {
-		candidates = append(candidates, &accounts[i])
+		if accountAllowedByAPIKeyGroup(ctx, &accounts[i]) {
+			candidates = append(candidates, &accounts[i])
+		}
+	}
+	if len(candidates) == 0 {
+		return nil
 	}
 
 	result, err := s.rateLimitService.PreCheckUsageBatch(ctx, candidates, requestedModel)
@@ -452,6 +461,9 @@ func (s *GeminiMessagesCompatService) getSchedulableAccount(ctx context.Context,
 }
 
 func (s *GeminiMessagesCompatService) hydrateSelectedAccount(ctx context.Context, account *Account) (*Account, error) {
+	if !accountAllowedByAPIKeyGroup(ctx, account) {
+		return nil, ErrAPIKeyPrimaryGroupRequired
+	}
 	if account == nil || s.schedulerSnapshot == nil {
 		return account, nil
 	}
@@ -462,10 +474,21 @@ func (s *GeminiMessagesCompatService) hydrateSelectedAccount(ctx context.Context
 	if hydrated == nil {
 		return nil, fmt.Errorf("selected gemini account %d not found during hydration", account.ID)
 	}
+	if !accountAllowedByAPIKeyGroup(ctx, hydrated) {
+		return nil, ErrAPIKeyPrimaryGroupRequired
+	}
 	return hydrated, nil
 }
 
-func (s *GeminiMessagesCompatService) listSchedulableAccountsOnce(ctx context.Context, groupID *int64, platform string, hasForcePlatform bool) ([]Account, error) {
+func (s *GeminiMessagesCompatService) listSchedulableAccountsOnce(ctx context.Context, groupID *int64, platform string, hasForcePlatform bool) (accountsResult []Account, resultErr error) {
+	if primaryID, constrained := primaryOnlyGroupFromContext(ctx); constrained {
+		groupID = &primaryID
+		// Snapshot slices can be shared with other requests. Filter into a new
+		// slice before any model usage precheck or forced-platform fallback.
+		defer func() {
+			accountsResult = filterAPIKeyGroupAccounts(ctx, accountsResult)
+		}()
+	}
 	if s.schedulerSnapshot != nil {
 		accounts, _, err := s.schedulerSnapshot.ListSchedulableAccounts(ctx, groupID, platform, hasForcePlatform)
 		return accounts, err
@@ -480,7 +503,7 @@ func (s *GeminiMessagesCompatService) listSchedulableAccountsOnce(ctx context.Co
 	if groupID != nil {
 		return s.accountRepo.ListSchedulableByGroupIDAndPlatforms(ctx, *groupID, queryPlatforms)
 	}
-	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
+	if simpleModeAccountScope(ctx, s.cfg) {
 		return s.accountRepo.ListSchedulableByPlatforms(ctx, queryPlatforms)
 	}
 	return s.accountRepo.ListSchedulableUngroupedByPlatforms(ctx, queryPlatforms)
@@ -541,6 +564,9 @@ func (s *GeminiMessagesCompatService) HasAntigravityAccounts(ctx context.Context
 }
 
 func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*ForwardResult, error) {
+	if !accountAllowedByAPIKeyGroup(ctx, account) {
+		return nil, ErrAPIKeyPrimaryGroupRequired
+	}
 	if account.gatewayProtocolsPending() {
 		view, err := s.gatewayProtocolAccount(ctx, account, "gemini", gatewayProtocolBodyModel(body))
 		if err != nil {
@@ -1128,6 +1154,9 @@ func isGeminiSignatureRelatedError(respBody []byte) bool {
 }
 
 func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.Context, account *Account, originalModel string, action string, stream bool, body []byte) (*ForwardResult, error) {
+	if !accountAllowedByAPIKeyGroup(ctx, account) {
+		return nil, ErrAPIKeyPrimaryGroupRequired
+	}
 	if account.gatewayProtocolsPending() {
 		view, err := s.gatewayProtocolAccount(ctx, account, "gemini", originalModel)
 		if err != nil {

@@ -936,6 +936,9 @@ func (s *GeminiCachedContentService) boundAccount(ctx context.Context, record *G
 	if account == nil {
 		return nil, nil
 	}
+	if !accountAllowedByAPIKeyGroup(ctx, account) {
+		return nil, ErrAPIKeyPrimaryGroupRequired
+	}
 	if !IsGeminiExplicitCacheAccount(account) {
 		return nil, errGeminiCachedContentAccountUnsupported
 	}
@@ -1055,6 +1058,9 @@ func geminiCachedContentNotSent(err error) error {
 // doUpstream 调用上游缓存接口并返回 2xx 响应体，单次调用不超过 timeout。上游调用与客户端连接脱钩：客户端断开不会中途取消
 // 已发出的创建 / 修改，调用方据结果完成落库、计费或清理。请求发出前的失败包装为 ErrGeminiCachedContentRequestNotSent。
 func (s *GeminiCachedContentService) doUpstream(ctx context.Context, account *Account, method, target string, body []byte, timeout time.Duration) ([]byte, error) {
+	if !accountAllowedByAPIKeyGroup(ctx, account) {
+		return nil, geminiCachedContentNotSent(ErrAPIKeyPrimaryGroupRequired)
+	}
 	if s.compat == nil || s.compat.httpUpstream == nil {
 		return nil, geminiCachedContentNotSent(errors.New("gemini upstream client not configured"))
 	}

@@ -2,6 +2,9 @@ package service
 
 import (
 	"context"
+	"slices"
+
+	"github.com/Wei-Shaw/sub2api/internal/config"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
@@ -42,6 +45,12 @@ func primaryGroupOnly(key *APIKey) (*APIKey, error) {
 		return nil, ErrAPIKeyPrimaryGroupRequired
 	}
 	copyKey := *key
+	for _, id := range key.GroupIDs {
+		if id > 0 && id != *key.GroupID {
+			copyKey.primaryOnlyGroupID = *key.GroupID
+			break
+		}
+	}
 	copyKey.GroupIDs = []int64{*key.GroupID}
 	group := *key.Group
 	group.FallbackGroupID = nil
@@ -62,4 +71,58 @@ func (s *APIKeyService) applyGroupPolicy(ctx context.Context, key *APIKey) (*API
 		return key, nil
 	}
 	return primaryGroupOnly(key)
+}
+
+type apiKeyGroupConstraintKey struct{}
+
+// PrimaryOnlyGroupID is an authentication identity component for queued and WS
+// revalidation. A change requires a new request rather than a stale route.
+func (k *APIKey) PrimaryOnlyGroupID() int64 {
+	if k == nil {
+		return 0
+	}
+	return k.primaryOnlyGroupID
+}
+
+// WithAPIKeyGroupConstraint carries only server-derived authorization state.
+// An existing restriction cannot be relaxed by a later request-local key view.
+func WithAPIKeyGroupConstraint(ctx context.Context, key *APIKey) context.Context {
+	if key == nil || key.primaryOnlyGroupID <= 0 {
+		return ctx
+	}
+	if _, restricted := primaryOnlyGroupFromContext(ctx); restricted {
+		return ctx
+	}
+	return context.WithValue(ctx, apiKeyGroupConstraintKey{}, key.primaryOnlyGroupID)
+}
+
+func primaryOnlyGroupFromContext(ctx context.Context) (int64, bool) {
+	id, _ := ctx.Value(apiKeyGroupConstraintKey{}).(int64)
+	return id, id > 0
+}
+
+func accountAllowedByAPIKeyGroup(ctx context.Context, account *Account) bool {
+	id, restricted := primaryOnlyGroupFromContext(ctx)
+	return !restricted || (account != nil && slices.Contains(account.GroupIDs, id))
+}
+
+// simpleModeAccountScope preserves platform-wide legacy simple scheduling only
+// for requests that were not restricted from an original multi-group binding.
+func simpleModeAccountScope(ctx context.Context, cfg *config.Config) bool {
+	_, restricted := primaryOnlyGroupFromContext(ctx)
+	return cfg != nil && cfg.RunMode == config.RunModeSimple && !restricted
+}
+
+// Copy before filtering: scheduler/auth cache slices are shared with other keys.
+func filterAPIKeyGroupAccounts(ctx context.Context, accounts []Account) []Account {
+	if _, restricted := primaryOnlyGroupFromContext(ctx); !restricted {
+		return accounts
+	}
+	filtered := make([]Account, 0, len(accounts))
+	for i := range accounts {
+		if accountAllowedByAPIKeyGroup(ctx, &accounts[i]) {
+			filtered = append(filtered, accounts[i])
+		}
+	}
+	return filtered
 }

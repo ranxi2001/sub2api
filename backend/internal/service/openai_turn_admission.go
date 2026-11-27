@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/gin-gonic/gin"
 )
@@ -259,6 +258,9 @@ func (s *OpenAIGatewayService) latestOpenAITurnAccountForGroup(
 	if selected == nil {
 		return nil, denyOpenAITurn("account_unavailable")
 	}
+	if !accountAllowedByAPIKeyGroup(ctx, selected) {
+		return nil, denyOpenAITurn("group_membership_changed")
+	}
 	gatewayView := selected.gatewayProtocolSource != nil
 	gatewayModel := selected.gatewayProtocolModel
 	if gatewayView {
@@ -383,11 +385,12 @@ func (s *OpenAIGatewayService) latestOpenAITurnAccountForGroup(
 		!parent.IsOpenAIOAuth() || !parent.IsCredentialUsableForShadow()) {
 		return nil, denyOpenAITurn("credential_parent_ineligible")
 	}
-	// Simple mode deliberately schedules across the whole platform and does
-	// not bind an account to the API key's group. Keep the final pre-send
-	// admission predicate aligned with the scheduler instead of rejecting an
-	// account that the scheduler just selected.
-	enforceGroup = enforceGroup && (s == nil || s.cfg == nil || s.cfg.RunMode != config.RunModeSimple)
+	// Preserve legacy simple scheduling while constrained keys recheck their
+	// primary membership on the authoritative account at the send boundary.
+	if !accountAllowedByAPIKeyGroup(ctx, latest) {
+		return nil, denyOpenAITurn("group_membership_changed")
+	}
+	enforceGroup = enforceGroup && (s == nil || !simpleModeAccountScope(ctx, s.cfg))
 	if enforceGroup {
 		if (groupID != 0 && !slices.Contains(latest.GroupIDs, groupID)) ||
 			(groupID == 0 && len(latest.GroupIDs) != 0) {

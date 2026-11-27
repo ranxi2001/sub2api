@@ -59,6 +59,9 @@ func (s *AntigravityGatewayService) ForwardAsChatCompletions(
 	body []byte,
 	_ *ParsedRequest,
 ) (*ForwardResult, error) {
+	if !accountAllowedByAPIKeyGroup(ctx, account) {
+		return nil, ErrAPIKeyPrimaryGroupRequired
+	}
 	if err := CheckUpstreamModeration(ctx, c, account); err != nil {
 		return nil, err
 	}
@@ -110,6 +113,9 @@ func (s *AntigravityGatewayService) ForwardAsResponses(
 	body []byte,
 	_ *ParsedRequest,
 ) (*ForwardResult, error) {
+	if !accountAllowedByAPIKeyGroup(ctx, account) {
+		return nil, ErrAPIKeyPrimaryGroupRequired
+	}
 	if err := CheckUpstreamModeration(ctx, c, account); err != nil {
 		return nil, err
 	}
