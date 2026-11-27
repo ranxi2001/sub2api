@@ -811,7 +811,9 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			if shouldFailover && (turn == 1 || resp.StatusCode == http.StatusTooManyRequests) {
 				return nil, newOpenAIUpstreamFailoverError(resp.StatusCode, resp.Header, respBody, upstreamMsg, false).WithGrokForbiddenPolicy(account)
 			}
-		} else if !strictSession && !preserveAgentHistory && shouldFailover && (turn == 1 || resp.StatusCode == http.StatusTooManyRequests) {
+		} else if !strictSession && !preserveAgentHistory && ctx.Err() == nil && shouldFailover &&
+			(turn == 1 || resp.StatusCode == http.StatusTooManyRequests ||
+				isOpenAIExplicitAccountCredential401(resp.StatusCode, resp.Header, respBody)) {
 			return nil, s.handleFailoverErrorResponsePassthrough(ctx, resp, c, account, body, respBody)
 		}
 		if account.Platform != PlatformGrok && (shouldFailover || shouldCooldownOpenAITransientUpstreamError(resp.StatusCode, respBody)) {

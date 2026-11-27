@@ -51,13 +51,14 @@ func WithRegionalMetering(m *RegionalMetering) OpenAIGatewayOption {
 
 type regionalMeterKey struct{}
 type regionalMeterAttempt struct {
-	ledger           ledger.RequestLedger
-	reservation      ledger.Reservation
-	price            ledger.Price
-	output           int64
-	fullOutputWindow bool
-	sent             atomic.Bool
-	finalUsage       atomic.Pointer[OpenAIUsage]
+	ledger              ledger.RequestLedger
+	reservation         ledger.Reservation
+	price               ledger.Price
+	output              int64
+	fullOutputWindow    bool
+	canceledBeforeStart atomic.Bool
+	sent                atomic.Bool
+	finalUsage          atomic.Pointer[OpenAIUsage]
 }
 type regionalMeterSessionKey struct{}
 type regionalMeterSession struct {
@@ -67,6 +68,12 @@ type regionalMeterSession struct {
 func regionalMeterFinishForward(ctx context.Context, result *OpenAIForwardResult, forwardErr error, finish func(*OpenAIForwardResult, error) error) error {
 	finishErr := finish(result, forwardErr)
 	if regionalMeterAttemptFrom(ctx) == nil {
+		return forwardErr
+	}
+	var handshake *openAIWSHandshakeAccountFailover
+	attempt := regionalMeterAttemptFrom(ctx)
+	if errors.As(forwardErr, &handshake) && handshake.meter == attempt &&
+		!attempt.sent.Load() && attempt.canceledBeforeStart.Load() && finishErr == nil && ctx.Err() == nil {
 		return forwardErr
 	}
 	if forwardErr != nil || finishErr != nil {
@@ -248,9 +255,16 @@ func regionalTextOutputBound(body []byte) (string, int64, error) {
 
 func (s *OpenAIGatewayService) beginRegionalMeter(ctx context.Context, c *gin.Context, account *Account, body []byte) (context.Context, func(*OpenAIForwardResult, error) error, error) {
 	noop := func(*OpenAIForwardResult, error) error { return nil }
+	var retired *regionalMeterAttempt
 	if attempt := regionalMeterAttemptFrom(ctx); attempt != nil {
-		ctx = context.WithValue(ctx, regionalMeterKey{}, attempt)
-		return ctx, noop, nil
+		if !attempt.canceledBeforeStart.Load() || attempt.sent.Load() {
+			ctx = context.WithValue(ctx, regionalMeterKey{}, attempt)
+			return ctx, noop, nil
+		}
+		// The previous identity remains canceled in the ledger. Never reuse its
+		// reservation for another account; trusted admission must mint B's ID.
+		retired = attempt
+		ctx = context.WithValue(ctx, regionalMeterKey{}, (*regionalMeterAttempt)(nil))
 	}
 	if s.regionalMetering == nil {
 		if s.cfg != nil && s.cfg.Runtime.RegionalAuthFile != "" {
@@ -282,6 +296,9 @@ func (s *OpenAIGatewayService) beginRegionalMeter(ctx context.Context, c *gin.Co
 	if err != nil {
 		return ctx, nil, err
 	}
+	if retired != nil && r.RequestID == retired.reservation.RequestID {
+		return ctx, nil, ledger.ErrAlreadyDispatched
+	}
 	if r.UserID != key.UserID || r.APIKeyID != key.ID || r.AccountID != account.ID || p.Model != model {
 		return ctx, nil, ledger.ErrConflict
 	}
@@ -293,6 +310,10 @@ func (s *OpenAIGatewayService) beginRegionalMeter(ctx context.Context, c *gin.Co
 		return ctx, nil, err
 	}
 	digest := sha256.Sum256(body)
+	if retired != nil && (retired.reservation.UserID != r.UserID || retired.reservation.APIKeyID != r.APIKeyID ||
+		retired.reservation.PayloadSHA256 != hex.EncodeToString(digest[:]) || retired.reservation.Model != model) {
+		return ctx, nil, ledger.ErrConflict
+	}
 	r.Model = model
 	r.PricingVersion = p.Version()
 	r.Maximum = maximum
@@ -313,7 +334,11 @@ func (s *OpenAIGatewayService) beginRegionalMeter(ctx context.Context, c *gin.Co
 		if !attempt.sent.Load() {
 			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			defer cancel()
-			return m.Ledger.CancelBeforeStart(cleanup, r.RequestID)
+			err := m.Ledger.CancelBeforeStart(cleanup, r.RequestID)
+			if err == nil {
+				attempt.canceledBeforeStart.Store(true)
+			}
+			return err
 		}
 		// Existing HTTP adapters do not all expose a terminal-usage flag. On an
 		// interrupted turn retain the hold rather than trusting partial counters.
