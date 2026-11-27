@@ -31,6 +31,8 @@ func TestIssue1077HandshakeAccountRejection(t *testing.T) {
 		{"duplicate", `{"error":{"code":"usage_limit_reached","code":"rate_limit_exceeded"}}`, 429, false, nil},
 		{"message_only", `{"error":{"message":"usage_limit_reached"}}`, 429, false, nil},
 		{"retry_after", `{"error":{"type":"usage_limit_reached"}}`, 429, false, http.Header{"Retry-After": {"1"}}},
+		{"malformed_code", `{"error":{"code":[],"type":"usage_limit_reached"}}`, 429, false, nil},
+		{"empty_code", `{"error":{"code":"","type":"usage_limit_reached"}}`, 429, false, nil},
 		{"short_throttle", `{"error":{"code":"rate_limit_exceeded"}}`, 429, false, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -79,7 +81,11 @@ func TestIssue1077HandshakeOriginalPayloadSafety(t *testing.T) {
 			SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
 			d := &wsSSETestDialer{status: 401, err: &openAIWSHandshakeError{Body: []byte(`{"error":{"code":"invalid_api_key"}}`), Err: errors.New("fixture refusal")}}
 			s := wsSSETestService(t, d, wsSSEGuardHTTPUpstream())
-			body := []byte(strings.TrimSuffix(wsSSETestRequest, "}") + extra + "}")
+			base := `{"model":"gpt-5.1","stream":true,"instructions":"test"`
+			if !strings.HasPrefix(extra, `,"input":`) {
+				base += `,"input":"hello"`
+			}
+			body := []byte(base + extra + "}")
 			original := string(body)
 			_, err := s.Forward(context.Background(), c, wsSSETestAccount(), body)
 			var failover *UpstreamFailoverError
@@ -124,4 +130,15 @@ func TestIssue1077StreamQuotaHasOneSafeTerminal(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestIssue1077StreamQuotaPreservesObservedUsage(t *testing.T) {
+	_, _, result, _, err := issue776Forward(t, []string{
+		`{"type":"response.output_text.delta","delta":"partial"}`,
+		`{"type":"response.failed","response":{"id":"resp_used","error":{"code":"usage_limit_reached"},"usage":{"input_tokens":7,"output_tokens":2}}}`,
+	}, nil)
+	require.Error(t, err)
+	require.NotNil(t, result, "authoritative partial usage must survive terminal conversion")
+	require.Equal(t, 7, result.Usage.InputTokens)
+	require.Equal(t, 2, result.Usage.OutputTokens)
 }

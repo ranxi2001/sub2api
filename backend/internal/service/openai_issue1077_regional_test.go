@@ -1,3 +1,5 @@
+//go:build unit && issue1077
+
 package service
 
 import (

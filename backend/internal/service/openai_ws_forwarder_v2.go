@@ -999,7 +999,8 @@ readLoop:
 				emitStreamMessage(failed, true)
 				markOpenAIWSClientVisibleFailure(c, "response.failed", failed, &OpsUpstreamWSFailure{Phase: "upstream_event"})
 			}
-			return nil, errors.New("upstream response failed: usage_limit_reached")
+			upstreamTerminalEvent = "response.failed"
+			return partialResultWithUsage(), errors.New("upstream response failed: usage_limit_reached")
 		}
 
 		if eventType == "error" {

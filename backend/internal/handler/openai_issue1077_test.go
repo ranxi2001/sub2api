@@ -257,6 +257,12 @@ func TestIssue1077HandlerSamePOST(t *testing.T) {
 			}
 			require.Zero(t, aGenerations.Load(), "A handshake refusal receives zero generation/prewarm frames")
 			if !tc.wantB {
+				if tc.metered {
+					require.Len(t, meterLedger.reserved, 1)
+					require.Equal(t, []string{"same-post-account-1"}, meterLedger.canceled)
+					require.Empty(t, meterLedger.started)
+					require.Empty(t, meterLedger.events)
+				}
 				require.Zero(t, bHandshakes.Load(), "unsafe/budget-limited request must not reach B")
 				require.Zero(t, bGenerations.Load())
 				return
@@ -285,6 +291,10 @@ func TestIssue1077HandlerSamePOST(t *testing.T) {
 				require.Equal(t, []string{"same-post-account-1"}, meterLedger.canceled)
 				require.Equal(t, []string{"same-post-account-2"}, meterLedger.started)
 				require.Len(t, meterLedger.events, 1, "B settles exactly once")
+				require.Equal(t, "same-post-account-2", meterLedger.events[0].Usage.EventID)
+				require.Equal(t, int64(2), meterLedger.events[0].Usage.AccountID)
+				require.Equal(t, int64(7), meterLedger.events[0].InputTokens)
+				require.Equal(t, int64(2), meterLedger.events[0].OutputTokens)
 				require.Equal(t, int64(2), meterLedger.reserved[1].AccountID)
 				require.Empty(t, usage.created, "legacy usage must not double-bill a metered result")
 			} else {
@@ -307,6 +317,8 @@ type issue1077BridgeHTTP struct {
 	mu       sync.Mutex
 	accounts []int64
 	bodies   [][]byte
+	control  string
+	onSecond func(context.Context)
 }
 
 func (u *issue1077BridgeHTTP) Do(r *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
@@ -319,7 +331,17 @@ func (u *issue1077BridgeHTTP) Do(r *http.Request, _ string, accountID int64, _ i
 	u.accounts = append(u.accounts, accountID)
 	u.bodies = append(u.bodies, append([]byte(nil), raw...))
 	if len(u.accounts) == 2 {
-		return &http.Response{StatusCode: 401, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"invalid_api_key","type":"authentication_error"}}`))}, nil
+		if u.onSecond != nil {
+			u.onSecond(r.Context())
+		}
+		if u.control == "after_output" {
+			return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n" + "data: {\"type\":\"error\",\"status_code\":401,\"error\":{\"code\":\"invalid_api_key\",\"type\":\"authentication_error\"}}\n\n"))}, nil
+		}
+		refusal := `{"error":{"code":"invalid_api_key","type":"authentication_error"}}`
+		if u.control == "relay" {
+			refusal = `{"error":{"type":"authentication_error"}}`
+		}
+		return &http.Response{StatusCode: 401, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(refusal))}, nil
 	}
 	id := "resp_first1077"
 	output := `[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"first-ok"}]},{"type":"function_call","call_id":"call1077","name":"lookup","arguments":"{}","status":"completed"}]`
@@ -335,75 +357,127 @@ func (u *issue1077BridgeHTTP) DoWithTLS(r *http.Request, p string, a int64, c in
 
 func TestIssue1077HandlerBridgeLater401(t *testing.T) {
 	for _, automatic := range []bool{false, true} {
-		t.Run(fmt.Sprint("automatic=", automatic), func(t *testing.T) {
-			up := &issue1077BridgeHTTP{}
-			repo := &issue1077Repo{}
-			headers := http.Header{"Session-Id": {"fixture-bridge1077"}}
-			h := newOpenAIWSPassthroughHandlerHarnessWithKey(t, "http://fixture.invalid", headers,
-				map[string]string{service.SettingKeyCyberSessionBlockEnabled: "false", service.SettingKeyOpenAI400OmitEncryptedHistoryEnabled: "false", service.SettingKeyOpenAI409OmitEncryptedHistoryEnabled: "false"}, nil,
-				func(k *service.APIKey) { k.AllowLongContext = true },
-				func(a *service.Account, cfg *config.Config, transport *service.HTTPUpstream, ar *service.AccountRepository) {
-					a.ID = 1
-					a.Priority = 0
-					a.Type = service.AccountTypeOAuth
-					a.Credentials = map[string]any{"access_token": "fixture-A"}
-					a.Extra = map[string]any{"openai_oauth_responses_websockets_v2_enabled": true, "openai_oauth_responses_websockets_v2_mode": service.OpenAIWSIngressModeHTTPBridge}
-					if automatic {
-						a.Extra["openai_oauth_responses_websockets_v2_mode"] = service.OpenAIWSIngressModeCtxPool
+		for _, control := range []string{"success", "bound_tool", "bound_reference", "orphan_tool", "after_output", "cancel", "relay"} {
+			t.Run(fmt.Sprintf("automatic=%v/%s", automatic, control), func(t *testing.T) {
+				up := &issue1077BridgeHTTP{control: control}
+				repo := &issue1077Repo{}
+				headers := http.Header{"Session-Id": {"fixture-bridge1077"}}
+				h := newOpenAIWSPassthroughHandlerHarnessWithKey(t, "http://fixture.invalid", headers,
+					map[string]string{service.SettingKeyCyberSessionBlockEnabled: "false", service.SettingKeyOpenAI400OmitEncryptedHistoryEnabled: "false", service.SettingKeyOpenAI409OmitEncryptedHistoryEnabled: "false"}, nil,
+					func(k *service.APIKey) { k.AllowLongContext = true },
+					func(a *service.Account, cfg *config.Config, transport *service.HTTPUpstream, ar *service.AccountRepository) {
+						a.ID = 1
+						a.Priority = 0
+						a.Type = service.AccountTypeOAuth
+						a.Credentials = map[string]any{"access_token": "fixture-A"}
+						a.Extra = map[string]any{"openai_oauth_responses_websockets_v2_enabled": true, "openai_oauth_responses_websockets_v2_mode": service.OpenAIWSIngressModeHTTPBridge}
+						if automatic {
+							a.Extra["openai_oauth_responses_websockets_v2_mode"] = service.OpenAIWSIngressModeCtxPool
+						}
+						cfg.Gateway.OpenAIWS.OAuthEnabled = true
+						cfg.Gateway.OpenAILegacyCompatibilityMode = true
+						cfg.Gateway.DisableEncryptedAgentOwnerBinding = true
+						cfg.Gateway.OpenAIWS.HTTPBridgeEnabled = true
+						cfg.Gateway.OpenAIWS.HTTPBridgeThresholdBytes = 15 << 20
+						cfg.Gateway.OpenAIWS.ClientReadLimitBytes = 64 << 20
+						cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 30
+						cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 30
+						cfg.Gateway.MaxAccountSwitches = 1
+						b := *a
+						b.ID = 2
+						b.Priority = 1
+						b.Credentials = map[string]any{"access_token": "fixture-B"}
+						repo.accounts = []service.Account{*a, b}
+						*ar = repo
+						*transport = up
+					})
+				ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+				defer cancel()
+				text := "first"
+				if automatic {
+					text = strings.Repeat("x", 24<<20)
+				}
+				first, _ := json.Marshal(map[string]any{"type": "response.create", "model": "gpt-5.4", "input": []any{map[string]any{"role": "user", "content": text}}, "tools": []any{map[string]any{"type": "function", "name": "lookup", "parameters": map[string]any{"type": "object", "properties": map[string]any{}}}}})
+				if control == "bound_tool" {
+					var value map[string]any
+					require.NoError(t, json.Unmarshal(first, &value))
+					value["tools"] = []any{map[string]any{"type": "file_search", "vector_store_ids": []string{"vs_A"}}}
+					first, _ = json.Marshal(value)
+				}
+				require.NoError(t, h.clientConn.Write(ctx, ws.MessageText, first))
+				readCompleted := func(id string) {
+					for i := 0; i < 10; i++ {
+						_, raw, err := h.clientConn.Read(ctx)
+						require.NoError(t, err, "ISSUE1077_BRIDGE_LATER_401")
+						require.NotEqual(t, "error", gjson.GetBytes(raw, "type").String(), string(raw))
+						if gjson.GetBytes(raw, "type").String() == "response.completed" {
+							require.Equal(t, id, gjson.GetBytes(raw, "response.id").String())
+							return
+						}
 					}
-					cfg.Gateway.OpenAIWS.OAuthEnabled = true
-					cfg.Gateway.OpenAILegacyCompatibilityMode = true
-					cfg.Gateway.DisableEncryptedAgentOwnerBinding = true
-					cfg.Gateway.OpenAIWS.HTTPBridgeEnabled = true
-					cfg.Gateway.OpenAIWS.HTTPBridgeThresholdBytes = 15 << 20
-					cfg.Gateway.OpenAIWS.ClientReadLimitBytes = 64 << 20
-					cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 30
-					cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 30
-					cfg.Gateway.MaxAccountSwitches = 1
-					b := *a
-					b.ID = 2
-					b.Priority = 1
-					b.Credentials = map[string]any{"access_token": "fixture-B"}
-					repo.accounts = []service.Account{*a, b}
-					*ar = repo
-					*transport = up
-				})
-			ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
-			defer cancel()
-			text := "first"
-			if automatic {
-				text = strings.Repeat("x", 24<<20)
-			}
-			first, _ := json.Marshal(map[string]any{"type": "response.create", "model": "gpt-5.4", "input": []any{map[string]any{"role": "user", "content": text}}, "tools": []any{map[string]any{"type": "function", "name": "lookup", "parameters": map[string]any{"type": "object", "properties": map[string]any{}}}}})
-			require.NoError(t, h.clientConn.Write(ctx, ws.MessageText, first))
-			readCompleted := func(id string) {
-				for i := 0; i < 10; i++ {
-					_, raw, err := h.clientConn.Read(ctx)
-					require.NoError(t, err, "ISSUE1077_BRIDGE_LATER_401")
-					require.NotEqual(t, "error", gjson.GetBytes(raw, "type").String(), string(raw))
-					if gjson.GetBytes(raw, "type").String() == "response.completed" {
-						require.Equal(t, id, gjson.GetBytes(raw, "response.id").String())
-						return
+					t.Fatal("missing completion")
+				}
+				readCompleted("resp_first1077")
+				second := `{"type":"response.create","model":"gpt-5.4","previous_response_id":"resp_first1077","input":[{"type":"function_call_output","call_id":"call1077","output":"second"}]}`
+				if control == "orphan_tool" {
+					second = strings.ReplaceAll(second, "call1077", "missing_call")
+				}
+				if control == "bound_reference" {
+					second = `{"type":"response.create","model":"gpt-5.4","previous_response_id":"resp_first1077","input":[{"type":"item_reference","id":"private_A"},{"role":"user","content":"second"}]}`
+				}
+				if control == "cancel" {
+					reached := make(chan struct{})
+					up.mu.Lock()
+					up.onSecond = func(upstream context.Context) { close(reached); <-upstream.Done() }
+					up.mu.Unlock()
+					require.NoError(t, h.clientConn.Write(ctx, ws.MessageText, []byte(second)))
+					select {
+					case <-reached:
+					case <-ctx.Done():
+						t.Fatal("second HTTP request not reached")
+					}
+					_ = h.clientConn.CloseNow()
+				} else {
+					require.NoError(t, h.clientConn.Write(ctx, ws.MessageText, []byte(second)))
+					if control == "success" {
+						readCompleted("resp_second1077")
+					} else {
+						failed := false
+						for i := 0; i < 10; i++ {
+							_, raw, err := h.clientConn.Read(ctx)
+							if err != nil {
+								failed = true
+								break
+							}
+							kind := gjson.GetBytes(raw, "type").String()
+							require.NotEqual(t, "response.completed", kind, "unsafe second turn must never complete on B")
+							if kind == "error" || kind == "response.failed" {
+								failed = true
+								break
+							}
+						}
+						require.True(t, failed, "unsafe continuation must be explicitly refused")
 					}
 				}
-				t.Fatal("missing completion")
-			}
-			readCompleted("resp_first1077")
-			require.NoError(t, h.clientConn.Write(ctx, ws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.4","previous_response_id":"resp_first1077","input":[{"type":"function_call_output","call_id":"call1077","output":"second"}]}`)))
-			readCompleted("resp_second1077")
-			issue600Finish(t, h, headers)
-			up.mu.Lock()
-			defer up.mu.Unlock()
-			require.Equal(t, []int64{1, 1, 2}, up.accounts, "only current turn may execute on B once")
-			require.False(t, gjson.GetBytes(up.bodies[2], "previous_response_id").Exists())
-			input := gjson.GetBytes(up.bodies[2], "input").Array()
-			require.Len(t, input, 4)
-			require.Equal(t, text, input[0].Get("content").String())
-			require.Equal(t, "assistant", input[1].Get("role").String())
-			require.Equal(t, "function_call", input[2].Get("type").String())
-			require.Equal(t, "function_call_output", input[3].Get("type").String())
-			require.Equal(t, "call1077", input[2].Get("call_id").String())
-			require.Equal(t, "call1077", input[3].Get("call_id").String())
-		})
+				issue600Finish(t, h, headers)
+				up.mu.Lock()
+				defer up.mu.Unlock()
+				if control != "success" {
+					require.NotContains(t, up.accounts, int64(2), "bound/tool/output/canceled/relay request cannot reach B")
+					require.LessOrEqual(t, len(up.accounts), 2)
+					return
+				}
+				require.Equal(t, []int64{1, 1, 2}, up.accounts, "only current turn may execute on B once")
+				require.False(t, gjson.GetBytes(up.bodies[2], "previous_response_id").Exists())
+				input := gjson.GetBytes(up.bodies[2], "input").Array()
+				require.Len(t, input, 4)
+				require.Equal(t, text, input[0].Get("content").String())
+				require.Equal(t, "assistant", input[1].Get("role").String())
+				require.Equal(t, "function_call", input[2].Get("type").String())
+				require.Equal(t, "function_call_output", input[3].Get("type").String())
+				require.Equal(t, "call1077", input[2].Get("call_id").String())
+				require.Equal(t, "call1077", input[3].Get("call_id").String())
+			})
+		}
 	}
 }

@@ -51,13 +51,29 @@ jobs:
           assert int(sys.argv[1])==1
           assert not any(r.get('Action') in ('build-fail','skip') for r in rows)
           assert any(r.get('Test')=='TestIssue1077HandshakeAccountRejection' and r.get('Action')=='fail' for r in rows)
-          assert 'ISSUE1077_HANDSHAKE_ACCOUNT_REJECTION' in ''.join(r.get('Output','') for r in rows)
+          output=''.join(r.get('Output','') for r in rows)
+          assert 'ISSUE1077_HANDSHAKE_ACCOUNT_REJECTION' in output
+          assert any(r.get('Test')=='TestIssue1077HandlerSamePOST/credential' and r.get('Action')=='fail' for r in rows)
+          assert 'B must be reached in the original POST' in output
           PY
       - name: Candidate regressions with race detector
         if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
-          (cd backend && go test -race -json -tags=unit,issue1077 ./internal/service ./internal/handler -run '^Test(Issue1077|OpenAIWSHTTPBridgeLaterTurn|ProxyOpenAIWSHTTPBridgeTurnLater|BuildOpenAIWSCurrentTurnRetryPayload|OpenAIWSSSEIncompleteRegionalHandlerOwnsSingleResponse)'  -count=1 -timeout=5m) | tee "$RUNNER_TEMP/issue1077-green.jsonl"
+          (cd backend && go test -race -json -tags=unit,issue1077 ./internal/service ./internal/handler -run '^Test(Issue1077|OpenAIWSHTTPBridgeLaterTurn|ProxyOpenAIWSHTTPBridgeTurnLater|BuildOpenAIWSCurrentTurnRetryPayload|OpenAIWSSSEIncompleteRegionalHandlerOwnsSingleResponse)'  -count=1 -timeout=8m) | tee "$RUNNER_TEMP/issue1077-green.jsonl"
+      - name: Require named acceptance cases on the exact candidate
+        if: ${{ !cancelled() }}
+        run: |
+          python3 - "$RUNNER_TEMP/issue1077-green.jsonl" <<'PY'
+          import json,sys
+          rows=[json.loads(line) for line in open(sys.argv[1]) if line.startswith('{')]
+          assert not any(r.get('Action') in ('fail','build-fail','skip') for r in rows)
+          required=['TestIssue1077HandlerSamePOST/'+x for x in ('credential','quota','function','prewarm','metered','budget_zero','B_rejected','client_cancel','committed','relay','bare','proxy','quota_conflict','bound_vector_store','bound_container','cancel_hold_unknown','stream_quota')]
+          required += ['TestIssue1077HandlerBridgeLater401/automatic='+a+'/'+c for a in ('false','true') for c in ('success','bound_tool','bound_reference','orphan_tool','after_output','cancel','relay')]
+          required += ['TestIssue1077HandshakeAccountRejection','TestIssue1077StreamQuotaHasOneSafeTerminal','TestIssue1077StreamQuotaPreservesObservedUsage','TestIssue1077RegionalFinalizerOnlyCertifiedUnsentHandshake']
+          for name in required:
+              assert any(r.get('Test')==name and r.get('Action')=='pass' for r in rows),name
+          PY
       - uses: actions/upload-artifact@v7
         if: always()
         with:

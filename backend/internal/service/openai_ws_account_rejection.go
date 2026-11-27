@@ -21,6 +21,9 @@ func isOpenAIExplicitAccountCredential401(status int, headers http.Header, body 
 	if !fields.IsObject() {
 		return false
 	}
+	if fields.Get("code").Type != gjson.String {
+		return false
+	}
 	code := strings.TrimSpace(fields.Get("code").String())
 	// A type such as authentication_error is also emitted by relays and policy
 	// gateways. Only an explicit, allowlisted account code is sufficient.
@@ -45,6 +48,12 @@ func isOpenAIExplicitQuota429(status int, headers http.Header, body []byte) bool
 	}
 	error := gjson.GetBytes(body, "error")
 	if !error.IsObject() {
+		return false
+	}
+	if code := error.Get("code"); code.Exists() && (code.Type != gjson.String || strings.TrimSpace(code.String()) == "") {
+		return false
+	}
+	if typ := error.Get("type"); typ.Exists() && typ.Type != gjson.String {
 		return false
 	}
 	code := strings.ToLower(strings.TrimSpace(error.Get("code").String()))
@@ -121,7 +130,7 @@ func openAIWSHandshakePayloadPortable(ctx context.Context, raw []byte) bool {
 		return false
 	}
 	root := gjson.ParseBytes(raw)
-	if !root.IsObject() {
+	if !root.IsObject() || openAIWSHandshakeHasOpaqueResource(root, 0) {
 		return false
 	}
 	for _, key := range []string{"previous_response_id", "conversation", "conversation_id"} {
@@ -208,4 +217,24 @@ func (e *openAIWSHandshakeAccountFailover) Unwrap() error { return e.cause }
 
 func isOpenAIExplicitStreamQuota(raw []byte) bool {
 	return openAIEncryptedJSONUnambiguous(raw) && isOpenAIExplicitQuota429(http.StatusTooManyRequests, nil, openAICapacityShedRuleBody(raw))
+}
+
+func openAIWSHandshakeHasOpaqueResource(value gjson.Result, depth int) bool {
+	if depth > 64 {
+		return true
+	}
+	if !value.IsObject() && !value.IsArray() {
+		return false
+	}
+	bound := false
+	value.ForEach(func(key, child gjson.Result) bool {
+		switch key.String() {
+		case "encrypted_content", "file_id", "vector_store_ids", "container":
+			bound = true
+		default:
+			bound = openAIWSHandshakeHasOpaqueResource(child, depth+1)
+		}
+		return !bound
+	})
+	return bound
 }
