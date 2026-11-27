@@ -2062,6 +2062,26 @@ func TestLogOpsStreamError_NonStreamInBandContentPolicy(t *testing.T) {
 
 // 请求级带内结果（RequestScoped）：此前尝试残留的上游错误上下文不参与分类、不做上游归因，
 // 按业务限制计；透传规则的 skip_monitoring 残留也不影响它落库。
+func TestLogOpsStreamError_ContextWindowKeepsWireStatusOutsideSLA(t *testing.T) {
+	setupOpsErrorLogTestQueue(t, 4)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	setOpsRequestContext(c, "fixture", true)
+	service.MarkOpsStreamErrorValue(c, service.OpsStreamError{
+		ErrType: "invalid_request_error", Code: "context_length_exceeded", Message: "Input exceeds the model context window.",
+		IntendedStatus: http.StatusBadRequest, UpstreamStatus: http.StatusOK, RequestScoped: true,
+	})
+	logOpsStreamError(c, service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil), http.StatusOK)
+	require.Equal(t, int64(1), OpsErrorLogQueueLength())
+	entry := (<-opsErrorLogQueue).entry
+	require.Equal(t, "client", entry.ErrorOwner)
+	require.Equal(t, "request", entry.ErrorPhase)
+	require.True(t, entry.IsBusinessLimited)
+	require.Equal(t, http.StatusBadRequest, entry.StatusCode)
+	require.NotNil(t, entry.UpstreamStatusCode)
+	require.Equal(t, http.StatusOK, *entry.UpstreamStatusCode)
+}
+
 func TestLogOpsStreamError_RequestScopedIgnoresResidualUpstreamContext(t *testing.T) {
 	setupOpsErrorLogTestQueue(t, 4)
 

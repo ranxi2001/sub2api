@@ -32,16 +32,27 @@ func (s *GatewayService) interceptAnthropicContextRejection(c *gin.Context, acco
 }
 
 func writeGatewayContextRejection(c *gin.Context, upstreamStatus int) {
+	writeContextRejection(c, upstreamStatus, false)
+}
+
+const OpsContextRejectionStatusKey = "ops_context_rejection_status"
+
+func writeContextRejection(c *gin.Context, upstreamStatus int, chat bool) {
 	const code = "context_length_exceeded"
 	const message = "Input exceeds the model context window. Shorten or compact the conversation and try again."
+	c.Set(OpsContextRejectionStatusKey, upstreamStatus)
 	setOpsUpstreamError(c, upstreamStatus, code+": "+message, "")
 	MarkOpsRequestScopedError(c, "invalid_request_error")
 	MarkResponseCommitted(c)
 	payload := gin.H{"type": "error", "error": gin.H{"type": "invalid_request_error", "code": code, "message": message}}
 	if gatewaySSEStarted(c) {
 		MarkOpsStreamErrorValue(c, OpsStreamError{ErrType: "invalid_request_error", Code: code,
-			Message: message, IntendedStatus: http.StatusBadRequest, RequestScoped: true})
-		c.SSEvent("error", payload)
+			Message: message, IntendedStatus: http.StatusBadRequest, UpstreamStatus: upstreamStatus, RequestScoped: true})
+		if chat {
+			_, _ = io.WriteString(c.Writer, buildChatStreamErrorSSE(code, message)+"data: [DONE]\n\n")
+		} else {
+			c.SSEvent("error", payload)
+		}
 		c.Writer.Flush()
 	} else {
 		c.JSON(http.StatusBadRequest, payload)

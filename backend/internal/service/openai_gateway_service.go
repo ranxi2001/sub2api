@@ -249,6 +249,7 @@ type OpenAIUsage struct {
 
 // OpenAIForwardResult represents the result of forwarding
 type OpenAIForwardResult struct {
+	SLAExcluded      bool // A metered rejection must not become a successful SLA request.
 	AuthConnectionID string
 	// RegionalMetered prevents the legacy asynchronous path from double charging.
 	RegionalMetered bool

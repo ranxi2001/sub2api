@@ -102,6 +102,7 @@ func ApplyLegacyRequestFields(requestType RequestType, fallbackStream bool, fall
 }
 
 type UsageLog struct {
+	SLAExcluded             bool `json:"-"`
 	ProcurementCostSnapshot *ProcurementCostSnapshot
 	CustomerCostDetails     *CustomerCostDetails
 	// Platform snapshots the concrete upstream provider at request time. Gateway
