@@ -544,8 +544,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 			return s.forwardAsRawChatCompletionsWithStartTime(ctx, c, account, body, defaultMappedModel, startTime)
 		}
 		if completeErrorBody && IsUpstreamContextRejection(resp.StatusCode, respBody) {
-			writeContextRejection(c, resp.StatusCode, true)
-			return nil, errGatewayContextRejection
+			return nil, writeContextRejection(c, resp.StatusCode, true, "", nil)
 		}
 		if foErr := s.failoverOpenAIUpstreamHTTPError(ctx, c, account, resp, respBody, upstreamMsg, upstreamModel); foErr != nil {
 			return nil, foErr
@@ -858,8 +857,8 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 			return nil, fmt.Errorf("openai cyber_policy: %s", msg)
 		}
 		if explicitContextWindowError(payload) {
-			writeContextRejection(c, resp.StatusCode, true)
-			return &OpenAIForwardResult{RequestID: requestID, Usage: usage, Model: originalModel, BillingModel: billingModel, UpstreamModel: upstreamModel, Duration: time.Since(startTime)}, errGatewayContextRejection
+			rejection := writeContextRejection(c, resp.StatusCode, true, account.Platform, payload)
+			return &OpenAIForwardResult{RequestID: requestID, Usage: usage, Model: originalModel, BillingModel: billingModel, UpstreamModel: upstreamModel, Duration: time.Since(startTime)}, rejection
 		}
 		message := openAICompatFailedResponseMessage(finalResponse)
 		if openAIStreamFailedEventShouldFailover(payload, message) {
@@ -1135,8 +1134,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				return true
 			}
 			if explicitContextWindowError(payloadBytes) {
-				writeContextRejection(c, resp.StatusCode, true)
-				streamNonFailoverErr = errGatewayContextRejection
+				streamNonFailoverErr = writeContextRejection(c, resp.StatusCode, true, account.Platform, payloadBytes)
 				return true
 			}
 			shouldFailover := openAIStreamFailedEventShouldFailover(payloadBytes, message)
