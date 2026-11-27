@@ -168,6 +168,9 @@ func modelsEndpointAccountRank(a *Account) int {
 // AI Studio 兼容账号原样返回上游响应；Vertex 服务账号读取 Google 发布方模型列表后转换格式，
 // 上游非 2xx 时原样返回该响应；Vertex API Key 账号返回内置列表。
 func (s *GeminiMessagesCompatService) ForwardListModels(ctx context.Context, account *Account) (*UpstreamHTTPResult, error) {
+	if !accountAllowedByAPIKeyGroup(ctx, account) {
+		return nil, ErrAPIKeyPrimaryGroupRequired
+	}
 	if account == nil {
 		return nil, errors.New("account is nil")
 	}
@@ -196,6 +199,9 @@ func (s *GeminiMessagesCompatService) ForwardListModels(ctx context.Context, acc
 // Vertex 服务账号在该模型生成请求所用区域的模型列表中查找，找不到时返回 404；该区域为多区域（us/eu）时
 // 查 global 列表，多区域可用性以 vertexModelLocations 为准。Vertex API Key 账号返回内置信息。
 func (s *GeminiMessagesCompatService) ForwardGetModel(ctx context.Context, account *Account, model string) (*UpstreamHTTPResult, error) {
+	if !accountAllowedByAPIKeyGroup(ctx, account) {
+		return nil, ErrAPIKeyPrimaryGroupRequired
+	}
 	if account == nil {
 		return nil, errors.New("account is nil")
 	}

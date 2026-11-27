@@ -18,6 +18,8 @@
 
 网关在缓存外读取当前策略。关闭后，新请求只使用数据库 `api_keys.group_id`，额外绑定不参与倍率、容量、排队、模型目录并集或故障转移。请求副本同时屏蔽跨组 fallback，主组内账号重试仍沿用原机制；主组缺失、删除、停用或撤权保持拒绝，不从额外数组补主组。暖 L1/L2 保留完整绑定，开关往返无需清库；配额和历史用量不变。已准入请求不切换计费归属，排队与 WS turn 重新鉴权会拒绝关闭前选中的额外组，要求重新请求。
 
+简易模式兼容范围：仅当 Key 原始绑定包含主组之外的不同组且策略关闭时，请求携带不可由客户端设置的主组约束。共享调度快照、粘性账号、容量探测、模型诊断及发送入口均须遵守该约束；主组无可用账号时不会借用额外组。原本只有一个组（重复主组不算额外组）的 Key，以及策略开启时的 Key，保留原有简易模式调度行为。排队或持久 WS 的主组约束发生变化时要求重新鉴权；不在连接内迁移账号或回放 continuation。约束只存在于请求副本和上下文，不写回绑定或共享缓存。
+
 区域鉴权把这一白名单 bool 放入同一 repeatable-read 事务导出的签名认证快照；区域读取不回源主站数据库。旧快照缺失该字段视为开启，多绑仍由区域原有多组拒绝保护；关闭快照只提供合法主组。更新按既有发布周期传播，过期/断连超出有效期 failclosed。旧二进制严格拒绝含未知字段的新快照，因此区域 reader 应与 publisher 一起升级；现有区域模型服务 503 安全门仍然生效，此开关不会开启区域付费生成。
 
 The administrator switch defaults to enabled, including missing legacy values. Disabled sites reject explicit multi-group submissions with HTTP 400, hide additional-group controls, and authenticate requests against the real primary group only. Omitting `group_ids` preserves existing extra links; explicitly submitting the collection replaces it. No migration or usage rewrite is required. Re-enabling resumes preserved bindings. Auth caches retain configured links while request-local policy views restrict routing; signed regional snapshots carry the same policy and retain their existing expiry and serving gates.

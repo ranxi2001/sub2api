@@ -24,6 +24,9 @@ type geminiResponsesOptions struct {
 // including Vertex service-account auth. Anthropic is only an intermediate
 // message representation; no Anthropic upstream or credential provider is used.
 func (s *GeminiMessagesCompatService) ForwardAsResponses(ctx context.Context, c *gin.Context, account *Account, body []byte) (*ForwardResult, error) {
+	if !accountAllowedByAPIKeyGroup(ctx, account) {
+		return nil, ErrAPIKeyPrimaryGroupRequired
+	}
 	if err := CheckUpstreamModeration(ctx, c, account); err != nil {
 		return nil, err
 	}

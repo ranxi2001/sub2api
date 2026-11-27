@@ -928,6 +928,9 @@ func (s *GatewayService) routingAccountIDsForRequest(ctx context.Context, groupI
 }
 
 func (s *GatewayService) resolveGatewayGroup(ctx context.Context, groupID *int64) (*Group, *int64, error) {
+	if primary, restricted := primaryOnlyGroupFromContext(ctx); restricted && (groupID == nil || *groupID != primary) {
+		return nil, nil, ErrAPIKeyPrimaryGroupRequired
+	}
 	if groupID == nil {
 		return nil, nil, nil
 	}
@@ -935,6 +938,9 @@ func (s *GatewayService) resolveGatewayGroup(ctx context.Context, groupID *int64
 	currentID := *groupID
 	visited := map[int64]struct{}{}
 	for {
+		if primary, restricted := primaryOnlyGroupFromContext(ctx); restricted && currentID != primary {
+			return nil, nil, ErrAPIKeyPrimaryGroupRequired
+		}
 		if _, seen := visited[currentID]; seen {
 			return nil, nil, fmt.Errorf("fallback group cycle detected")
 		}
@@ -1020,9 +1026,16 @@ func (s *GatewayService) resolvePlatform(ctx context.Context, groupID *int64, gr
 }
 
 func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *int64, platform string, hasForcePlatform bool) (accountsResult []Account, mixedResult bool, resultErr error) {
+	if primary, restricted := primaryOnlyGroupFromContext(ctx); restricted {
+		if groupID != nil && *groupID != primary {
+			return nil, false, ErrAPIKeyPrimaryGroupRequired
+		}
+		groupID = &primary
+	}
 	defer func() {
 		if resultErr == nil {
 			accountsResult, resultErr = s.appendGatewayMessagesCandidates(ctx, groupID, platform, accountsResult)
+			accountsResult = filterAPIKeyGroupAccounts(ctx, accountsResult)
 		}
 	}()
 	if s.schedulerSnapshot != nil {
@@ -1058,7 +1071,7 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 		var err error
 		if groupID != nil {
 			accounts, err = s.accountRepo.ListSchedulableByGroupIDAndPlatforms(ctx, *groupID, platforms)
-		} else if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
+		} else if simpleModeAccountScope(ctx, s.cfg) {
 			accounts, err = s.accountRepo.ListSchedulableByPlatforms(ctx, platforms)
 		} else {
 			accounts, err = s.accountRepo.ListSchedulableUngroupedByPlatforms(ctx, platforms)
@@ -1098,7 +1111,7 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 
 	var accounts []Account
 	var err error
-	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
+	if simpleModeAccountScope(ctx, s.cfg) {
 		accounts, err = s.accountRepo.ListSchedulableByPlatform(ctx, platform)
 	} else if groupID != nil {
 		accounts, err = s.accountRepo.ListSchedulableByGroupIDAndPlatform(ctx, *groupID, platform)
@@ -1527,6 +1540,9 @@ func (s *GatewayService) getSchedulableAccount(ctx context.Context, accountID in
 	if err != nil || account == nil {
 		return account, err
 	}
+	if !accountAllowedByAPIKeyGroup(ctx, account) {
+		return nil, ErrNoAvailableAccounts
+	}
 	if s.isAccountBlockedBySchedulingThreshold(ctx, account) {
 		return nil, nil
 	}
@@ -1542,6 +1558,7 @@ func (s *GatewayService) getSchedulableAccount(ctx context.Context, accountID in
 // filterAccountsBySchedulingThreshold 在 accounts 上原地剔除被调度阈值暂停的账号并返回剔除后的切片；
 // accounts 必须由调用方独占，调用后只能使用返回值。
 func (s *GatewayService) filterAccountsBySchedulingThreshold(ctx context.Context, accounts []Account) []Account {
+	accounts = filterAPIKeyGroupAccounts(ctx, accounts)
 	if len(accounts) == 0 {
 		return accounts
 	}
@@ -1565,6 +1582,9 @@ func (s *GatewayService) isAccountBlockedBySchedulingThreshold(ctx context.Conte
 }
 
 func (s *GatewayService) hydrateSelectedAccount(ctx context.Context, account *Account) (*Account, error) {
+	if !accountAllowedByAPIKeyGroup(ctx, account) {
+		return nil, ErrNoAvailableAccounts
+	}
 	if account != nil && account.gatewayProtocolsPending() {
 		return s.refreshGatewayMessagesSelection(ctx, account)
 	}
@@ -1577,6 +1597,9 @@ func (s *GatewayService) hydrateSelectedAccount(ctx context.Context, account *Ac
 	}
 	if hydrated == nil {
 		return nil, fmt.Errorf("selected gateway account %d not found during hydration", account.ID)
+	}
+	if !accountAllowedByAPIKeyGroup(ctx, hydrated) {
+		return nil, ErrNoAvailableAccounts
 	}
 	return hydrated, nil
 }
