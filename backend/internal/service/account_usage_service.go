@@ -144,11 +144,13 @@ func NewUsageCache() *UsageCache {
 // standard_cost: 标准费用（total_cost，不含倍率）
 // user_cost: 用户/API Key 口径费用（actual_cost，受分组倍率影响）
 type WindowStats struct {
-	Requests     int64   `json:"requests"`
-	Tokens       int64   `json:"tokens"`
-	Cost         float64 `json:"cost"`
-	StandardCost float64 `json:"standard_cost"`
-	UserCost     float64 `json:"user_cost"`
+	Procurement         *usagestats.ProcurementCoverage `json:"procurement,omitempty"`
+	LifetimeProcurement *usagestats.ProcurementCoverage `json:"lifetime_procurement,omitempty"`
+	Requests            int64                           `json:"requests"`
+	Tokens              int64                           `json:"tokens"`
+	Cost                float64                         `json:"cost"`
+	StandardCost        float64                         `json:"standard_cost"`
+	UserCost            float64                         `json:"user_cost"`
 	// Lifetime totals (no time filter); only populated by today-stats queries.
 	LifetimeTokens int64   `json:"lifetime_tokens,omitempty"`
 	LifetimeCost   float64 `json:"lifetime_cost,omitempty"`
@@ -1476,6 +1478,30 @@ func (s *AccountUsageService) addWindowStats(ctx context.Context, account *Accou
 	}
 }
 
+// Only administrator statistics use procurement estimates. Scheduling and quota
+// checks continue to consume the account debit reported by the usage repository.
+type accountProcurementReader interface {
+	GetAccountProcurementWindows(context.Context, []int64, time.Time, time.Time, bool) (map[int64]usagestats.AccountProcurementWindows, error)
+}
+
+func (s *AccountUsageService) attachTodayProcurement(ctx context.Context, ids []int64, stats map[int64]*WindowStats, start time.Time) error {
+	reader, ok := s.usageLogRepo.(accountProcurementReader)
+	if !ok {
+		return nil
+	}
+	costs, err := reader.GetAccountProcurementWindows(ctx, ids, start, time.Now(), true)
+	if err != nil {
+		return fmt.Errorf("get account procurement costs: %w", err)
+	}
+	for id, cost := range costs {
+		if row := stats[id]; row != nil {
+			row.Procurement = &cost.Window
+			row.LifetimeProcurement = &cost.Lifetime
+		}
+	}
+	return nil
+}
+
 // GetTodayStats 获取账号今日统计，并附带账号累计 Token/费用。
 func (s *AccountUsageService) GetTodayStats(ctx context.Context, accountID int64) (*WindowStats, error) {
 	stats, err := s.usageLogRepo.GetAccountTodayStats(ctx, accountID)
@@ -1493,7 +1519,7 @@ func (s *AccountUsageService) GetTodayStats(ctx context.Context, accountID int64
 	if lifetime, lerr := s.usageLogRepo.GetAccountWindowStats(ctx, accountID, time.Time{}); lerr == nil {
 		attachLifetimeStats(ws, lifetime)
 	}
-	return ws, nil
+	return ws, s.attachTodayProcurement(ctx, []int64{accountID}, map[int64]*WindowStats{accountID: ws}, timezone.Today())
 }
 
 // GetTodayStatsBatch 批量获取账号今日统计，优先走批量 SQL，失败时回退单账号查询。
@@ -1528,7 +1554,7 @@ func (s *AccountUsageService) GetTodayStatsBatch(ctx context.Context, accountIDs
 				}
 				result[accountID] = ws
 			}
-			return result, nil
+			return result, s.attachTodayProcurement(ctx, uniqueIDs, result, startTime)
 		}
 	}
 
@@ -1562,7 +1588,7 @@ func (s *AccountUsageService) GetTodayStatsBatch(ctx context.Context, accountIDs
 			attachLifetimeStats(ws, lifetime)
 		}
 	}
-	return result, nil
+	return result, s.attachTodayProcurement(ctx, uniqueIDs, result, startTime)
 }
 
 func windowStatsFromAccountStats(stats *usagestats.AccountStats) *WindowStats {
@@ -1661,6 +1687,15 @@ func (s *AccountUsageService) GetAccountUsageStats(ctx context.Context, accountI
 	stats, err := s.usageLogRepo.GetAccountUsageStats(ctx, accountID, startTime, endTime)
 	if err != nil {
 		return nil, fmt.Errorf("get account usage stats failed: %w", err)
+	}
+	if reader, ok := s.usageLogRepo.(accountProcurementReader); ok {
+		costs, err := reader.GetAccountProcurementWindows(ctx, []int64{accountID}, startTime, endTime, false)
+		if err != nil {
+			return nil, fmt.Errorf("get account procurement costs: %w", err)
+		}
+		if cost, ok := costs[accountID]; ok {
+			stats.Summary.Procurement = &cost.Window
+		}
 	}
 	return stats, nil
 }

@@ -1622,7 +1622,15 @@ export interface AccountSchedulerGroupScore {
 }
 
 // Account Usage types
+export interface ProcurementCoverage {
+  amount: number | null
+  known: number
+  requests: number
+}
+
 export interface WindowStats {
+  procurement?: ProcurementCoverage
+  lifetime_procurement?: ProcurementCoverage
   requests: number
   tokens: number
   cost: number // Account cost (account multiplier)
@@ -2596,6 +2604,7 @@ export interface AccountUsageHistory {
 }
 
 export interface AccountUsageSummary {
+  procurement?: ProcurementCoverage
   days: number
   actual_days_used: number
   total_cost: number // Account cost (account multiplier)

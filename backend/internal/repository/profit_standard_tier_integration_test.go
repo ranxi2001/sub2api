@@ -89,12 +89,33 @@ func TestProfitStandardTierAccountOverrideAndFrozenSnapshot(t *testing.T) {
 	check(40, 4, 0)
 	_, err = integrationDB.Exec(`UPDATE accounts SET extra='{"cost_multiplier":0.9,"token_procurement_basis":"standard_tier"}' WHERE id=$1`, f.account)
 	require.NoError(t, err)
-	check(7.5, 3, 1) // Request-time .25 is retained; neither 6x nor 3x is inferred.
+	check(7.5, 3, 1)
+	usage := newUsageLogRepositoryWithSQL(integrationEntClient, integrationDB)
+	checkDisplay := func(start time.Time, lifetime bool, wantKnown, wantRequests int64, wantCost *float64) {
+		t.Helper()
+		windows, err := usage.GetAccountProcurementWindows(ctx, []int64{f.account, f.outsider}, start, filter.Until, lifetime)
+		require.NoError(t, err)
+		require.NotContains(t, windows, f.outsider)
+		require.Contains(t, windows, f.account)
+		window := windows[f.account].Window
+		require.Equal(t, wantRequests, window.Requests)
+		require.Equal(t, wantKnown, window.Known)
+		require.Equal(t, wantCost, window.Amount)
+		if lifetime {
+			require.Equal(t, int64(4), windows[f.account].Lifetime.Requests)
+			require.Equal(t, numberPtr(7.5), windows[f.account].Lifetime.Amount)
+		}
+	}
+	checkDisplay(from, false, 3, 4, numberPtr(7.5))
+	checkDisplay(from.Add(time.Minute), true, 3, 4, numberPtr(7.5))
+	checkDisplay(from.Add(2*time.Minute), true, 0, 0, numberPtr(0))
+	// Request-time .25 is retained; neither 6x nor 3x is inferred.
 	filter.From = from.Add(time.Minute)
 	check(7.5, 3, 1) // Direct event boundary agrees with the converted rollup.
 	filter.From = from
 	_, err = integrationDB.Exec(`UPDATE account_usage_financial_rollups SET standard_tier_projected=NULL,standard_tier_amount=NULL WHERE bucket=$1 AND account_id=$2`, from, f.account)
 	require.NoError(t, err)
+	checkDisplay(from, false, 3, 4, numberPtr(7.5))
 	check(7.5, 3, 1) // Old workers trigger the bounded raw-event projection.
 	_, err = integrationDB.Exec(`UPDATE accounts SET extra='{"cost_multiplier":0.9}' WHERE id=$1`, f.account)
 	require.NoError(t, err)

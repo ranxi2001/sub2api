@@ -38,6 +38,8 @@
           formatCurrency(props.stats.lifetime_cost ?? 0)
         }}</span>
       </div>
+      <AccountProcurementAmount v-if="props.stats.procurement" :coverage="props.stats.procurement" :label="t('admin.accounts.stats.todayProcurement')" />
+      <AccountProcurementAmount v-if="props.stats.lifetime_procurement" :coverage="props.stats.lifetime_procurement" :label="t('admin.accounts.stats.lifetimeProcurement')" />
     </div>
 
     <!-- No data -->
@@ -46,6 +48,7 @@
 </template>
 
 <script setup lang="ts">
+import AccountProcurementAmount from './AccountProcurementAmount.vue'
 import { useI18n } from 'vue-i18n'
 import type { WindowStats } from '@/types'
 import { formatCurrency } from '@/utils/format'

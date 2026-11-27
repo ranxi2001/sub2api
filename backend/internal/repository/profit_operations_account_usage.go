@@ -8,6 +8,18 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
+// Shared by the profit report and administrator account cost displays, for both
+// closed rollups and individual events. NULL indicates missing price evidence.
+const accountProcurementCostSQL = `CASE WHEN c.standard_tier_tokens AND f.standard_tier_eligible AND procurement_source IN ('snapshot','snapshot_standard','snapshot_standard_tier','account_debit','legacy_token_debit','legacy_rate') THEN
+        CASE WHEN procurement_source='legacy_rate' THEN CASE WHEN c.multiplier=0 THEN 0 ELSE standard_tier_amount*c.multiplier END ELSE standard_tier_amount END
+      WHEN procurement_source='legacy_token_debit' AND c.standard_tokens THEN standard_token_amount
+      WHEN procurement_source='snapshot' AND c.standard_tokens AND standard_token_amount IS NOT NULL THEN standard_token_amount
+      WHEN procurement_source='legacy_rate' AND c.cost_basis='current_saved_multiplier' THEN
+        (CASE WHEN c.standard_tokens THEN COALESCE(standard_token_amount,procurement_amount) ELSE procurement_amount END)*c.multiplier
+      WHEN procurement_source='legacy_image_account' AND NULLIF(c.image_prices,'{}'::jsonb) IS NULL THEN account_charge
+      WHEN procurement_source IN ('legacy_image','legacy_image_account') AND c.account_type<>'gateway' THEN profit_image_amount(image_quantities,c.image_prices)*requests
+      WHEN procurement_source NOT IN ('legacy_rate','legacy_image','legacy_image_account') THEN procurement_amount END`
+
 func readAccountUsageProfit(ctx context.Context, tx *sql.Tx, f service.UpstreamOperationsFilter) (*service.ProfitOperationsSnapshot, error) {
 	if err := accountUsageReady(ctx, tx, f.From, f.Until); err != nil {
 		return nil, err
@@ -47,15 +59,7 @@ func readAccountUsageProfit(ctx context.Context, tx *sql.Tx, f service.UpstreamO
 ), priced AS (
  SELECT f.*,c.standard_tokens,c.standard_tier_tokens,COALESCE(c.key,'unknown:account_missing') AS upstream_key,c.name AS account_name,c.channel_id,c.channel_name,c.channel_code,
  c.channel_remark,c.assignment,CASE $5 WHEN 'public' THEN public_model WHEN 'recorded' THEN model ELSE COALESCE(upstream_model,'(unknown upstream model)') END AS model_key,
- CASE WHEN c.standard_tier_tokens AND f.standard_tier_eligible AND procurement_source IN ('snapshot','snapshot_standard','snapshot_standard_tier','account_debit','legacy_token_debit','legacy_rate') THEN
-        CASE WHEN procurement_source='legacy_rate' THEN CASE WHEN c.multiplier=0 THEN 0 ELSE standard_tier_amount*c.multiplier END ELSE standard_tier_amount END
-      WHEN procurement_source='legacy_token_debit' AND c.standard_tokens THEN standard_token_amount
-      WHEN procurement_source='snapshot' AND c.standard_tokens AND standard_token_amount IS NOT NULL THEN standard_token_amount
-      WHEN procurement_source='legacy_rate' AND c.cost_basis='current_saved_multiplier' THEN
-        (CASE WHEN c.standard_tokens THEN COALESCE(standard_token_amount,procurement_amount) ELSE procurement_amount END)*c.multiplier
-      WHEN procurement_source='legacy_image_account' AND NULLIF(c.image_prices,'{}'::jsonb) IS NULL THEN account_charge
-      WHEN procurement_source IN ('legacy_image','legacy_image_account') AND c.account_type<>'gateway' THEN profit_image_amount(image_quantities,c.image_prices)*requests
-      WHEN procurement_source NOT IN ('legacy_rate','legacy_image','legacy_image_account') THEN procurement_amount END AS procurement_cost
+ ` + accountProcurementCostSQL + ` AS procurement_cost
  FROM facts f LEFT JOIN cfg c ON c.id=f.account_id
  WHERE ($6::bigint=0 OR f.group_id=$6) AND ($7::bigint=0 OR c.channel_id=$7) AND ($8='' OR COALESCE(c.key,'unknown:account_missing')=$8)
  AND ($9='' OR CASE $5 WHEN 'public' THEN public_model WHEN 'recorded' THEN model ELSE upstream_model END=$9)

@@ -2315,6 +2315,8 @@ export default {
         requests: '请求',
         tokens: 'Token',
         lifetimeTokens: '总计 Token',
+        todayProcurement: '今日采购成本',
+        lifetimeProcurement: '累计采购成本',
         lifetimeCost: '总计费用',
         highestCostDay: '最高费用日',
         highestRequestDay: '最高请求日',

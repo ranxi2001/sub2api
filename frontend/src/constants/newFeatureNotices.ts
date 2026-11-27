@@ -79,6 +79,7 @@ export const NEW_FEATURE_NOTICES = {
   apiKeyContextTokenLimit: 'api-key-context-token-limit-initial-announcement',
   usageRecordsApi: 'usage-records-api-initial-announcement',
   apiKeyUsageDateRange: 'api-key-usage-date-range-initial-announcement',
+  accountProcurement: 'standard-tier-account-procurement',
   providerProfit: 'profit-operations-provider-reconciliation',
   profitOperationsToday: 'profit-operations-today-filter-initial-announcement',
   profitOperationsTimeRanges: 'profit-operations-time-ranges-initial-announcement',
