@@ -104,7 +104,7 @@ for(const mode of ['before','after']){
    await page.waitForFunction(()=>window.__issue1081.writes.some(w=>w.path==='/admin/settings'))
    assert.equal(await page.evaluate(()=>window.__issue1081.writes.find(w=>w.path==='/admin/settings').body.api_key_multi_group_enabled),false)
    await page.reload();await toggle.waitFor({state:'visible'});assert.equal(await toggle.getAttribute('aria-checked'),'false');await capture('settings-disabled',card)
-   const badges=()=>page.locator('#settings-tab-features + [data-testid="new-feature-badge"], [data-testid="api-key-multi-group-settings"] [data-testid="new-feature-badge"]')
+   const badges=()=>page.locator('[data-testid="new-feature-badge"][data-notice="api-key-multi-group"]')
    assert.equal(await badges().count(),2)
    await badges().nth(device==='desktop'?0:1).click();assert.equal(await badges().count(),0)
    await page.reload();await toggle.waitFor({state:'visible'});assert.equal(await badges().count(),0)

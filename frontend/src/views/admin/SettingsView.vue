@@ -41,7 +41,7 @@
                 </button>
                 <NewFeatureBadge
                   v-if="tab.key === 'features'"
-                  :notice-id="NEW_FEATURE_NOTICES.apiKeyMultiGroupPolicy"
+                  data-notice="api-key-multi-group" :notice-id="NEW_FEATURE_NOTICES.apiKeyMultiGroupPolicy"
                   :user-id="authStore.user?.id"
                   class="settings-tab-badge"
                 />
@@ -7491,7 +7491,7 @@
           <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
             <h2 id="settings-section-api-key-multi-group" tabindex="-1" class="flex items-center gap-2 text-lg font-semibold text-gray-900 dark:text-white">
               {{ t('admin.settings.features.apiKeyMultiGroup.title') }}
-              <NewFeatureBadge :notice-id="NEW_FEATURE_NOTICES.apiKeyMultiGroupPolicy" :user-id="authStore.user?.id" />
+              <NewFeatureBadge data-notice="api-key-multi-group" :notice-id="NEW_FEATURE_NOTICES.apiKeyMultiGroupPolicy" :user-id="authStore.user?.id" />
             </h2>
             <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.apiKeyMultiGroup.description') }}</p>
           </div>

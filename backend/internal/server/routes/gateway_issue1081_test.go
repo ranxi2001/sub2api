@@ -4,7 +4,7 @@ package routes
 
 import (
 	"context"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
+
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +13,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -42,7 +43,7 @@ func TestIssue1081RegisteredProtocolAuthUsesPrimaryOnly(t *testing.T) {
 			gin.SetMode(gin.TestMode)
 			f := newUnionFixture()
 			f.groups.groups[1].Platform = tc.platform
-			cfg := &config.Config{RunMode: config.RunModeSimple}
+			cfg := &config.Config{RunMode: config.RunModeSimple, Gateway: config.GatewayConfig{MaxBodySize: 1 << 20, TextMaxBodySize: 1 << 20}}
 			keys := service.NewAPIKeyService(&unionKeys{key: f.key}, nil, f.groups, f.subs, f.rates, nil, cfg)
 			keys.SetGroupPolicy(&issue1081RoutePolicy{})
 			gateway := service.NewGatewayService(f.accounts, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
@@ -135,7 +136,7 @@ func TestIssue1081RealRoutingAndTransportRoundTrip(t *testing.T) {
 			f := newUnionFixture()
 			f.groups.groups[1].AllowMessagesDispatch = true
 			f.groups.groups[2].AllowMessagesDispatch = true
-			cfg := &config.Config{RunMode: config.RunModeSimple}
+			cfg := &config.Config{RunMode: config.RunModeSimple, Gateway: config.GatewayConfig{MaxBodySize: 1 << 20, TextMaxBodySize: 1 << 20}}
 			accounts := &issue1081SchedulingAccounts{groups: map[int64][]service.Account{}}
 			for groupID := int64(1); groupID <= 2; groupID++ {
 				accounts.groups[groupID] = []service.Account{{ID: groupID + 100, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, GroupIDs: []int64{groupID}, Credentials: map[string]any{"api_key": "fixture-upstream", "model_mapping": map[string]any{"fixture-model": "fixture-model"}}, Extra: map[string]any{"openai_responses_supported": true}}}
@@ -147,7 +148,10 @@ func TestIssue1081RealRoutingAndTransportRoundTrip(t *testing.T) {
 			concurrency := service.NewConcurrencyService(nil)
 			billing := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
 			t.Cleanup(billing.Stop)
-			openAI := service.NewOpenAIGatewayService(accounts, nil, nil, nil, nil, nil, nil, nil, cfg, nil, nil, nil, nil, nil, upstream, nil, nil, nil, nil, nil, nil, nil, nil)
+			// Account selection must honor the group chosen by the policy.
+			schedulerCfg := *cfg
+			schedulerCfg.RunMode = config.RunModeStandard
+			openAI := service.NewOpenAIGatewayService(accounts, nil, nil, nil, nil, nil, nil, nil, &schedulerCfg, nil, nil, nil, nil, nil, upstream, nil, nil, nil, nil, nil, nil, nil, nil)
 			gateway := service.NewGatewayService(accounts, f.groups, nil, nil, nil, nil, nil, nil, &config.Config{RunMode: config.RunModeStandard}, nil, nil, nil, nil, nil, nil, upstream, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 			h := &handler.Handlers{Gateway: handler.NewGatewayHandler(gateway, openAI, nil, nil, nil, concurrency, billing, nil, keys, nil, nil, nil, nil, cfg, nil), OpenAIGateway: handler.NewOpenAIGatewayHandler(openAI, concurrency, billing, keys, nil, nil, nil, nil, cfg), AsyncImage: handler.NewAsyncImageHandler(nil, nil)}
 			r := gin.New()
