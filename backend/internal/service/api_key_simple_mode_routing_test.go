@@ -105,3 +105,42 @@ func TestIssue1081SimpleModeConstraintDoesNotMutateSharedCandidates(t *testing.T
 	require.Equal(t, 10, shared[1].Priority)
 	require.Equal(t, []int64{2}, shared[0].GroupIDs)
 }
+
+func TestIssue1081SimpleModeSharedSnapshotRouting(t *testing.T) {
+	ctx, group := issue1081RoutingContext(t, false, []int64{1, 2})
+	extra := issue1081RoutingAccount(20, 2, 1)
+	main := issue1081RoutingAccount(10, 1, 10)
+	for _, includeMain := range []bool{false, true} {
+		t.Run(map[bool]string{false: "extra_only", true: "main_eligible"}[includeMain], func(t *testing.T) {
+			shared := []Account{extra}
+			if includeMain {
+				shared = append(shared, main)
+			}
+			cache := &valuesReaderCache{values: shared}
+			cfg := &config.Config{RunMode: config.RunModeSimple}
+			snapshot := &SchedulerSnapshotService{cache: cache, cfg: cfg}
+			svc := &GatewayService{cfg: cfg, schedulerSnapshot: snapshot, groupRepo: &mockGroupRepoForGateway{groups: map[int64]*Group{1: group}}}
+			// Use the complete selection path; hydration reads the authoritative account.
+			hydration := &snapshotHydrationCache{snapshot: []*Account{&extra}, accounts: map[int64]*Account{10: &main, 20: &extra}}
+			if includeMain {
+				hydration.snapshot = append(hydration.snapshot, &main)
+			}
+			svc.schedulerSnapshot = &SchedulerSnapshotService{cache: hydration, cfg: cfg}
+			selected, err := svc.SelectAccountForModelWithExclusions(ctx, &group.ID, "", issue1081RoutingModel, nil)
+			if includeMain {
+				require.NoError(t, err)
+				require.Equal(t, main.ID, selected.ID)
+			} else {
+				require.ErrorIs(t, err, ErrNoAvailableAccounts)
+				require.Nil(t, selected)
+			}
+			values, _, err := snapshot.ListSchedulableAccounts(ctx, &group.ID, PlatformOpenAI, false)
+			require.NoError(t, err)
+			require.Len(t, values, map[bool]int{false: 0, true: 1}[includeMain])
+			require.Equal(t, extra.ID, shared[0].ID, "request filtering must not compact the shared platform bucket")
+			legacy, _, err := snapshot.ListSchedulableAccounts(context.Background(), &group.ID, PlatformOpenAI, false)
+			require.NoError(t, err)
+			require.Len(t, legacy, len(shared), "later legacy requests retain the full shared snapshot")
+		})
+	}
+}

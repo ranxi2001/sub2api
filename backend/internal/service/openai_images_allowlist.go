@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
 )
 
@@ -116,7 +115,7 @@ func (s *OpenAIGatewayService) ValidateImagesRouting(c *gin.Context, r *OpenAIIm
 		ctx := c.Request.Context()
 		var accounts []Account
 		var err error
-		simpleMode := s.cfg != nil && s.cfg.RunMode == config.RunModeSimple
+		simpleMode := simpleModeAccountScope(ctx, s.cfg)
 		if apiKey.GroupID != nil && !simpleMode {
 			accounts, err = s.accountRepo.ListByGroup(ctx, *apiKey.GroupID)
 		} else {
@@ -134,10 +133,13 @@ func (s *OpenAIGatewayService) ValidateImagesRouting(c *gin.Context, r *OpenAIIm
 		if err != nil {
 			return ErrImageModelAuthorizationUnavailable
 		}
-		r.authorizationAccounts, r.authorizationLoaded = accounts, true
+		r.authorizationAccounts, r.authorizationLoaded = filterAPIKeyGroupAccounts(ctx, accounts), true
 	}
 	for i := range r.authorizationAccounts {
 		account := &r.authorizationAccounts[i]
+		if !accountAllowedByAPIKeyGroup(c.Request.Context(), account) {
+			continue
+		}
 		if account.IsOpenAI() && account.Type == AccountTypeAPIKey && r.ValidateAccountModels(account, channelModel) == nil {
 			return nil
 		}

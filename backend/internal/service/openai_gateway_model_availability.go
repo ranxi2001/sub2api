@@ -4,8 +4,6 @@ import (
 	"context"
 	"strings"
 	"time"
-
-	"github.com/Wei-Shaw/sub2api/internal/config"
 )
 
 // DiagnoseModelAvailabilityForPlatform reports whether the requested model
@@ -39,8 +37,14 @@ func (s *OpenAIGatewayService) DiagnoseModelAvailabilityForPlatform(
 
 	platform = NormalizeOpenAICompatiblePlatform(platform)
 	queryGroupID := groupID
+	if primary, restricted := primaryOnlyGroupFromContext(ctx); restricted {
+		if groupID != nil && *groupID != primary {
+			return ModelAvailabilityDiagnosis{Complete: true}
+		}
+		queryGroupID = &primary
+	}
 	includeGrouped := false
-	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
+	if simpleModeAccountScope(ctx, s.cfg) {
 		queryGroupID = nil
 		includeGrouped = true
 	}
@@ -59,6 +63,9 @@ func (s *OpenAIGatewayService) DiagnoseModelAvailabilityForPlatform(
 	diag := ModelAvailabilityDiagnosis{Complete: true}
 	now := time.Now()
 	for i := range accounts {
+		if !accountAllowedByAPIKeyGroup(ctx, &accounts[i]) {
+			continue
+		}
 		diag.HasAccountsInPool = true
 		if isRetiredOpenAISubscriptionModel(&accounts[i], resolveOpenAIAccountUpstreamModelForRequest(&accounts[i], requestedModel, false)) {
 			diag.HasRetiredSubscriptionModel = true

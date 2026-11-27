@@ -302,6 +302,7 @@ func (s *SchedulerSnapshotService) readSnapshotAccounts(ctx context.Context, buc
 		if err != nil || !hit {
 			return nil, false, err
 		}
+		accounts = filterAPIKeyGroupAccounts(ctx, accounts)
 		return compactSchedulableAccounts(accounts), true, nil
 	}
 	cached, hit, err := s.cache.GetSnapshot(ctx, bucket)

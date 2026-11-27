@@ -233,3 +233,10 @@ backend/internal/handler/gateway_anthropic_tool_media_test.go
 # worktree. The current candidate runs both with their production sources.
 backend/internal/handler/usage_records_test.go
 backend/internal/service/qwen_reasoning_effort_test.go
+
+# Primary-only simple-mode regressions depend on post-1082 request constraints.
+# Full historical overlays restore/omit them; exact candidate GREEN keeps them.
+backend/internal/service/api_key_simple_mode_routing_test.go
+backend/internal/service/api_key_simple_mode_siblings_test.go
+backend/internal/service/openai_issue1081_simple_mode_test.go
+backend/internal/server/middleware/api_key_simple_mode_routing_test.go
