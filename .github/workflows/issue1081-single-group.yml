@@ -1,0 +1,132 @@
+name: Issue1081 single-group policy
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - '.github/workflows/issue1081-single-group.yml'
+      - '.github/scripts/issue1081*'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: issue1081-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Exact source identity
+        env:
+          EXPECTED: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED"
+          test -z "$(git status --porcelain)"
+          go version
+      - name: Policy regressions with race detector
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          go test -race -tags=unit ./internal/service ./internal/handler/admin ./internal/handler ./internal/server/middleware ./internal/server/routes ./internal/server -run 'TestIssue1081|TestAPIContracts|TestSettingHandler_GetPublicSettings_MatchesInjectionPayload' -count=1 -v -timeout=10m 2>&1 | tee "$RUNNER_TEMP/issue1081-policy.log"
+      - name: Production compilation
+        working-directory: backend
+        run: go build -o "$RUNNER_TEMP/sub2api" ./cmd/server
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: issue1081-policy-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/issue1081-policy.log
+          if-no-files-found: warn
+
+  persistence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: fixture
+          POSTGRES_PASSWORD: fixture
+          POSTGRES_DB: issue1081
+        ports: ['15432:5432']
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:8-alpine
+        ports: ['16379:6379']
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Stored bindings and usage survive policy roundtrip
+        working-directory: backend
+        env:
+          SUB2API_TEST_POSTGRES_DSN: postgres://fixture:fixture@127.0.0.1:15432/issue1081?sslmode=disable
+          SUB2API_TEST_REDIS_URL: redis://127.0.0.1:16379/0
+        run: |
+          set -euo pipefail
+          go test -race -tags=integration ./internal/repository -run 'TestAPIKeyRepoSuite/TestIssue1081' -count=1 -v -timeout=15m 2>&1 | tee "$RUNNER_TEMP/issue1081-persistence.log"
+          ! grep -q -- '--- SKIP:' "$RUNNER_TEMP/issue1081-persistence.log"
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: issue1081-persistence-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/issue1081-persistence.log
+  frontend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      NODE_OPTIONS: --max-old-space-size=6144
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: UI policy and badge regressions
+        run: pnpm --dir frontend exec vitest run src/views/user/__tests__/KeysView.spec.ts src/views/admin/__tests__/SettingsView.spec.ts src/components/common/__tests__/NewFeatureBadge.spec.ts
+      - name: Typecheck
+        run: pnpm --dir frontend run typecheck
+
+      - name: Install isolated remote browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/issue1081-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/issue1081-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Fixed old base first, then real candidate CSS and interactions
+        env:
+          CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/issue1081-browser/node_modules/playwright
+          SCREENSHOT_DIR: ${{ runner.temp }}/issue1081-ui
+        run: |
+          set -euo pipefail
+          mkdir -p "$SCREENSHOT_DIR"
+          node .github/scripts/issue1081-ui-evidence.mjs 2>&1 | tee "$SCREENSHOT_DIR/render.log"
+          test -s "$SCREENSHOT_DIR/manifest.json"
+          test -z "$(git status --porcelain)"
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: issue1081-ui-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/issue1081-ui
+          if-no-files-found: warn

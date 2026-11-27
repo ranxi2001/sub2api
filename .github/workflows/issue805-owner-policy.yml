@@ -85,6 +85,7 @@ jobs:
             backend/internal/handler/gemini_cached_contents_billing_test.go
           )
           omission_tests=(
+            backend/internal/handler/api_key_issue1081_test.go
             backend/internal/handler/openai_409_omit_history_test.go
             backend/internal/handler/openai_409_readable_continuation_test.go
             backend/internal/handler/openai_409_http_rebuild_test.go

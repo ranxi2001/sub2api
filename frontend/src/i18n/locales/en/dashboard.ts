@@ -143,6 +143,7 @@ export default {
     nameLabel: 'Name',
     namePlaceholder: 'My API Key',
     groupLabel: 'Group',
+    singleGroupHint: 'This site uses the primary group only. Existing additional bindings are preserved and resume when multi-group is enabled again.',
     additionalGroups: 'Use additional groups',
     multiGroupHint: 'Each request selects an available group with a lower effective multiplier and is billed by the selected group. Select up to 20 groups.',
     multiGroupCount: 'Auto · {count} groups',

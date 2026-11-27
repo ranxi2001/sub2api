@@ -41,6 +41,12 @@
                 </button>
                 <NewFeatureBadge
                   v-if="tab.key === 'features'"
+                  data-notice="api-key-multi-group" :notice-id="NEW_FEATURE_NOTICES.apiKeyMultiGroupPolicy"
+                  :user-id="authStore.user?.id"
+                  class="settings-tab-badge"
+                />
+                <NewFeatureBadge
+                  v-if="tab.key === 'features'"
                   :notice-id="NEW_FEATURE_NOTICES.protocolFeatureSwitches"
                   :user-id="authStore.user?.id"
                   class="settings-tab-badge"
@@ -7481,6 +7487,19 @@
         <!-- Tab: Features (功能开关) -->
         <div v-show="activeTab === 'features'" class="space-y-6">
         <SmartOpsSidebarSettings v-model="form.smart_ops_hidden_menu_items" />
+        <div class="card" data-testid="api-key-multi-group-settings">
+          <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
+            <h2 id="settings-section-api-key-multi-group" tabindex="-1" class="flex items-center gap-2 text-lg font-semibold text-gray-900 dark:text-white">
+              {{ t('admin.settings.features.apiKeyMultiGroup.title') }}
+              <NewFeatureBadge data-notice="api-key-multi-group" :notice-id="NEW_FEATURE_NOTICES.apiKeyMultiGroupPolicy" :user-id="authStore.user?.id" />
+            </h2>
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.apiKeyMultiGroup.description') }}</p>
+          </div>
+          <div class="flex items-center justify-between gap-4 p-6">
+            <label for="api-key-multi-group-enabled" class="font-medium text-gray-900 dark:text-white">{{ t('admin.settings.features.apiKeyMultiGroup.enabled') }}</label>
+            <Toggle id="api-key-multi-group-enabled" v-model="form.api_key_multi_group_enabled" />
+          </div>
+        </div>
         <div class="card" data-testid="protocol-feature-switches">
           <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
             <h2 class="flex items-center gap-2 text-lg font-semibold text-gray-900 dark:text-white">
@@ -10382,6 +10401,7 @@ type SettingsForm = Omit<
   | "openai_oauth_scheduling_rate_multiplier"
 > & {
   /** Form always binds a concrete boolean (SystemSettings marks this optional). */
+  api_key_multi_group_enabled: boolean;
   channel_monitor_hide_throughput: boolean;
   channel_monitor_show_quota: boolean;
   channel_monitor_hide_user_ranking: boolean;
@@ -10744,6 +10764,7 @@ const form = reactive<SettingsForm>({
   available_channels_enabled: false,
   // Subscription feature switch (user sidebar "My Subscriptions" entry)
   subscription_enabled: true,
+  api_key_multi_group_enabled: true,
   // Model Plaza feature switches + description
   model_plaza_enabled: false,
   model_plaza_require_auth: false,
@@ -11812,6 +11833,7 @@ async function loadSettings() {
     form.channel_monitor_hide_user_ranking = Boolean(
       settings.channel_monitor_hide_user_ranking
     );
+    form.api_key_multi_group_enabled = settings.api_key_multi_group_enabled !== false;
     form.excel_bps_enabled = settings.excel_bps_enabled !== false;
     form.prism_browser_enabled = Boolean(settings.prism_browser_enabled);
     form.prism_browser_base_url = settings.prism_browser_base_url || "http://127.0.0.1:8319/v1";
@@ -12578,6 +12600,7 @@ async function saveSettings() {
       available_channels_enabled: form.available_channels_enabled,
       // Subscription feature switch
       subscription_enabled: form.subscription_enabled,
+      api_key_multi_group_enabled: form.api_key_multi_group_enabled,
       // Model Plaza feature switches + description
       model_plaza_enabled: form.model_plaza_enabled,
       model_plaza_require_auth: form.model_plaza_require_auth,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/requesttiming"
 	"net/http"
 	"strings"
@@ -319,6 +320,8 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 // Only initial authentication classifies unknown credentials for abuse tracking.
 func abortAPIKeyLookupError(c *gin.Context, err error, anonymousGuard *service.APIKeyService) {
 	switch {
+	case errors.Is(err, service.ErrAPIKeyPrimaryGroupRequired), errors.Is(err, service.ErrAPIKeyGroupPolicyUnavailable):
+		AbortWithError(c, infraerrors.Code(err), infraerrors.Reason(err), infraerrors.Message(err))
 	case errors.Is(err, service.ErrUserNotFound):
 		AbortWithError(c, http.StatusUnauthorized, "USER_NOT_FOUND", "User associated with API key not found")
 	case errors.Is(err, service.ErrAPIKeyNotFound):

@@ -82,3 +82,8 @@ func (r *regionalAuthSource) ListRegionalAuth(ctx context.Context, allowed []int
 	}
 	return out, nil
 }
+
+// Uses the same Ent transaction as keys and grants, never the primary pool.
+func (r *regionalAuthSource) APIKeyMultiGroupEnabled(ctx context.Context) (bool, error) {
+	return service.NewSettingService(NewSettingRepository(r.client), nil).APIKeyMultiGroupEnabled(ctx)
+}

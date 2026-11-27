@@ -46,6 +46,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   { tab: 'general', id: 'site', titleKey: 'admin.settings.site.title' },
   { tab: 'general', id: 'custom-menu', titleKey: 'admin.settings.customMenu.title' },
   { tab: 'agreement', id: 'login-agreement', title: ['登录条款确认', 'Login agreement'] },
+  { tab: 'features', id: 'api-key-multi-group', titleKey: 'admin.settings.features.apiKeyMultiGroup.title', keywordKeys: ['description', 'enabled'].map(key => `admin.settings.features.apiKeyMultiGroup.${key}`) },
   { tab: 'features', id: 'request-capture', titleKey: 'admin.requestCapture.title' },
   { tab: 'features', id: 'smart-ops-sidebar', titleKey: 'admin.settings.features.smartOpsSidebar.title' },
   { tab: 'features', id: 'features-excel-bps-images', titleKey: 'admin.settings.features.excelBpsImages.title' },

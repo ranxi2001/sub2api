@@ -1505,9 +1505,18 @@ func (s *adminServiceImpl) AdminUpdateAPIKeySettings(ctx context.Context, keyID 
 			}
 		}
 
+		if apiKey.GroupID != nil && *apiKey.GroupID == *groupID {
+			fields.GroupID = false
+		}
 		gid := *groupID
+		ids := []int64{gid}
+		for _, saved := range apiKey.ConfiguredGroupIDs() {
+			if (apiKey.GroupID == nil || saved != *apiKey.GroupID) && saved != gid {
+				ids = append(ids, saved)
+			}
+		}
 		apiKey.GroupID = &gid
-		apiKey.GroupIDs = []int64{gid}
+		apiKey.GroupIDs = ids
 		apiKey.Group = group
 
 		// 专属标准分组：使用事务保证「添加分组权限」与「更新 API Key」的原子性
