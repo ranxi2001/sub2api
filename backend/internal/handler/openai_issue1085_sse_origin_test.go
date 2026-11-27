@@ -1,4 +1,4 @@
-//go:build unit
+//go:build unit && issue1085
 
 package handler
 
@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/model"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/Wei-Shaw/sub2api/internal/testutil"
@@ -33,7 +34,7 @@ func issue1085FlushRecords() {
 
 func TestIssue1085UpstreamTerminalAttribution(t *testing.T) {
 	for _, passthrough := range []bool{false, true} {
-		for _, mode := range []string{"http400", "sse", "stale_account_auth", "request_override", "malformed", "unknown", "success_after_attempt"} {
+		for _, mode := range []string{"http400", "sse", "stale_account_auth", "stale_skip", "current_skip", "request_override", "malformed", "unknown", "success_after_attempt", "hidden_history_success", "privacy"} {
 			t.Run(fmt.Sprintf("passthrough=%v/%s", passthrough, mode), func(t *testing.T) {
 				setupOpsErrorLogTestQueue(t, 8)
 				var sends atomic.Int32
@@ -60,6 +61,10 @@ func TestIssue1085UpstreamTerminalAttribution(t *testing.T) {
 							"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"fixture_unknown\",\"message\":\"fixture unknown failure\"}}}\n\n"
 					case "success_after_attempt":
 						terminal = "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_fixture\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}\n\n"
+					case "hidden_history_success":
+						terminal = "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_fixture\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}\n\n"
+					case "privacy":
+						terminal = strings.Replace(issue1085Failed, `"status":"failed"`, `"status":"failed","authorization":"Bearer fixture-canary-1085-secret","api_key":"fixture-canary-1085-secret"`, 1)
 					}
 					_, _ = io.WriteString(w, issue1085Created+terminal)
 				}))
@@ -72,6 +77,13 @@ func TestIssue1085UpstreamTerminalAttribution(t *testing.T) {
 				h := newOpenAIResponsesFailoverTestHandlerWithUsage(t, testutil.NewRealHTTPUpstream(cfg), nil, nil, &readable409UsageRepo{}, accounts...)
 				h.cfg.Security.URLAllowlist.AllowInsecureHTTP = true
 				h.maxAccountSwitches = 0
+				if mode == "current_skip" {
+					h.errorPassthroughService = service.NewErrorPassthroughService(&errorPassthroughRepoStub{rules: []*model.ErrorPassthroughRule{{
+						ID: 1085, Name: "fixture current terminal skip", Enabled: true, Priority: 1,
+						Keywords: []string{issue1085Code}, MatchMode: model.MatchModeAny,
+						Platforms: []string{service.PlatformOpenAI}, PassthroughCode: true, PassthroughBody: true, SkipMonitoring: true,
+					}}}, nil)
+				}
 				repo := &ingressRejectOpsRepo{}
 				ops := service.NewOpsService(repo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 				router := gin.New()
@@ -81,11 +93,15 @@ func TestIssue1085UpstreamTerminalAttribution(t *testing.T) {
 					c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{ID: 99, Key: "fixture-client", GroupID: &groupID,
 						Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI}, User: &service.User{ID: 100}})
 					c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: 100})
-					if mode == "stale_account_auth" || mode == "success_after_attempt" || mode == "request_override" {
+					if mode == "stale_account_auth" || mode == "success_after_attempt" || mode == "request_override" || mode == "stale_skip" || mode == "hidden_history_success" {
 						c.Set(service.OpsUpstreamErrorsKey, []*service.OpsUpstreamErrorEvent{{
 							AccountID: 42, Stage: string(service.GatewayFailureStageAccountAuth),
 							Message: "fixture earlier credential failure", Detail: "fixture earlier detail",
+							SkipMonitoring: mode == "stale_skip" || mode == "hidden_history_success",
 						}})
+						if mode == "stale_skip" || mode == "hidden_history_success" {
+							c.Set(service.OpsSkipPassthroughKey, true)
+						}
 					}
 					h.Responses(c)
 					if mode == "request_override" {
@@ -98,10 +114,29 @@ func TestIssue1085UpstreamTerminalAttribution(t *testing.T) {
 				router.ServeHTTP(rec, req)
 				require.Equal(t, int32(1), sends.Load(), "attribution must not introduce replay")
 				issue1085FlushRecords()
+				if mode == "hidden_history_success" || mode == "current_skip" {
+					require.Empty(t, repo.entries, "historical skip policy still applies to recovered history")
+					return
+				}
 				require.Len(t, repo.entries, 1)
 				entry := repo.entries[0]
 				if mode == "success_after_attempt" {
 					require.Equal(t, 200, entry.StatusCode, "history must not become a final failure")
+					require.Equal(t, "provider", entry.ErrorOwner)
+					require.Equal(t, "upstream_http", entry.ErrorSource)
+					require.Equal(t, "account_auth", entry.ErrorPhase)
+					require.NotNil(t, entry.UpstreamErrorMessage)
+					require.NotNil(t, entry.UpstreamStatusCode)
+					require.Equal(t, "fixture earlier credential failure", *entry.UpstreamErrorMessage)
+					require.Equal(t, 0, *entry.UpstreamStatusCode)
+					require.NotNil(t, entry.UpstreamErrorDetail)
+					require.Equal(t, "fixture earlier detail", *entry.UpstreamErrorDetail)
+					require.NotNil(t, entry.UpstreamErrorsJSON)
+					history, err := service.ParseOpsUpstreamErrors(*entry.UpstreamErrorsJSON)
+					require.NoError(t, err)
+					require.Len(t, history, 1)
+					require.Equal(t, int64(42), history[0].AccountID)
+					require.NotContains(t, entry.ErrorBody, issue1085Code)
 					return
 				}
 				if mode == "malformed" || mode == "unknown" {
@@ -136,10 +171,28 @@ func TestIssue1085UpstreamTerminalAttribution(t *testing.T) {
 					require.NotNil(t, entry.UpstreamErrorMessage)
 					require.Equal(t, issue1085Message, *entry.UpstreamErrorMessage)
 				}
-				if mode == "stale_account_auth" {
-					require.Len(t, entry.UpstreamErrors, 1)
-					require.Equal(t, int64(42), entry.UpstreamErrors[0].AccountID)
+				if mode == "stale_account_auth" || mode == "stale_skip" {
+					require.NotNil(t, entry.UpstreamErrorsJSON)
+					history, err := service.ParseOpsUpstreamErrors(*entry.UpstreamErrorsJSON)
+					require.NoError(t, err)
+					require.Len(t, history, 1)
+					require.Equal(t, int64(42), history[0].AccountID)
+					require.Equal(t, string(service.GatewayFailureStageAccountAuth), history[0].Stage)
 					require.Nil(t, entry.UpstreamErrorDetail)
+				}
+				if mode == "privacy" {
+					require.NotContains(t, entry.ErrorMessage, "fixture-canary-1085-secret")
+					if entry.UpstreamErrorMessage != nil {
+						require.NotContains(t, *entry.UpstreamErrorMessage, "fixture-canary-1085-secret")
+					}
+					if entry.UpstreamErrorDetail != nil {
+						require.NotContains(t, *entry.UpstreamErrorDetail, "fixture-canary-1085-secret")
+					}
+					if entry.UpstreamErrorsJSON != nil {
+						require.NotContains(t, *entry.UpstreamErrorsJSON, "fixture-canary-1085-secret")
+					}
+					require.NotContains(t, entry.ErrorBody, "fixture-canary-1085-secret")
+					require.Contains(t, entry.ErrorBody, "[REDACTED]")
 				}
 			})
 		}

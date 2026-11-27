@@ -1,3 +1,5 @@
+//go:build unit && issue1085
+
 package service
 
 import (
@@ -13,12 +15,15 @@ func TestOpsUpstreamSSETerminalAttemptScope(t *testing.T) {
 	first := beginOpsUpstreamSSETerminal(c)
 	first.observe([]byte(`{"type":"response.failed","response":{"error":{"type":"invalid_request_error"}}}`), "response.failed")
 	require.False(t, HasOpsUpstreamSSETerminal(c), "a partial event is not a completed terminal")
-	first.complete()
+	first.boundary()
+	require.False(t, HasOpsUpstreamSSETerminal(c), "a buffered terminal still needs a successful flush")
+	first.flushed()
 	require.True(t, HasOpsUpstreamSSETerminal(c))
 	next := beginOpsUpstreamSSETerminal(c)
 	require.False(t, HasOpsUpstreamSSETerminal(c), "a replacement reader must not inherit failure provenance")
 	next.observe([]byte(`{"type":"response.completed","response":{"status":"completed"}}`), "response.completed")
-	next.complete()
+	next.boundary()
+	next.flushed()
 	require.False(t, HasOpsUpstreamSSETerminal(c))
 }
 
@@ -27,7 +32,8 @@ func TestOpsUpstreamSSETerminalRejectsMalformed(t *testing.T) {
 		c, _ := gin.CreateTestContext(httptest.NewRecorder())
 		terminal := beginOpsUpstreamSSETerminal(c)
 		terminal.observe([]byte(payload), "response.failed")
-		terminal.complete()
+		terminal.boundary()
+		terminal.flushed()
 		require.False(t, HasOpsUpstreamSSETerminal(c))
 	}
 }

@@ -1800,6 +1800,12 @@ func shouldSkipFinalOpsFailure(c *gin.Context) bool {
 	if isOpsRequestSizeRejection(c) {
 		return false
 	}
+	// A forwarded terminal reached this boundary only after the current
+	// reader's passthrough-rule early returns. Old rule snapshots still belong
+	// to their historical events, and cannot suppress this authoritative row.
+	if service.HasOpsUpstreamSSETerminal(c) {
+		return false
+	}
 	if v, ok := c.Get(service.OpsSkipPassthroughKey); ok {
 		if skip, _ := v.(bool); skip {
 			return true

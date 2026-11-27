@@ -11,6 +11,7 @@ const opsUpstreamSSETerminalKey = "ops_upstream_sse_terminal"
 // history. Only a complete forwarded response.failed can confirm it.
 type opsUpstreamSSETerminal struct {
 	pending   bool
+	buffered  bool
 	confirmed bool
 }
 
@@ -27,9 +28,24 @@ func (terminal *opsUpstreamSSETerminal) observe(payload []byte, eventType string
 		gjson.GetBytes(payload, "response.error").IsObject()
 }
 
-func (terminal *opsUpstreamSSETerminal) complete() {
-	terminal.confirmed = terminal.pending
+// boundary means the complete event has entered the downstream buffer. A
+// queued native reader may not flush here; only flushed can confirm delivery.
+func (terminal *opsUpstreamSSETerminal) boundary() {
+	terminal.buffered = terminal.pending
 	terminal.pending = false
+}
+
+func (terminal *opsUpstreamSSETerminal) flushed() {
+	if terminal.buffered {
+		terminal.confirmed = true
+		terminal.buffered = false
+	}
+}
+
+func (terminal *opsUpstreamSSETerminal) discard() {
+	terminal.pending = false
+	terminal.buffered = false
+	terminal.confirmed = false
 }
 
 // HasOpsUpstreamSSETerminal reports internal forwarding evidence. Neither an

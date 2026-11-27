@@ -6,6 +6,8 @@ on:
       - 'backend/internal/handler/ops_error_logger.go'
       - 'backend/internal/handler/openai_issue1085*'
       - 'backend/internal/service/ops_upstream_sse_terminal*'
+      - 'backend/internal/service/ops_upstream_sse_delivery_test.go'
+      - 'backend/internal/testutil/sse1085/**'
       - 'backend/internal/service/openai_gateway_response_handling.go'
       - 'backend/internal/service/openai_gateway_passthrough.go'
       - '.github/workflows/issue1085-sse-origin.yml'
@@ -35,11 +37,18 @@ jobs:
           git worktree add --detach "$RUNNER_TEMP/issue1085-base" de34fb8c799966188a1afdc02da1458014bba81d
           git -C "$RUNNER_TEMP/issue1085-base" rev-parse HEAD > "$RUNNER_TEMP/issue1085-base.txt"
           cp backend/internal/handler/openai_issue1085_sse_origin_test.go "$RUNNER_TEMP/issue1085-base/backend/internal/handler/"
+          git worktree add --detach "$RUNNER_TEMP/issue1085-reviewed" 7b14ab2a1e959ac54a4dedd6dc5b55dbf518f5a5
+          git -C "$RUNNER_TEMP/issue1085-reviewed" rev-parse HEAD > "$RUNNER_TEMP/issue1085-reviewed.txt"
+          mkdir -p "$RUNNER_TEMP/issue1085-reviewed/backend/internal/testutil/sse1085"
+          cp backend/internal/testutil/sse1085/fixture.go "$RUNNER_TEMP/issue1085-reviewed/backend/internal/testutil/sse1085/"
+          cp backend/internal/service/ops_upstream_sse_delivery_test.go "$RUNNER_TEMP/issue1085-reviewed/backend/internal/service/"
+          cp backend/internal/handler/openai_issue1085_sse_delivery_test.go "$RUNNER_TEMP/issue1085-reviewed/backend/internal/handler/"
+          cp backend/internal/handler/openai_issue1085_sse_origin_test.go "$RUNNER_TEMP/issue1085-reviewed/backend/internal/handler/"
       - name: Old code must fail the same persisted-owner oracle
         run: |
           set -euo pipefail
           set +e
-          (cd "$RUNNER_TEMP/issue1085-base/backend" && go test -json -tags=unit ./internal/handler -run '^TestIssue1085' -count=1 -timeout=4m) > "$RUNNER_TEMP/issue1085-red.jsonl" 2>&1
+          (cd "$RUNNER_TEMP/issue1085-base/backend" && go test -json -tags=unit,issue1085 ./internal/handler -run '^TestIssue1085' -count=1 -timeout=4m) > "$RUNNER_TEMP/issue1085-red.jsonl" 2>&1
           result=$?
           set -e
           cat "$RUNNER_TEMP/issue1085-red.jsonl"
@@ -56,11 +65,35 @@ jobs:
               assert any(row.get('Test') == name and row.get('Action') == 'fail' for row in rows), name
           assert any(row.get('Test') == 'TestIssue1085LocalSSEAttribution/stale=false' and row.get('Action') == 'pass' for row in rows)
           PY
+      - name: Reviewed head must fail queued delivery and historical skip oracles
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          set +e
+          (cd "$RUNNER_TEMP/issue1085-reviewed/backend" && go test -json -tags=unit,issue1085 ./internal/service ./internal/handler -run '^Test(Issue1085TerminalDelivery|Issue1085DeliveryMiddleware|Issue1085UpstreamTerminalAttribution)$' -count=1 -timeout=4m) > "$RUNNER_TEMP/issue1085-review-red.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/issue1085-review-red.jsonl"
+          python3 - "$result" "$RUNNER_TEMP/issue1085-review-red.jsonl" <<'PY'
+          import json, sys
+          rows = [json.loads(line) for line in open(sys.argv[2]) if line.startswith('{')]
+          output = ''.join(row.get('Output', '') for row in rows)
+          assert int(sys.argv[1]) == 1
+          assert not any(row.get('Action') in ('build-fail', 'skip') for row in rows)
+          assert not any(word in output for word in ('panic:', 'DATA RACE', 'build failed', 'setup failed', 'test timed out'))
+          for name in ('TestIssue1085TerminalDelivery/native_async/write', 'TestIssue1085TerminalDelivery/native_async/flush',
+                       'TestIssue1085DeliveryMiddleware/native_async/write', 'TestIssue1085DeliveryMiddleware/native_async/flush',
+                       'TestIssue1085UpstreamTerminalAttribution/passthrough=false/stale_skip',
+                       'TestIssue1085UpstreamTerminalAttribution/passthrough=true/stale_skip'):
+              assert any(row.get('Test') == name and row.get('Action') == 'fail' for row in rows), name
+          assert 'ISSUE1085_DELIVERY_EVIDENCE' in output
+          assert 'ISSUE1085_MIDDLEWARE_DELIVERY_EVIDENCE' in output
+          PY
       - name: Exact head regressions and related Ops tests
         if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
-          (cd backend && go test -race -json -tags=unit ./internal/handler ./internal/service -run '^Test(Issue1085|OpsUpstreamSSETerminal|OpsErrorLoggerMiddleware|ClassifyOps|ParseOps|InferStreamFailure)' -count=1 -timeout=8m) | tee "$RUNNER_TEMP/issue1085-green.jsonl"
+          (cd backend && go test -race -json -tags=unit,issue1085 ./internal/handler ./internal/service -run '^Test(Issue1085|OpsUpstreamSSETerminal|OpsErrorLoggerMiddleware|ClassifyOps|ParseOps|InferStreamFailure|OpenAISSETerminalFlushDelivery)' -count=1 -timeout=8m) | tee "$RUNNER_TEMP/issue1085-green.jsonl"
       - name: Require all named acceptance cases without skips
         if: ${{ !cancelled() }}
         run: |
@@ -70,9 +103,15 @@ jobs:
           assert not any(row.get('Action') in ('fail', 'build-fail', 'skip') for row in rows)
           required = ['TestIssue1085UpstreamTerminalAttribution/passthrough=' + mode + '/' + case
                       for mode in ('false', 'true')
-                      for case in ('http400', 'sse', 'stale_account_auth', 'request_override', 'malformed', 'unknown', 'success_after_attempt')]
+                      for case in ('http400', 'sse', 'stale_account_auth', 'stale_skip', 'current_skip', 'request_override', 'malformed', 'unknown', 'success_after_attempt', 'hidden_history_success', 'privacy')]
           required += ['TestIssue1085LocalSSEAttribution/stale=' + mode for mode in ('false', 'true')]
           required += ['TestOpsUpstreamSSETerminalAttemptScope', 'TestOpsUpstreamSSETerminalRejectsMalformed']
+          required += [test + '/' + reader + '/' + outcome
+                       for test in ('TestIssue1085TerminalDelivery', 'TestIssue1085DeliveryMiddleware')
+                       for reader in ('native_async', 'passthrough')
+                       for outcome in ('success', 'write', 'flush')]
+          required += ['TestOpenAISSETerminalFlushDelivery/' + reader + '/' + outcome
+                       for reader in ('native', 'passthrough') for outcome in ('success', 'flush_failure')]
           for name in required:
               assert any(row.get('Test') == name and row.get('Action') == 'pass' for row in rows), name
           PY

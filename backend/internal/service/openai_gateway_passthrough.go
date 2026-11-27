@@ -2346,6 +2346,11 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithImage(
 	ttftMode := s.openAITTFTMode(ctx)
 	requesttiming.Mode(ctx, ttftMode)
 	clientDisconnected := OpenAIHeaderWaitDisconnected(c)
+	defer func() {
+		if clientDisconnected {
+			upstreamTerminal.discard()
+		}
+	}()
 	sawDone := false
 	sawTerminalEvent := false
 	sawFailedEvent := false
@@ -2426,9 +2431,11 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithImage(
 			return
 		}
 		if err := FlushGatewayResponse(w); err != nil {
+			upstreamTerminal.discard()
 			clientDisconnected = true
 			return
 		}
+		upstreamTerminal.flushed()
 		requesttiming.OutputFlushed(ctx)
 		deliveryObservation.flushed(ctx)
 		if earlyMetadataPending && !pluginEventOpen {
@@ -2816,6 +2823,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithImage(
 				clientOutputStarted = true
 				flushPending = true
 				if line == "" {
+					if responseFailedPending {
+						upstreamTerminal.boundary()
+					}
 					flushPendingOutput()
 				}
 			}
@@ -2823,9 +2833,6 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithImage(
 		if line == "" && responseFailedPending {
 			responseFailedPending = false
 			failureDelivered = true
-			if !clientDisconnected {
-				upstreamTerminal.complete()
-			}
 		}
 		// Terminal 事件（response.completed / [DONE] 等）随空行完整刷出后不再等上游
 		// EOF：上游在 keep-alive/HTTP2 复用连接上可能拖延关闭连接（观测到 8~46s 不等），
