@@ -216,3 +216,18 @@ func TestIssue1081OpenAISimpleModeContinuationStaysOnPrimaryOwner(t *testing.T) 
 		})
 	}
 }
+
+func TestIssue1081OpenAISimpleModeVideoFirstWrite(t *testing.T) {
+	ctx, key := issue1081OpenAIContext(t, []int64{7, 8}, true)
+	account := &Account{ID: 81, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, GroupIDs: []int64{8}, Credentials: map[string]any{"api_key": "fixture", "base_url": "https://upstream.invalid"}}
+	upstream := &httpUpstreamRecorder{}
+	svc := &OpenAIGatewayService{cfg: &config.Config{RunMode: config.RunModeSimple}, httpUpstream: upstream}
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil).WithContext(ctx)
+	c.Set("api_key", key)
+	result, creation, err := svc.ForwardOpenAIVideo(ctx, c, account, OpenAIVideoEndpointCreate, "fixture", "", []byte(`{"model":"sora-2","prompt":"fixture"}`), "application/json", GrokMediaRequestInfo{Model: "sora-2"})
+	require.Nil(t, result)
+	require.Nil(t, creation)
+	requireGroupMembershipDenied(t, err)
+	require.Nil(t, upstream.lastReq)
+}

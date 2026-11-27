@@ -240,3 +240,4 @@ backend/internal/service/api_key_simple_mode_routing_test.go
 backend/internal/service/api_key_simple_mode_siblings_test.go
 backend/internal/service/openai_issue1081_simple_mode_test.go
 backend/internal/server/middleware/api_key_simple_mode_routing_test.go
+backend/internal/service/api_key_issue1081_test.go
