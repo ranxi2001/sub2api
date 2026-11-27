@@ -4,6 +4,7 @@
  * browser; use a new ID to announce the feature again in a later release.
  */
 export const NEW_FEATURE_NOTICES = {
+  apiKeyMultiGroupPolicy: 'api-key-multi-group-policy-v1',
   monitorV3ComponentModels: 'channel-monitor-v3-component-models',
   adminKeyFullAccess: 'admin-key-full-access-compatibility',
   upstreamBillingGroupSync: 'upstream-billing-group-sync',

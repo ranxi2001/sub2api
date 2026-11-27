@@ -174,7 +174,7 @@
             <div class="key-group-cell group/dropdown relative">
               <button
                 :ref="(el) => setGroupButtonRef(row.id, el)"
-                @click="(row.group_ids?.length ?? 0) > 1 ? editKey(row) : openGroupSelector(row)"
+                @click="multiGroupEnabled && (row.group_ids?.length ?? 0) > 1 ? editKey(row) : openGroupSelector(row)"
                 class="key-group-control -mx-2 -my-1 flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 transition-all duration-200 hover:bg-gray-100 dark:hover:bg-dark-700"
                 :title="t('keys.clickToChangeGroup')"
               >
@@ -195,7 +195,7 @@
                 <span v-else class="text-sm text-gray-400 dark:text-dark-500">{{
                   t('keys.noGroup')
                 }}</span>
-                <span v-if="(row.group_ids?.length ?? 0) > 1" class="key-group-hint text-xs text-primary-600">{{ t('keys.multiGroupCount', { count: row.group_ids.length }) }}</span>
+                <span v-if="multiGroupEnabled && (row.group_ids?.length ?? 0) > 1" class="key-group-hint text-xs text-primary-600">{{ t('keys.multiGroupCount', { count: row.group_ids.length }) }}</span>
                 <span v-else class="key-group-hint text-xs text-gray-500 dark:text-gray-400">{{ t('keys.selectGroup') }}</span>
                 <svg
                   class="h-3.5 w-3.5 text-gray-400 opacity-60 transition-opacity group-hover/dropdown:opacity-100"
@@ -673,7 +673,7 @@
               />
             </template>
           </Select>
-          <fieldset class="mt-3 space-y-2" data-testid="key-additional-groups">
+          <fieldset v-if="!publicSettingsLoading && multiGroupEnabled" class="mt-3 space-y-2" data-testid="key-additional-groups">
             <legend class="input-label">{{ t('keys.additionalGroups') }}</legend>
             <p class="input-hint">{{ t('keys.multiGroupHint') }}</p>
             <div class="max-h-48 space-y-2 overflow-y-auto">
@@ -686,6 +686,7 @@
               </label>
             </div>
           </fieldset>
+          <p v-if="!multiGroupEnabled" class="input-hint" data-testid="key-single-group-hint">{{ t('keys.singleGroupHint') }}</p>
         </div>
 
         <!-- Custom Key Section (only for create) -->
@@ -1699,6 +1700,7 @@ const selectedCodexQuickConfigPlatform = computed(() => {
 const copiedKeyId = ref<number | null>(null)
 const groupSelectorKeyId = ref<number | null>(null)
 const publicSettings = ref<PublicSettings | null>(null)
+const multiGroupEnabled = computed(() => publicSettings.value?.api_key_multi_group_enabled !== false)
 const publicSettingsLoading = ref(true)
 const dropdownRef = ref<HTMLElement | null>(null)
 const columnDropdownRef = ref<HTMLElement | null>(null)
@@ -2151,7 +2153,7 @@ const changeGroup = async (key: ApiKey, newGroupId: number | null) => {
   if (key.group_id === newGroupId) return
 
   try {
-    await keysAPI.update(key.id, { group_id: newGroupId, group_ids: newGroupId === null ? [] : [newGroupId] })
+    await keysAPI.update(key.id, { group_id: newGroupId, ...(multiGroupEnabled.value ? { group_ids: newGroupId === null ? [] : [newGroupId] } : {}) })
     appStore.showSuccess(t('keys.groupChangedSuccess'))
     loadApiKeys()
   } catch (error) {
@@ -2244,7 +2246,7 @@ const handleSubmit = async () => {
         name: formData.value.name,
         concurrency_limit: concurrencyLimit,
         group_id: formData.value.group_id,
-        group_ids: selectedFormGroupIDs(),
+        ...(multiGroupEnabled.value ? { group_ids: selectedFormGroupIDs() } : {}),
         ip_whitelist: ipWhitelist,
         ip_blacklist: ipBlacklist,
         quota: quota,
@@ -2270,7 +2272,7 @@ const handleSubmit = async () => {
         expiresInDays,
         rateLimitData,
         concurrencyLimit,
-        selectedFormGroupIDs()
+        multiGroupEnabled.value ? selectedFormGroupIDs() : undefined
       )
       appStore.showSuccess(t('keys.keyCreatedSuccess'))
       // Only advance tour if active, on submit step, and creation succeeded

@@ -143,6 +143,7 @@ export default {
     nameLabel: '名称',
     namePlaceholder: '我的 API 密钥',
     groupLabel: '分组',
+    singleGroupHint: '站点已关闭多分组，只使用主分组。已有额外绑定会保留，重新开启后恢复。',
     additionalGroups: '同时使用其他分组',
     multiGroupHint: '每次请求自动选择可用且倍率较低的分组，并按实际使用分组计费。最多选择 20 个分组。',
     multiGroupCount: '自动分配 · {count} 个分组',

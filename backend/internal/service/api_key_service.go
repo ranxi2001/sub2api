@@ -302,6 +302,7 @@ type RateLimitCacheInvalidator interface {
 }
 
 type APIKeyService struct {
+	groupPolicy               APIKeyGroupPolicy
 	groupAntiDistillation     *GroupAntiDistillationService
 	autoCredit                AutoCreditRepository
 	autoCreditBilling         *BillingCacheService
@@ -544,6 +545,9 @@ func (s *APIKeyService) Create(ctx context.Context, userID int64, req CreateAPIK
 		}
 	}
 
+	if _, err := s.validateGroupSubmission(ctx, req.GroupID, req.GroupIDs); err != nil {
+		return nil, err
+	}
 	groupIDs, err := normalizeAPIKeyGroupIDs(req.GroupID, req.GroupIDs)
 	if err != nil {
 		return nil, err
@@ -782,6 +786,17 @@ func (s *APIKeyService) GetByID(ctx context.Context, id int64) (*APIKey, error) 
 
 // GetByKey 根据Key字符串获取API Key（用于认证）
 func (s *APIKeyService) GetByKey(ctx context.Context, key string) (*APIKey, error) {
+	apiKey, err := s.getByKey(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	if s.localAuth != nil {
+		return apiKey, nil
+	}
+	return s.applyGroupPolicy(ctx, apiKey)
+}
+
+func (s *APIKeyService) getByKey(ctx context.Context, key string) (*APIKey, error) {
 	if s.localAuth != nil {
 		return s.localAuth.GetByKey(ctx, key)
 	}
@@ -848,6 +863,17 @@ func (s *APIKeyService) GetByKey(ctx context.Context, key string) (*APIKey, erro
 // not a prerequisite for revocation. The normal auth lookup concurrency bound
 // and the caller's admission timeout still apply.
 func (s *APIKeyService) GetByKeyUncached(ctx context.Context, key string) (*APIKey, error) {
+	apiKey, err := s.getByKeyUncached(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	if s.localAuth != nil {
+		return apiKey, nil
+	}
+	return s.applyGroupPolicy(ctx, apiKey)
+}
+
+func (s *APIKeyService) getByKeyUncached(ctx context.Context, key string) (*APIKey, error) {
 	if s.localAuth != nil {
 		return s.localAuth.GetByKey(ctx, key)
 	}
@@ -926,6 +952,10 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 		if req.GroupIDs != nil {
 			requested = *req.GroupIDs
 		}
+		_, err = s.validateGroupSubmission(ctx, req.GroupID, requested)
+		if err != nil {
+			return nil, err
+		}
 		ids, err := normalizeAPIKeyGroupIDs(req.GroupID, requested)
 		if err != nil {
 			return nil, err
@@ -933,13 +963,26 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 		if err := s.validateAPIKeyGroups(ctx, user, ids); err != nil {
 			return nil, err
 		}
-		apiKey.GroupIDs = ids
-		apiKey.GroupID = nil
-		apiKey.Group = nil
-		if len(ids) > 0 {
-			apiKey.GroupID = &ids[0]
+		if req.GroupIDs == nil {
+			// Legacy primary-only edits preserve extras, including when
+			// changing the primary. Validate only the requested primary above.
+			for _, saved := range apiKey.ConfiguredGroupIDs() {
+				if (apiKey.GroupID == nil || saved != *apiKey.GroupID) && (len(ids) == 0 || saved != ids[0]) {
+					ids = append(ids, saved)
+				}
+			}
 		}
-		fields.GroupID = true
+		// A legacy editor echoing the same primary must not rewrite links from
+		// a stale snapshot and overwrite a concurrent explicit collection edit.
+		if req.GroupIDs != nil || apiKey.GroupID == nil || req.GroupID == nil || *apiKey.GroupID != *req.GroupID {
+			apiKey.GroupIDs = ids
+			apiKey.GroupID = nil
+			apiKey.Group = nil
+			if len(ids) > 0 {
+				apiKey.GroupID = &ids[0]
+			}
+			fields.GroupID = true
+		}
 	}
 
 	if req.Status != nil {
