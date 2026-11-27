@@ -41,7 +41,7 @@ jobs:
         run: |
           set -euo pipefail
           set +e
-          (cd "$RUNNER_TEMP/issue1077-base/backend" && go test -json -tags=unit ./internal/service ./internal/handler -run '^TestIssue1077(HandshakeAccountRejection|HandlerSamePOST)$' -count=1 -timeout=3m) > "$RUNNER_TEMP/issue1077-red.jsonl" 2>&1
+          (cd "$RUNNER_TEMP/issue1077-base/backend" && go test -json -tags=unit,issue1077 ./internal/service ./internal/handler -run '^TestIssue1077(HandshakeAccountRejection|HandlerSamePOST)$' -count=1 -timeout=3m) > "$RUNNER_TEMP/issue1077-red.jsonl" 2>&1
           result=$?
           set -e
           cat "$RUNNER_TEMP/issue1077-red.jsonl"
@@ -57,7 +57,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
-          (cd backend && go test -race -json -tags=unit ./internal/service ./internal/handler -run '^Test(Issue1077|OpenAIWSHTTPBridgeLaterTurn|ProxyOpenAIWSHTTPBridgeTurnLater|BuildOpenAIWSCurrentTurnRetryPayload|OpenAIWSSSEIncompleteRegionalHandlerOwnsSingleResponse)'  -count=1 -timeout=5m) | tee "$RUNNER_TEMP/issue1077-green.jsonl"
+          (cd backend && go test -race -json -tags=unit,issue1077 ./internal/service ./internal/handler -run '^Test(Issue1077|OpenAIWSHTTPBridgeLaterTurn|ProxyOpenAIWSHTTPBridgeTurnLater|BuildOpenAIWSCurrentTurnRetryPayload|OpenAIWSSSEIncompleteRegionalHandlerOwnsSingleResponse)'  -count=1 -timeout=5m) | tee "$RUNNER_TEMP/issue1077-green.jsonl"
       - uses: actions/upload-artifact@v7
         if: always()
         with:

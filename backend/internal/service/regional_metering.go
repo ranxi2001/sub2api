@@ -310,6 +310,10 @@ func (s *OpenAIGatewayService) beginRegionalMeter(ctx context.Context, c *gin.Co
 		return ctx, nil, err
 	}
 	digest := sha256.Sum256(body)
+	if retired != nil && (retired.reservation.UserID != r.UserID || retired.reservation.APIKeyID != r.APIKeyID ||
+		retired.reservation.PayloadSHA256 != hex.EncodeToString(digest[:]) || retired.reservation.Model != model) {
+		return ctx, nil, ledger.ErrConflict
+	}
 	r.Model = model
 	r.PricingVersion = p.Version()
 	r.Maximum = maximum

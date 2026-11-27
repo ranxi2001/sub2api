@@ -748,7 +748,7 @@ func openAIWSRawItemsContainNonPortableContext(items []json.RawMessage) bool {
 			if itemType, ok := typed["type"].(string); ok && (strings.TrimSpace(itemType) == "item_reference" || itemType == "input_image" || itemType == "input_file") {
 				return true
 			}
-			if encrypted, ok := typed["encrypted_content"].(string); ok && strings.TrimSpace(encrypted) != "" {
+			if _, exists := typed["encrypted_content"]; exists {
 				return true
 			}
 			for _, child := range typed {
@@ -767,6 +767,9 @@ func openAIWSRawItemsContainNonPortableContext(items []json.RawMessage) bool {
 	}
 
 	for _, item := range items {
+		if !openAIEncryptedJSONUnambiguous(item) {
+			return true
+		}
 		var decoded any
 		if err := json.Unmarshal(item, &decoded); err != nil {
 			// The caller already validated the request.  If a replay item is
@@ -910,8 +913,7 @@ func buildOpenAIWSCurrentTurnRetryPayload(
 	fullInputExists bool,
 	originalModel string,
 ) ([]byte, bool, error) {
-	if !fullInputExists || !openAIEncryptedJSONUnambiguous(payload) ||
-		!openAIWSReplayToolsPortable(gjson.GetBytes(payload, "tools")) {
+	if !fullInputExists || !openAIEncryptedJSONUnambiguous(payload) {
 		return nil, false, nil
 	}
 	for _, key := range []string{"conversation", "conversation_id"} {

@@ -981,7 +981,7 @@ readLoop:
 		// Responses failure rather than forwarding a bare error and appending a
 		// generic terminal from the outer handler.
 		if accelerateHTTPSSE && reqStream && (eventType == "error" || eventType == "response.failed") &&
-			isOpenAIQuotaExhaustedResponse(message) {
+			isOpenAIExplicitStreamQuota(message) {
 			lease.MarkBroken()
 			errCode, errType, errMessage := parseOpenAIWSErrorEventFields(message)
 			s.persistOpenAIWSRateLimitSignal(openAI429LeaseObservation(ctx, lease), account, lease.HandshakeHeaders(), message, errCode, errType, errMessage, mappedModel)

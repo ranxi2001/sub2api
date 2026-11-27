@@ -91,7 +91,11 @@ func prismBrowserResponsesURL(baseURL string) string {
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (result *OpenAIForwardResult, resultErr error) {
-	ctx = context.WithValue(ctx, openAIWSHandshakeReplayKey{}, openAIWSHandshakePayloadPortable(ctx, body))
+	portable := openAIWSHandshakePayloadPortable(ctx, body)
+	if original, ok := ctx.Value(openAIWSHandshakeClientSourceKey{}).(bool); ok {
+		portable = portable && original
+	}
+	ctx = context.WithValue(ctx, openAIWSHandshakeReplayKey{}, portable)
 	if account.gatewayProtocolsPending() {
 		view, err := s.gatewayProtocolAccount(ctx, account, "openai", gatewayProtocolBodyModel(body))
 		if err != nil {

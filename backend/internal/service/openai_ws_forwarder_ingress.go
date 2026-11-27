@@ -1600,7 +1600,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					if retryPayloadErr != nil {
 						return fmt.Errorf("build websocket current-turn failover payload: %w", retryPayloadErr)
 					}
-					if !retrySafe {
+					if !retrySafe || !openAIWSReplayToolsPortable(gjson.GetBytes(currentBridgePayload.accountIdentitySourceRaw, "tools")) {
 						retryPayload = nil
 					}
 					return newOpenAIWSCurrentTurnFailoverError(bridgeErr, retryPayload)

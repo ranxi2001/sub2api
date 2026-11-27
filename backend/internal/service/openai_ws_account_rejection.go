@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 )
 
@@ -53,7 +54,7 @@ func isOpenAIExplicitQuota429(status int, headers http.Header, body []byte) bool
 	if code != "" && !quotaCode {
 		return false
 	}
-	if typ != "" && !quotaType && !(quotaCode && typ == "rate_limit_error") {
+	if typ != "" && !quotaType && (!quotaCode || typ != "rate_limit_error") {
 		return false
 	}
 	return quotaCode || quotaType
@@ -100,14 +101,38 @@ func openAIWSReplayToolsPortable(tools gjson.Result) bool {
 }
 
 type openAIWSHandshakeReplayKey struct{}
+type openAIWSHandshakeClientSourceKey struct{}
+
+// PreserveOpenAIWSHandshakeClientSource freezes the portability decision before
+// the HTTP handler can omit, recover, normalize or project any client history.
+// No request body is retained in Gin or placed in a public header.
+func PreserveOpenAIWSHandshakeClientSource(c *gin.Context, raw []byte) {
+	if c != nil && c.Request != nil {
+		ctx := c.Request.Context()
+		c.Request = c.Request.WithContext(context.WithValue(ctx, openAIWSHandshakeClientSourceKey{}, openAIWSHandshakePayloadPortable(ctx, raw)))
+	}
+}
 
 // Capture this before any account projection or history normalization. Both
 // the immutable client request and the exact outgoing payload must be portable.
 func openAIWSHandshakePayloadPortable(ctx context.Context, raw []byte) bool {
-	if !openAIWSModelFailureCanReplay(ctx, raw) {
+	if !OpenAIWSAgentRecoveryCanRetry(ctx) || OpenAIAgentRecoveryNoReplay(ctx) ||
+		codexWSAnchorFromContext(ctx) != nil || !openAIEncryptedJSONUnambiguous(raw) {
 		return false
 	}
 	root := gjson.ParseBytes(raw)
+	if !root.IsObject() {
+		return false
+	}
+	for _, key := range []string{"previous_response_id", "conversation", "conversation_id"} {
+		if v := root.Get(key); v.Exists() && v.Type != gjson.Null && v.String() != "" {
+			return false
+		}
+	}
+	input := root.Get("input")
+	if input.Type != gjson.String && !input.IsArray() {
+		return false
+	}
 	if !openAIWSReplayToolsPortable(root.Get("tools")) {
 		return false
 	}
@@ -116,7 +141,23 @@ func openAIWSHandshakePayloadPortable(ctx context.Context, raw []byte) bool {
 		(!choice.IsObject() || choice.Get("type").String() != "function" || choice.Get("name").Type != gjson.String) {
 		return false
 	}
-	for _, item := range root.Get("input").Array() {
+	var items []gjson.Result
+	if input.IsArray() {
+		items = input.Array()
+	}
+	for _, item := range items {
+		if !item.IsObject() || (item.Get("type").String() != "" && item.Get("type").String() != "message") {
+			return false
+		}
+		switch item.Get("role").String() {
+		case "user", "system", "developer":
+		default:
+			return false
+		}
+		content := item.Get("content")
+		if content.Type != gjson.String && !content.IsArray() {
+			return false
+		}
 		known := true
 		item.ForEach(func(key, _ gjson.Result) bool {
 			known = key.String() == "type" || key.String() == "role" || key.String() == "content"
@@ -125,7 +166,13 @@ func openAIWSHandshakePayloadPortable(ctx context.Context, raw []byte) bool {
 		if !known {
 			return false
 		}
-		for _, part := range item.Get("content").Array() {
+		if content.Type == gjson.String {
+			continue
+		}
+		for _, part := range content.Array() {
+			if !part.IsObject() || part.Get("text").Type != gjson.String || (part.Get("type").String() != "text" && part.Get("type").String() != "input_text") {
+				return false
+			}
 			part.ForEach(func(key, _ gjson.Result) bool {
 				known = key.String() == "type" || key.String() == "text"
 				return known
@@ -158,3 +205,7 @@ type openAIWSHandshakeAccountFailover struct {
 
 func (e *openAIWSHandshakeAccountFailover) Error() string { return e.cause.Error() }
 func (e *openAIWSHandshakeAccountFailover) Unwrap() error { return e.cause }
+
+func isOpenAIExplicitStreamQuota(raw []byte) bool {
+	return openAIEncryptedJSONUnambiguous(raw) && isOpenAIExplicitQuota429(http.StatusTooManyRequests, nil, openAICapacityShedRuleBody(raw))
+}
