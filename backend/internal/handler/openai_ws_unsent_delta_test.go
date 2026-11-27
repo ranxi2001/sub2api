@@ -46,6 +46,9 @@ func runUnsentDeltaWithPolicy(t *testing.T, mode string, switchTurn int, fence, 
 	runUnsentDeltaWithLossyPolicy(t, mode, switchTurn, fence, extraInput, clientHistory, false)
 }
 func runUnsentDeltaWithLossyPolicy(t *testing.T, mode string, switchTurn int, fence, extraInput string, clientHistory, lossy bool) {
+	runUnsentDeltaLifecycle(t, mode, switchTurn, fence, extraInput, clientHistory, lossy, false)
+}
+func runUnsentDeltaLifecycle(t *testing.T, mode string, switchTurn int, fence, extraInput string, clientHistory, lossy, nextTool bool) {
 	t.Helper()
 	var mu sync.Mutex
 	var frames [][]byte
@@ -56,9 +59,28 @@ func runUnsentDeltaWithLossyPolicy(t *testing.T, mode string, switchTurn int, fe
 		frames = append(frames, append([]byte(nil), body...))
 		owners = append(owners, auth)
 		n := len(frames)
+		if nextTool && n <= switchTurn {
+			items := gjson.GetBytes(body, "input").Array()
+			found := false
+			for _, item := range items {
+				if item.Get("type").String() == "additional_tools" {
+					var actual, expected any
+					if json.Unmarshal([]byte(item.Raw), &actual) == nil && json.Unmarshal([]byte(issue1084AdditionalTools), &expected) == nil {
+						found = reflect.DeepEqual(expected, actual) && item.Get("tools.0.parameters.properties.ticket.enum.0").Raw == "9007199254740993"
+					}
+					break
+				}
+			}
+			if !found {
+				return [][]byte{[]byte(`{"type":"response.failed","response":{"status":"failed","error":{"code":"SUPPORTED_DECLARATION_NOT_PRESERVED"}}}`)}
+			}
+		}
 		output := fmt.Sprintf(`[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"fixture history %d"}]}]`, n)
 		if n == switchTurn-1 {
 			output = `[{"type":"function_call","call_id":"call_takeover_once","name":"fixture","arguments":"{\"n\":9007199254740993}","status":"completed"}]`
+		}
+		if nextTool && n == switchTurn {
+			output = `[{"type":"function_call","call_id":"call_replacement_once","name":"fixture_replacement","arguments":"{\"ticket\":9007199254740993}","status":"completed"}]`
 		}
 		var events [][]byte
 		if n == switchTurn-1 && fence == "terminal_excludes" {
@@ -166,6 +188,7 @@ func runUnsentDeltaWithLossyPolicy(t *testing.T, mode string, switchTurn int, fe
 	}
 	issue715WSSend(t, h.clientConn, create(initialInput, ""))
 	executions := 0
+	replacementExecutions := 0
 	consume := func(raw []byte) {
 		items := gjson.GetBytes(raw, "response.output").Array()
 		if gjson.GetBytes(raw, "type").String() == "response.output_item.done" {
@@ -173,6 +196,12 @@ func runUnsentDeltaWithLossyPolicy(t *testing.T, mode string, switchTurn int, fe
 		}
 		for _, item := range items {
 			if item.Get("type").String() == "function_call" {
+				if nextTool && item.Get("call_id").String() == "call_replacement_once" {
+					require.Equal(t, "fixture_replacement", item.Get("name").String())
+					require.Equal(t, `{"ticket":9007199254740993}`, item.Get("arguments").String())
+					replacementExecutions++
+					continue
+				}
 				require.Equal(t, "call_takeover_once", item.Get("call_id").String())
 				executions++
 			}
@@ -318,6 +347,40 @@ func runUnsentDeltaWithLossyPolicy(t *testing.T, mode string, switchTurn int, fe
 	require.True(t, gjson.GetBytes(resumed, "tools").IsArray(), "effective tool declarations must survive takeover")
 	for _, item := range gjson.GetBytes(resumed, "input").Array() {
 		require.NotContains(t, item.Get("type").String(), "call", "completed tools must be inert history")
+	}
+	if nextTool {
+		// Check the actual replacement wire, not just a parser projection.
+		require.Contains(t, string(resumed), "fixture replacement tool")
+		require.Equal(t, 1, replacementExecutions)
+		issue715WSSend(t, h.clientConn, create(`[{"type":"function_call_output","call_id":"call_replacement_once","output":"fixture replacement applied exactly once"}]`, fmt.Sprintf("resp_delta_%d", switchTurn)))
+		next := issue715WSRead(t, h.clientConn)
+		consume(next)
+		awaitUsage()
+		require.Equal(t, "response.completed", gjson.GetBytes(next, "type").String())
+		require.Equal(t, fmt.Sprintf("resp_delta_%d", switchTurn+1), gjson.GetBytes(next, "response.id").String())
+		mu.Lock()
+		defer mu.Unlock()
+		require.Len(t, frames, switchTurn+1)
+		for _, owner := range owners[:switchTurn-1] {
+			require.Equal(t, "Bearer fixture-A", owner)
+		}
+		for _, owner := range owners[switchTurn-1:] {
+			require.Equal(t, "Bearer fixture-B", owner, "disabled A must never be reused")
+		}
+		require.Contains(t, string(frames[switchTurn]), "fixture replacement applied exactly once")
+		require.NotContains(t, string(frames[switchTurn]), fmt.Sprintf("resp_delta_%d\"", switchTurn-1))
+		require.Equal(t, 1, executions)
+		require.Equal(t, 1, replacementExecutions)
+		accounts.mu.Lock()
+		disabled := false
+		for _, account := range accounts.accounts {
+			if account.ID == 1 {
+				disabled = !account.Schedulable
+			}
+		}
+		accounts.mu.Unlock()
+		require.True(t, disabled, "A remains disabled")
+		return
 	}
 	if switchTurn == 53 {
 		require.Contains(t, string(resumed), "fixture history 1")
