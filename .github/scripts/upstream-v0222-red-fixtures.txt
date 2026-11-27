@@ -4,6 +4,7 @@ backend/internal/config/config_test.go
 backend/internal/domain/constants_test.go
 backend/internal/handler/admin/group_handler_openai_fast_test.go
 backend/internal/handler/api_key_handler_usage_sort_test.go
+backend/internal/handler/api_key_issue1081_test.go
 backend/internal/handler/dto/group_mapper_openai_fast_test.go
 backend/internal/handler/gateway_compat_effort_policy_test.go
 backend/internal/handler/gateway_helper_ping_test.go
