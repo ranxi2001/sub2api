@@ -231,3 +231,25 @@ func TestIssue1081OpenAISimpleModeVideoFirstWrite(t *testing.T) {
 	requireGroupMembershipDenied(t, err)
 	require.Nil(t, upstream.lastReq)
 }
+
+func TestIssue1081OpenAISimpleModeSiblingFirstWrite(t *testing.T) {
+	ctx, key := issue1081OpenAIContext(t, []int64{7, 8}, true)
+	account := &Account{ID: 81, Platform: PlatformGrok, Type: AccountTypeAPIKey, GroupIDs: []int64{8}, Credentials: map[string]any{"api_key": "fixture", "base_url": "https://upstream.invalid"}}
+	upstream := &httpUpstreamRecorder{}
+	svc := &OpenAIGatewayService{cfg: &config.Config{RunMode: config.RunModeSimple}, httpUpstream: upstream}
+	for _, alpha := range []bool{false, true} {
+		t.Run(map[bool]string{false: "grok_media", true: "alpha_search"}[alpha], func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(ctx)
+			c.Set("api_key", key)
+			var err error
+			if alpha {
+				_, err = svc.ForwardAlphaSearch(ctx, c, account, []byte(`{"query":"fixture"}`))
+			} else {
+				_, err = svc.ForwardGrokMedia(ctx, c, account, GrokMediaEndpointImagesGenerations, "", []byte(`{"model":"grok-imagine","prompt":"fixture"}`), "application/json")
+			}
+			requireGroupMembershipDenied(t, err)
+			require.Nil(t, upstream.lastReq)
+		})
+	}
+}
