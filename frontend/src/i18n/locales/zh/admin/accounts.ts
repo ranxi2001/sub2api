@@ -432,6 +432,7 @@ export default {
       subscriptionExpires: '到期',
       // 容量状态提示
       capacity: {
+        concurrencyUnavailable: '当前并发占用暂不可用，请刷新重试',
         windowCost: {
           blocked: '5h窗口费用超限，账号暂停调度',
           stickyOnly: '5h窗口费用达阈值，仅允许粘性会话',

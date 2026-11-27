@@ -161,6 +161,21 @@ describe('AccountsView automatic declaration refresh', () => {
     vi.useRealTimers()
   })
 
+  it('refreshes both occupied accounts, then unknown and zero without an account timestamp change', async () => {
+    rows = rows.map((row, index) => ({ ...row, current_concurrency: index + 1 }))
+    const view = await mountView()
+    const counts = () => view.findAll('[data-testid="account-concurrency"]').map(cell => cell.text().replace(/\s/g, ''))
+    expect(counts()).toEqual(['1/2', '2/2'])
+    rows = rows.map(row => ({ ...row, current_concurrency: null }))
+    listRevision++
+    await tick()
+    expect(counts()).toEqual(['—/2', '—/2'])
+    rows = rows.map((row, index) => ({ ...row, current_concurrency: index === 0 ? 0 : 1 }))
+    listRevision++
+    await tick()
+    expect(counts()).toEqual(['0/2', '1/2'])
+  })
+
   it('renders binding A → B → unbound/null from automatic list responses without changing account updated_at', async () => {
     rows = rows.map(row => ({ ...row, upstream_channel_binding: binding(row.id, 1, 'Fixture A') }))
     const view = await mountView()
@@ -356,16 +371,18 @@ describe('AccountsView automatic declaration refresh', () => {
     localStorage.setItem('account-filter-values', JSON.stringify({ platform: 'openai', status: 'active' }))
     localStorage.setItem('account-table-sort', JSON.stringify({ key: 'capacity', order: 'desc' }))
     total = 60
+    rows = rows.map(row => ({ ...row, current_concurrency: 2 }))
     const view = await mountView()
     const pending = holdNext('/admin/accounts', pageData())
     await tick()
-    rows = [account(61), account(62)]
+    rows = [{ ...account(61), current_concurrency: null }, { ...account(62), current_concurrency: 0 }]
     await view.get('button[aria-label="' + i18n.global.t('pagination.next') + '"]').trigger('click')
     await flushPromises()
     expect(view.findAll('[data-row-id]').map(row => row.attributes('data-row-id'))).toEqual(['61', '62'])
     pending.complete()
     await flushPromises()
     expect(view.findAll('[data-row-id]').map(row => row.attributes('data-row-id'))).toEqual(['61', '62'])
+    expect(view.findAll('[data-testid="account-concurrency"]').map(cell => cell.text().replace(/\s/g, ''))).toEqual(['—/2', '0/2'])
     await tick()
     const last = requests.filter(request => request.url === '/admin/accounts').at(-1)!
     expect(last.params).toMatchObject({ page: 2, page_size: 20, platform: 'openai', status: 'active', sort_by: 'current_concurrency', sort_order: 'desc', lite: '1' })
