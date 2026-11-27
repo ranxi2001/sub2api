@@ -580,6 +580,9 @@ func (s *OpenAIGatewayService) selectAccountByPreviousResponseIDForCapability(
 	}
 	accountID, account, responseID, store := s.resolveAccountByPreviousResponseIDForCapability(ctx, groupID, previousResponseID, requestedModel, excludedIDs, requiredCapability, requireCompact)
 	if accountID <= 0 || account == nil || store == nil {
+		if _, restricted := primaryOnlyGroupFromContext(ctx); restricted && strings.TrimSpace(previousResponseID) != "" {
+			return nil, denyOpenAITurn("group_membership_changed")
+		}
 		return nil, nil
 	}
 
@@ -662,7 +665,9 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 		return 0, nil, "", nil
 	}
 	if account == nil {
-		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
+		if _, restricted := primaryOnlyGroupFromContext(ctx); !restricted {
+			_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
+		}
 		return 0, nil, "", nil
 	}
 	if !s.openAIAccountMatchesSchedulingGroup(ctx, account, groupID) {
@@ -676,7 +681,9 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 		return 0, nil, "", nil
 	}
 	if shouldClearStickySession(account, requestedModel) || !account.IsOpenAI() || !account.IsSchedulable() {
-		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
+		if _, restricted := primaryOnlyGroupFromContext(ctx); !restricted {
+			_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
+		}
 		return 0, nil, "", nil
 	}
 	if !parentHealthyForShadow(account, s.parentAccountLookup(ctx)) {

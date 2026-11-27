@@ -429,6 +429,10 @@ func (s *defaultOpenAIAccountScheduler) Select(
 			return nil, decision, err
 		}
 	}
+	if _, restricted := primaryOnlyGroupFromContext(ctx); restricted && strings.TrimSpace(req.PreviousResponseID) != "" {
+		req.PreviousResponseCanMove = false
+		req.StickyWeighted = false
+	}
 	recovery := openAIAgentRecoveryFromContext(ctx)
 	// Preserve the public refusal and admission policy, while allowing operators
 	// to identify the exact owner check without capturing conversation state.
@@ -784,6 +788,9 @@ func (s *defaultOpenAIAccountScheduler) Select(
 
 	if previousResponseID != "" && req.priorityLatencyPool != nil {
 		return nil, decision, priorityLatencyAdmissionError(false)
+	}
+	if _, restricted := primaryOnlyGroupFromContext(ctx); restricted && previousResponseID != "" {
+		return nil, decision, denyOpenAITurn("group_membership_changed")
 	}
 
 	if req.GuardianParentAccountID > 0 {
@@ -2958,6 +2965,9 @@ func (s *OpenAIGatewayService) selectLegacyAccountByPreviousResponse(
 		if selection.ReleaseFunc != nil {
 			selection.ReleaseFunc()
 		}
+		if _, restricted := primaryOnlyGroupFromContext(ctx); restricted {
+			return nil, false, denyOpenAITurn("group_membership_changed")
+		}
 		return nil, false, nil
 	}
 	if sessionHash != "" {
@@ -2983,6 +2993,9 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
 	if err := s.checkPrimaryOnlyPreviousResponseOwner(ctx, groupID, previousResponseID); err != nil {
 		return nil, OpenAIAccountScheduleDecision{}, err
+	}
+	if _, restricted := primaryOnlyGroupFromContext(ctx); restricted && strings.TrimSpace(previousResponseID) != "" {
+		previousResponseCanMove = false
 	}
 	ctx = withOpenAIProxyQuarantineTransport(ctx, requiredTransport)
 	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)

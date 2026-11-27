@@ -28,18 +28,15 @@ func IsWindowExpired(windowStart *time.Time, duration time.Duration) bool {
 }
 
 type APIKey struct {
-	ID       int64
-	UserID   int64
-	Key      string
-	Name     string
-	GroupIDs []int64 // Configured groups; GroupID is the selected group for a request.
-	GroupID  *int64
-	// Request-local policy state, derived before bindings are projected. Never
-	// persisted or included in shared auth snapshots / public JSON.
-	primaryOnlyGroupID int64
-	Status             string
-	IPWhitelist        []string
-	IPBlacklist        []string
+	ID          int64
+	UserID      int64
+	Key         string
+	Name        string
+	GroupIDs    []int64 // Configured groups; GroupID is the selected group for a request.
+	GroupID     *int64
+	Status      string
+	IPWhitelist []string
+	IPBlacklist []string
 
 	// Model, reasoning effort and long context policies are managed only by administrators.
 	// Mapping is an exact, single-step rewrite; empty policy preserves the request.
@@ -75,6 +72,10 @@ type APIKey struct {
 	Window5hStart *time.Time // Start of current 5h window
 	Window1dStart *time.Time // Start of current 1d window
 	Window7dStart *time.Time // Start of current 7d window
+
+	// Request-local policy state, derived before bindings are projected. Never
+	// persisted or included in shared auth snapshots / public JSON.
+	primaryOnlyGroupID int64
 }
 
 // RequiresContextCheck includes explicit ceilings even when long context is allowed.

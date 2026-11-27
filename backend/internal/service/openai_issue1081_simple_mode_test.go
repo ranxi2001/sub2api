@@ -179,3 +179,40 @@ func TestIssue1081OpenAISimpleModeStickyAndAcquisition(t *testing.T) {
 		})
 	}
 }
+
+func TestIssue1081OpenAISimpleModeContinuationStaysOnPrimaryOwner(t *testing.T) {
+	for _, excluded := range []bool{false, true} {
+		t.Run(map[bool]string{false: "primary_owner_eligible", true: "primary_owner_excluded"}[excluded], func(t *testing.T) {
+			ctx, key := issue1081OpenAIContext(t, []int64{7, 8}, true)
+			owner := Account{ID: 71, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, GroupIDs: []int64{7}, Credentials: map[string]any{"model_mapping": map[string]any{"gpt-5.1": "gpt-5.1"}}, Extra: map[string]any{"openai_apikey_responses_websockets_v2_enabled": true}}
+			other := owner
+			other.ID = 72
+			repo := schedulerGroupAwareOpenAIAccountRepo{schedulerTestOpenAIAccountRepo{accounts: []Account{owner, other}}}
+			cache := &schedulerTestGatewayCache{}
+			store := NewOpenAIWSStateStore(cache)
+			require.NoError(t, store.BindResponseAccount(ctx, 7, "resp_primary_1081", owner.ID, time.Hour))
+			acquired := []int64{}
+			svc := &OpenAIGatewayService{accountRepo: repo, cache: cache, cfg: &config.Config{RunMode: config.RunModeSimple}, openaiWSStateStore: store, concurrencyService: NewConcurrencyService(&schedulerTestConcurrencyCache{acquiredIDs: &acquired})}
+			exclusions := map[int64]struct{}{}
+			if excluded {
+				exclusions[owner.ID] = struct{}{}
+			}
+			selection, _, err := svc.SelectAccountWithSchedulerForCapability(ctx, key.GroupID, "resp_primary_1081", "", "gpt-5.1", exclusions, OpenAIUpstreamTransportAny, OpenAIEndpointCapabilityResponses, false, true, true)
+			if excluded {
+				require.Nil(t, selection)
+				require.Error(t, err)
+				require.Empty(t, acquired, "continuation must not move to another primary account")
+			} else {
+				require.NoError(t, err)
+				require.NotNil(t, selection)
+				require.Equal(t, owner.ID, selection.Account.ID)
+				if selection.ReleaseFunc != nil {
+					selection.ReleaseFunc()
+				}
+			}
+			bound, err := store.GetResponseAccount(ctx, 7, "resp_primary_1081")
+			require.NoError(t, err)
+			require.Equal(t, owner.ID, bound)
+		})
+	}
+}
