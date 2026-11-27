@@ -526,27 +526,6 @@ func getOpenAIGroupIDFromContext(c *gin.Context) int64 {
 	return *apiKey.GroupID
 }
 
-// A response owned outside the constrained primary group cannot be replayed on
-// another account. Keep the binding and return a local pre-send rejection.
-func (s *OpenAIGatewayService) checkPrimaryOnlyPreviousResponseOwner(ctx context.Context, groupID *int64, responseID string) error {
-	if _, restricted := primaryOnlyGroupFromContext(ctx); !restricted || strings.TrimSpace(responseID) == "" {
-		return nil
-	}
-	store := s.getOpenAIWSStateStore()
-	if store == nil {
-		return denyOpenAITurn("group_membership_changed")
-	}
-	id, err := store.GetResponseAccount(ctx, derefGroupID(groupID), strings.TrimSpace(responseID))
-	if err != nil || id <= 0 {
-		return denyOpenAITurn("group_membership_changed")
-	}
-	account, err := s.getSchedulableAccount(ctx, id)
-	if err != nil || !s.openAIAccountMatchesSchedulingGroup(ctx, account, groupID) {
-		return denyOpenAITurn("group_membership_changed")
-	}
-	return nil
-}
-
 // SelectAccountByPreviousResponseID 按 previous_response_id 命中账号粘连。
 // 未命中或账号不可用时返回 (nil, nil)，由调用方继续走常规调度。
 func (s *OpenAIGatewayService) SelectAccountByPreviousResponseID(
@@ -670,7 +649,7 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 		}
 		return 0, nil, "", nil
 	}
-	if !s.openAIAccountMatchesSchedulingGroup(ctx, account, groupID) {
+	if _, restricted := primaryOnlyGroupFromContext(ctx); restricted && !s.openAIAccountMatchesRequestGroup(ctx, account, groupID) {
 		return 0, nil, "", nil
 	}
 	// OAuth/SetupToken continuation state lives on the WSv2 session and cannot
@@ -731,7 +710,7 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 			_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
 			return 0, nil, "", nil
 		}
-		if !s.openAIAccountMatchesSchedulingGroup(ctx, latest, groupID) {
+		if !s.openAIAccountMatchesRequestGroup(ctx, latest, groupID) {
 			return 0, nil, "", nil
 		}
 		if s.openAIGroupRequiresPrivacySet(ctx, groupID) && !latest.IsPrivacySet() {

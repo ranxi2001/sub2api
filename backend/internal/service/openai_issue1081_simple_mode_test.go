@@ -281,7 +281,7 @@ func TestIssue1081OpenAISimpleModeWSIngress(t *testing.T) {
 				account.Credentials["model_mapping"] = map[string]any{"gpt-5.1": "gpt-5.1"}
 				account.Extra = map[string]any{"openai_oauth_responses_websockets_v2_mode": mode}
 				upstream := newStagedPassthroughConn()
-				defer upstream.Close()
+				defer func() { require.NoError(t, upstream.Close()) }()
 				svc := newPassthroughLifecycleService(cfg, upstream)
 				svc.accountRepo = &groupAdmissionRepo{first: account}
 				svc.requireLatestTurnAdmission = true
