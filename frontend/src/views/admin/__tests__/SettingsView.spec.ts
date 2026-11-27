@@ -188,6 +188,7 @@ vi.mock("vue-i18n", async () => {
     "admin.settings.wechatConnect.title": "微信登录",
     "admin.settings.wechatConnect.description": "用于微信开放平台或公众号/小程序的第三方登录配置。",
     "admin.settings.wechatConnect.enabledLabel": "启用微信登录",
+    "admin.settings.smtp.resendAPIKey": "Resend API Key",
     "admin.settings.wechatConnect.enabledHint": "开启后可使用微信第三方登录回调与授权配置。",
     "admin.settings.wechatConnect.appIdLabel": "AppID",
     "admin.settings.wechatConnect.appIdPlaceholder": "微信开放平台 AppID",
@@ -446,6 +447,8 @@ const baseSettingsResponse = {
   custom_endpoints: [],
   frontend_url: "",
   smtp_host: "",
+  email_provider: "smtp" as const,
+  resend_api_key_configured: false,
   smtp_port: 587,
   smtp_username: "",
   smtp_password_configured: false,
@@ -679,6 +682,48 @@ describe("admin SettingsView email domain quota copy", () => {
     expect(zhQuotaHint).toContain("关闭时非白名单域名直接拒绝");
     expect(enQuotaHint).toContain("one account");
     expect(enQuotaHint).toContain("When disabled");
+  });
+});
+
+describe("admin SettingsView Resend provider", () => {
+  beforeEach(() => {
+    getSettings.mockReset().mockResolvedValue({
+      ...baseSettingsResponse,
+      email_verify_enabled: true,
+      email_provider: "smtp",
+      resend_api_key_configured: true,
+    });
+    updateSettings.mockReset().mockImplementation(async (payload) => ({
+      ...baseSettingsResponse,
+      email_verify_enabled: true,
+      resend_api_key_configured: true,
+      ...payload,
+    }));
+  });
+
+  it("shows Resend configuration only after provider selection and keeps the API key out of settings reads", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    const emailTab = wrapper.findAll('[role="tab"]').find((node) => node.text().includes("admin.settings.tabs.email"));
+    expect(emailTab).toBeDefined();
+    await emailTab?.trigger("click");
+    await flushPromises();
+
+    const provider = wrapper.get<HTMLSelectElement>('[data-testid="email-provider-select"]');
+    expect(provider.element.value).toBe("smtp");
+    await provider.setValue("resend");
+    await flushPromises();
+    expect(wrapper.find('[data-testid="resend-api-key"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain("Resend API Key");
+    expect(wrapper.find('[data-testid="new-feature-badge"]').exists()).toBe(true);
+  });
+
+  it("registers the new notice separately and provides English and Chinese setup guidance", () => {
+    expect(NEW_FEATURE_NOTICES.resendEmailProvider).toBe("resend-transactional-email-provider-v1");
+    expect(zhSettings.settings.smtp.resendHint).toContain("验证发件域名");
+    expect(enSettings.settings.smtp.resendHint).toContain("verify the sender domain");
+    expect(zhSettings.settings.smtp.resendKeyConfiguredHint).toContain("留空");
+    expect(enSettings.settings.smtp.resendKeyConfiguredHint).toContain("Leave empty");
   });
 });
 

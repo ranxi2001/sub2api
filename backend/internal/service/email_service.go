@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -8,16 +9,21 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
+	"io"
 	"log/slog"
 	"math/big"
 	"net"
+	"net/http"
+	"net/mail"
 	"net/smtp"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -109,6 +115,9 @@ type EmailService struct {
 	settingRepo              SettingRepository
 	cache                    EmailCache
 	notificationEmailService *NotificationEmailService
+	secretEncryptor          SecretEncryptor
+	resendHTTPMu             sync.RWMutex
+	resendHTTPTransport      http.RoundTripper
 }
 
 // NewEmailService 创建邮件服务实例
@@ -117,6 +126,28 @@ func NewEmailService(settingRepo SettingRepository, cache EmailCache) *EmailServ
 		settingRepo: settingRepo,
 		cache:       cache,
 	}
+}
+
+func (s *EmailService) SetSecretEncryptor(encryptor SecretEncryptor) {
+	if s != nil {
+		s.secretEncryptor = encryptor
+	}
+}
+
+// SetResendHTTPTransport replaces the HTTP transport for isolated tests.
+func (s *EmailService) SetResendHTTPTransport(transport http.RoundTripper) {
+	if s == nil || transport == nil {
+		return
+	}
+	s.resendHTTPMu.Lock()
+	s.resendHTTPTransport = transport
+	s.resendHTTPMu.Unlock()
+}
+
+func ProvideEmailService(settingRepo SettingRepository, cache EmailCache, encryptor SecretEncryptor) *EmailService {
+	s := NewEmailService(settingRepo, cache)
+	s.SetSecretEncryptor(encryptor)
+	return s
 }
 
 func (s *EmailService) SetNotificationEmailService(notificationEmailService *NotificationEmailService) {
@@ -183,13 +214,138 @@ func (s *EmailService) GetSMTPConfig(ctx context.Context) (*SMTPConfig, error) {
 	}, nil
 }
 
+type ResendConfig struct {
+	APIKey   string
+	From     string
+	FromName string
+}
+
+func (s *EmailService) EncryptResendAPIKey(apiKey string) (string, error) {
+	if s == nil || s.secretEncryptor == nil {
+		return "", errors.New("Resend API key encryption is unavailable")
+	}
+	return s.secretEncryptor.Encrypt(strings.TrimSpace(apiKey))
+}
+
+func (s *EmailService) GetResendConfig(ctx context.Context) (*ResendConfig, error) {
+	if s == nil || s.settingRepo == nil {
+		return nil, ErrEmailNotConfigured
+	}
+	settings, err := s.settingRepo.GetMultiple(ctx, []string{SettingKeyResendAPIKey, SettingKeySMTPFrom, SettingKeySMTPFromName})
+	if err != nil {
+		return nil, fmt.Errorf("get Resend settings: %w", err)
+	}
+	if settings[SettingKeyResendAPIKey] == "" || s.secretEncryptor == nil {
+		return nil, ErrEmailNotConfigured
+	}
+	apiKey, err := s.secretEncryptor.Decrypt(settings[SettingKeyResendAPIKey])
+	if err != nil || strings.TrimSpace(apiKey) == "" {
+		return nil, errors.New("Resend API key could not be read")
+	}
+	return &ResendConfig{APIKey: apiKey, From: strings.TrimSpace(settings[SettingKeySMTPFrom]), FromName: strings.TrimSpace(settings[SettingKeySMTPFromName])}, nil
+}
+
 // SendEmail 发送邮件（使用数据库中保存的配置）
 func (s *EmailService) SendEmail(ctx context.Context, to, subject, body string) error {
+	if s == nil || s.settingRepo == nil {
+		return ErrEmailNotConfigured
+	}
+	providerSettings, err := s.settingRepo.GetMultiple(ctx, []string{SettingKeyEmailProvider})
+	if err != nil {
+		return fmt.Errorf("get email provider: %w", err)
+	}
+	if normalizeEmailProvider(providerSettings[SettingKeyEmailProvider]) == EmailProviderResend {
+		config, err := s.GetResendConfig(ctx)
+		if err != nil {
+			return err
+		}
+		return s.SendEmailWithResendConfig(ctx, config, to, subject, body)
+	}
 	config, err := s.GetSMTPConfig(ctx)
 	if err != nil {
 		return err
 	}
 	return s.SendEmailWithConfig(config, to, subject, body)
+}
+
+const (
+	resendSendEmailEndpoint = "https://api.resend.com/emails"
+	resendRequestTimeout    = 15 * time.Second
+)
+
+type resendSendEmailRequest struct {
+	From    string   `json:"from"`
+	To      []string `json:"to"`
+	Subject string   `json:"subject"`
+	HTML    string   `json:"html"`
+}
+
+func (s *EmailService) SendEmailWithResendConfig(ctx context.Context, config *ResendConfig, to, subject, body string) error {
+	if config == nil || strings.TrimSpace(config.APIKey) == "" {
+		return ErrEmailNotConfigured
+	}
+	from, err := parseSMTPAddress(config.From, "from")
+	if err != nil {
+		return errors.New("invalid Resend sender address")
+	}
+	recipient, err := parseSMTPAddress(to, "recipient")
+	if err != nil {
+		return errors.New("invalid email recipient")
+	}
+	fromName := sanitizeEmailHeader(config.FromName)
+	if fromName == "" {
+		fromName = from.Name
+	}
+	fromHeader := (&mail.Address{Name: fromName, Address: from.Address}).String()
+	payload, err := json.Marshal(resendSendEmailRequest{From: fromHeader, To: []string{recipient.Address}, Subject: sanitizeEmailHeader(subject), HTML: body})
+	if err != nil {
+		return errors.New("could not prepare Resend email")
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, resendRequestTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, resendSendEmailEndpoint, bytes.NewReader(payload))
+	if err != nil {
+		return errors.New("could not prepare Resend request")
+	}
+	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(config.APIKey))
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{
+		Timeout: resendRequestTimeout,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	if s != nil {
+		s.resendHTTPMu.RLock()
+		if s.resendHTTPTransport != nil {
+			client.Transport = s.resendHTTPTransport
+		}
+		s.resendHTTPMu.RUnlock()
+	}
+	response, err := client.Do(req)
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(requestCtx.Err(), context.DeadlineExceeded) {
+			return errors.New("Resend request timed out")
+		}
+		return errors.New("Resend request failed")
+	}
+	defer response.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64*1024))
+	if response.StatusCode >= 200 && response.StatusCode < 300 {
+		return nil
+	}
+	switch {
+	case response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden:
+		return errors.New("Resend authentication or permission failed")
+	case response.StatusCode == http.StatusTooManyRequests:
+		return errors.New("Resend rate limit exceeded")
+	case response.StatusCode == http.StatusBadRequest || response.StatusCode == http.StatusUnprocessableEntity:
+		return errors.New("Resend rejected the email request")
+	case response.StatusCode >= http.StatusInternalServerError:
+		return errors.New("Resend service is unavailable")
+	default:
+		return errors.New("Resend request failed")
+	}
 }
 
 const smtpDialTimeout = 10 * time.Second

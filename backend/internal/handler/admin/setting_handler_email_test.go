@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
+
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -55,4 +57,33 @@ func TestSendTestEmailRequestPreservesUseTLSOmissionSemantics(t *testing.T) {
 
 	require.True(t, resolveSMTPUseTLS(omitted.SMTPUseTLS, saved))
 	require.False(t, resolveSMTPUseTLS(explicitFalse.SMTPUseTLS, saved))
+}
+
+func TestUpdateSettingsResendKeyIsEncryptedAndBlankKeyPreservesExisting(t *testing.T) {
+	repo := &settingHandlerRepoStub{values: map[string]string{}}
+	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
+	email := service.NewEmailService(repo, nil)
+	email.SetSecretEncryptor(settingsTestEncryptor{})
+	h := NewSettingHandler(svc, email, nil, nil, nil, nil, nil)
+
+	rec := doUpdateSettings(t, h, map[string]any{"email_provider": "resend", "resend_api_key": "re_test-secret"}, nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotEqual(t, "re_test-secret", repo.values[service.SettingKeyResendAPIKey])
+	require.Equal(t, "resend", repo.values[service.SettingKeyEmailProvider])
+	require.Contains(t, rec.Body.String(), `"resend_api_key_configured":true`)
+	require.NotContains(t, rec.Body.String(), "re_test-secret")
+	require.NotContains(t, rec.Body.String(), `"resend_api_key":`)
+
+	stored := repo.values[service.SettingKeyResendAPIKey]
+	rec = doUpdateSettings(t, h, map[string]any{"email_provider": "smtp"}, nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, stored, repo.values[service.SettingKeyResendAPIKey])
+	require.Equal(t, "smtp", repo.values[service.SettingKeyEmailProvider])
+}
+
+func TestUpdateSettingsRejectsResendWithoutSavedOrNewKey(t *testing.T) {
+	h, repo := newStepUpSwitchTestHandler(t, map[string]string{})
+	rec := doUpdateSettings(t, h, map[string]any{"email_provider": "resend"}, nil)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Empty(t, repo.values[service.SettingKeyEmailProvider])
 }

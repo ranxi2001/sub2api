@@ -115,6 +115,12 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if req.SMTPPassword != "" {
 		changed = append(changed, "smtp_password")
 	}
+	if before.EmailProvider != after.EmailProvider {
+		changed = append(changed, "email_provider")
+	}
+	if req.ResendAPIKey != "" {
+		changed = append(changed, "resend_api_key")
+	}
 	if before.SMTPFrom != after.SMTPFrom {
 		changed = append(changed, "smtp_from_email")
 	}
@@ -123,6 +129,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	}
 	if before.SMTPUseTLS != after.SMTPUseTLS {
 		changed = append(changed, "smtp_use_tls")
+	}
+	if before.ResendAPIKeyConfigured != after.ResendAPIKeyConfigured || req.ResendAPIKey != "" {
+		changed = append(changed, "resend_api_key")
 	}
 	if before.TurnstileEnabled != after.TurnstileEnabled {
 		changed = append(changed, "turnstile_enabled")

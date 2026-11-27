@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -19,6 +20,13 @@ import (
 type settingHandlerRepoStub struct {
 	values      map[string]string
 	lastUpdates map[string]string
+}
+
+type settingsTestEncryptor struct{}
+
+func (settingsTestEncryptor) Encrypt(value string) (string, error) { return "encrypted:" + value, nil }
+func (settingsTestEncryptor) Decrypt(value string) (string, error) {
+	return strings.TrimPrefix(value, "encrypted:"), nil
 }
 
 func (s *settingHandlerRepoStub) Get(ctx context.Context, key string) (*service.Setting, error) {

@@ -57,13 +57,15 @@ type UpdateSettingsRequest struct {
 	LoginAgreementDocuments             []dto.LoginAgreementDocument `json:"login_agreement_documents"`
 
 	// 邮件服务设置
-	SMTPHost     string `json:"smtp_host"`
-	SMTPPort     int    `json:"smtp_port"`
-	SMTPUsername string `json:"smtp_username"`
-	SMTPPassword string `json:"smtp_password"`
-	SMTPFrom     string `json:"smtp_from_email"`
-	SMTPFromName string `json:"smtp_from_name"`
-	SMTPUseTLS   bool   `json:"smtp_use_tls"`
+	SMTPHost      string `json:"smtp_host"`
+	SMTPPort      int    `json:"smtp_port"`
+	SMTPUsername  string `json:"smtp_username"`
+	SMTPPassword  string `json:"smtp_password"`
+	SMTPFrom      string `json:"smtp_from_email"`
+	SMTPFromName  string `json:"smtp_from_name"`
+	SMTPUseTLS    bool   `json:"smtp_use_tls"`
+	EmailProvider string `json:"email_provider"`
+	ResendAPIKey  string `json:"resend_api_key"`
 
 	// Cloudflare Turnstile 设置
 	TurnstileEnabled   bool   `json:"turnstile_enabled"`
@@ -495,6 +497,7 @@ func (h *SettingHandler) ensureActorTotpForStepUp(c *gin.Context) bool {
 // is named after its setting key.
 var settingKeyJSONAliases = map[string]string{
 	"smtp_from_email": service.SettingKeySMTPFrom,
+	"resend_api_key":  service.SettingKeyResendAPIKey,
 }
 
 // settingKeyByJSONName maps the value-typed top-level JSON fields of
@@ -543,6 +546,7 @@ func omittedSettingKeys(sentFields map[string]json.RawMessage) service.OmittedSe
 }
 
 func settingsAuditRequest(req UpdateSettingsRequest) UpdateSettingsRequest {
+	req.ResendAPIKey = ""
 	req.TencentCaptchaAppSecretKey = strings.TrimSpace(req.TencentCaptchaAppSecretKey)
 	req.TencentCaptchaCloudSecretID = strings.TrimSpace(req.TencentCaptchaCloudSecretID)
 	req.TencentCaptchaCloudSecretKey = strings.TrimSpace(req.TencentCaptchaCloudSecretKey)
@@ -765,6 +769,8 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	req.SMTPPassword = strings.TrimSpace(req.SMTPPassword)
 	req.SMTPFrom = strings.TrimSpace(req.SMTPFrom)
 	req.SMTPFromName = strings.TrimSpace(req.SMTPFromName)
+	req.EmailProvider = strings.TrimSpace(req.EmailProvider)
+	req.ResendAPIKey = strings.TrimSpace(req.ResendAPIKey)
 	req.TencentCaptchaAppID = strings.TrimSpace(req.TencentCaptchaAppID)
 	req.TencentCaptchaAppSecretKey = strings.TrimSpace(req.TencentCaptchaAppSecretKey)
 	req.TencentCaptchaCloudSecretID = strings.TrimSpace(req.TencentCaptchaCloudSecretID)
@@ -788,6 +794,33 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		req.SMTPFrom = previousSettings.SMTPFrom
 		req.SMTPFromName = previousSettings.SMTPFromName
 		req.SMTPUseTLS = previousSettings.SMTPUseTLS
+	}
+	if _, sent := sentFields["email_provider"]; !sent {
+		req.EmailProvider = previousSettings.EmailProvider
+	}
+	if req.EmailProvider == "" {
+		req.EmailProvider = service.EmailProviderSMTP
+	}
+	if req.EmailProvider != service.EmailProviderSMTP && req.EmailProvider != service.EmailProviderResend {
+		response.BadRequest(c, "email_provider must be smtp or resend")
+		return
+	}
+	resendAPIKeyEncrypted := previousSettings.ResendAPIKeyEncrypted
+	if req.ResendAPIKey != "" {
+		if h.emailService == nil {
+			response.InternalError(c, "email credential encryption is unavailable")
+			return
+		}
+		var encryptErr error
+		resendAPIKeyEncrypted, encryptErr = h.emailService.EncryptResendAPIKey(req.ResendAPIKey)
+		if encryptErr != nil {
+			response.InternalError(c, "email credential encryption is unavailable")
+			return
+		}
+	}
+	if req.EmailProvider == service.EmailProviderResend && resendAPIKeyEncrypted == "" {
+		response.BadRequest(c, "Resend API key is required when Resend is selected")
+		return
 	}
 
 	turnstileEnabled := req.TurnstileEnabled
@@ -1707,6 +1740,8 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		SMTPPort:                            req.SMTPPort,
 		SMTPUsername:                        req.SMTPUsername,
 		SMTPPassword:                        req.SMTPPassword,
+		EmailProvider:                       req.EmailProvider,
+		ResendAPIKeyEncrypted:               resendAPIKeyEncrypted,
 		SMTPFrom:                            req.SMTPFrom,
 		SMTPFromName:                        req.SMTPFromName,
 		SMTPUseTLS:                          req.SMTPUseTLS,
@@ -2665,6 +2700,8 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		SMTPFrom:                                               updatedSettings.SMTPFrom,
 		SMTPFromName:                                           updatedSettings.SMTPFromName,
 		SMTPUseTLS:                                             updatedSettings.SMTPUseTLS,
+		EmailProvider:                                          updatedSettings.EmailProvider,
+		ResendAPIKeyConfigured:                                 updatedSettings.ResendAPIKeyConfigured,
 		TurnstileEnabled:                                       updatedSettings.TurnstileEnabled,
 		TurnstileSiteKey:                                       updatedSettings.TurnstileSiteKey,
 		TurnstileSecretKeyConfigured:                           updatedSettings.TurnstileSecretKeyConfigured,
