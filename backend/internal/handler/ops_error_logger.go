@@ -1162,11 +1162,9 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 			logOpsStreamError(c, ops, status)
 			return
 		}
-		// A complete context rejection has already been classified at the
-		// semantic boundary. The captured terminal's generic message cannot
-		// discard its request ownership or SLA exclusion.
-		if marked, ok := service.GetOpsStreamError(c); ok && marked.RequestScoped &&
-			service.IsOpsContextLimitRejection(marked.IntendedStatus, 0, marked.Code+" "+marked.Message) {
+		// A request-scoped rejection has already been classified at the semantic
+		// boundary. Captured SSE cannot override that explicit local decision.
+		if marked, ok := service.GetOpsStreamError(c); ok && marked.RequestScoped {
 			logOpsStreamError(c, ops, status)
 			if opsStreamErrorsAllRequestScoped(service.GetOpsStreamErrors(c)) {
 				logOpsRecoveredUpstream(c, ops, status)
@@ -1323,6 +1321,11 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 				finalStatus := status
 				entry.UpstreamStatusCode = &finalStatus
 			}
+			if service.HasOpsUpstreamSSETerminal(c) {
+				// Earlier attempt diagnostics remain in UpstreamErrors, not in
+				// the final terminal's top-level detail.
+				entry.UpstreamErrorDetail = nil
+			}
 		}
 		suppressOpsUpstreamAttributionForClientRejection(entry)
 		if status := c.GetInt(service.OpsContextRejectionStatusKey); status > 0 {
@@ -1362,6 +1365,12 @@ func logOpsRecoveredUpstream(c *gin.Context, ops *service.OpsService, finalStatu
 
 	entry := &service.OpsInsertErrorLogInput{StatusCode: finalStatus}
 	applyOpsUpstreamFieldsFromContext(c, entry)
+	// A request-size rejection also records its current upstream 413 in the
+	// top-level fields. Only explicit earlier attempts justify a separate
+	// recovered row; the current rejection already has its request-scoped row.
+	if isOpsRequestSizeRejection(c) && len(entry.UpstreamErrors) == 0 {
+		return
+	}
 	if len(entry.UpstreamErrors) > 0 {
 		visibleEvents := make([]*service.OpsUpstreamErrorEvent, 0, len(entry.UpstreamErrors))
 		for _, event := range entry.UpstreamErrors {
@@ -1795,6 +1804,12 @@ func shouldSkipFinalOpsFailure(c *gin.Context) bool {
 	// A preceding repair attempt's rule belongs to that attempt, not the final
 	// request-size rejection. Retain its event and SkipMonitoring snapshot.
 	if isOpsRequestSizeRejection(c) {
+		return false
+	}
+	// A forwarded terminal reached this boundary only after the current
+	// reader's passthrough-rule early returns. Old rule snapshots still belong
+	// to their historical events, and cannot suppress this authoritative row.
+	if service.HasOpsUpstreamSSETerminal(c) {
 		return false
 	}
 	if v, ok := c.Get(service.OpsSkipPassthroughKey); ok {
@@ -2409,8 +2424,9 @@ func classifyOpsErrorLog(c *gin.Context, errType, message, code string, status i
 	routingCapacityLimited := isOpsRoutingCapacityLimited(c)
 	clientBusinessLimited := service.HasOpsClientBusinessLimited(c)
 	localModelConfiguration := clientBusinessLimited && service.OpsClientBusinessLimitedReason(c) == service.OpsClientBusinessLimitedReasonLocalModelConfiguration
-	upstreamError := hasOpsUpstreamErrorContext(c)
-	accountAuthFailure := hasOpsAccountAuthFailure(c)
+	upstreamTerminal := service.HasOpsUpstreamSSETerminal(c)
+	upstreamError := upstreamTerminal || hasOpsUpstreamErrorContext(c)
+	accountAuthFailure := !upstreamTerminal && hasOpsAccountAuthFailure(c)
 	if localModelConfiguration {
 		// The requested model is outside this group's configured capabilities.
 		// This is a client rejection, not a platform or account failure.

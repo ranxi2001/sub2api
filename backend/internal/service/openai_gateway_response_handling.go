@@ -55,6 +55,7 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 }
 
 func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel, reasoningEffort string) (*openaiStreamingResult, error) {
+	upstreamTerminal := beginOpsUpstreamSSETerminal(c)
 	ctx = bindOpenAI429ResponseObservation(ctx, resp, c)
 	observer := upstreamResponseModelObserverFromContext(c)
 	if observer == nil {
@@ -161,16 +162,20 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	flushBuffered := func() error {
 		if firstOutputStage != nil && !firstOutputStage.closed {
 			if err := firstOutputStage.CommitTo(w); err != nil {
+				upstreamTerminal.discard()
 				return err
 			}
 		} else {
 			if err := bufferedWriter.Flush(); err != nil {
+				upstreamTerminal.discard()
 				return err
 			}
 		}
 		if err := FlushGatewayResponse(w); err != nil {
+			upstreamTerminal.discard()
 			return err
 		}
+		upstreamTerminal.flushed()
 		requesttiming.OutputFlushed(ctx)
 		deliveryObservation.flushed(ctx)
 		return nil
@@ -266,6 +271,11 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 	// 否则下游 SDK（例如 OpenCode）会因为类型校验失败而报错。
 	errorEventSent := false
 	clientDisconnected := OpenAIHeaderWaitDisconnected(c) // Preserve heartbeat transport failure while draining usage.
+	defer func() {
+		if clientDisconnected {
+			upstreamTerminal.discard()
+		}
+	}()
 	sawTerminalEvent := false
 	sawFailedEvent := false
 	sawBareError := false
@@ -794,6 +804,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 					}
 				}
 				forceFlushFailedEvent = true
+				upstreamTerminal.observe(dataBytes, eventType)
 				sawFailedEvent = true
 				terminalFailurePending = !codexFailureTerminal || eventType == "response.failed"
 			}
@@ -994,6 +1005,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				}
 			}
 			if streamEarlyErr == nil {
+				if terminalFailurePending && !clientDisconnected {
+					upstreamTerminal.boundary()
+				}
 				deliveryObservation.boundary()
 				completeGuardedEvent(queueDrained, true)
 			}
@@ -1030,6 +1044,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				handlePendingWriteError(err)
 			} else {
 				eventInProgress = line != ""
+				if line == "" && terminalFailurePending && streamEarlyErr == nil {
+					upstreamTerminal.boundary()
+				}
 				if shouldFlush {
 					if err := flushBuffered(); err != nil {
 						clientDisconnected = true

@@ -2311,6 +2311,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithImage(
 	reasoningEfforts ...string,
 ) (*openaiStreamingResultPassthrough, error) {
 	ctx = bindOpenAI429ResponseObservation(ctx, resp, c)
+	upstreamTerminal := beginOpsUpstreamSSETerminal(c)
 	earlyPluginEvents := s.openAIPluginSSEEarlyEvents(resp, account)
 	pluginEarlyCommitted := false
 	earlyMetadataPending := false
@@ -2345,6 +2346,11 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithImage(
 	ttftMode := s.openAITTFTMode(ctx)
 	requesttiming.Mode(ctx, ttftMode)
 	clientDisconnected := OpenAIHeaderWaitDisconnected(c)
+	defer func() {
+		if clientDisconnected {
+			upstreamTerminal.discard()
+		}
+	}()
 	sawDone := false
 	sawTerminalEvent := false
 	sawFailedEvent := false
@@ -2425,9 +2431,11 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithImage(
 			return
 		}
 		if err := FlushGatewayResponse(w); err != nil {
+			upstreamTerminal.discard()
 			clientDisconnected = true
 			return
 		}
+		upstreamTerminal.flushed()
 		requesttiming.OutputFlushed(ctx)
 		deliveryObservation.flushed(ctx)
 		if earlyMetadataPending && !pluginEventOpen {
@@ -2685,6 +2693,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithImage(
 					}
 				}
 				forceFlushFailedEvent = true
+				upstreamTerminal.observe(dataBytes, eventType)
 				sawFailedEvent = true
 			}
 			if trimmedData == "[DONE]" {
@@ -2814,6 +2823,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithImage(
 				clientOutputStarted = true
 				flushPending = true
 				if line == "" {
+					if responseFailedPending {
+						upstreamTerminal.boundary()
+					}
 					flushPendingOutput()
 				}
 			}
