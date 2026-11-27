@@ -33,6 +33,7 @@ WITH usage_base AS (
     date_trunc('hour', ul.created_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS bucket_start,
     g.platform AS platform,
     ul.group_id AS group_id,
+    ul.sla_excluded,
     ul.duration_ms AS duration_ms,
     ul.first_token_ms AS first_token_ms,
     (ul.input_tokens + ul.output_tokens + ul.cache_creation_tokens + ul.cache_read_tokens) AS tokens
@@ -45,7 +46,7 @@ usage_agg AS (
     bucket_start,
     CASE WHEN GROUPING(platform) = 1 THEN NULL ELSE platform END AS platform,
     CASE WHEN GROUPING(group_id) = 1 THEN NULL ELSE group_id END AS group_id,
-    COUNT(*) AS success_count,
+    COUNT(*) FILTER (WHERE NOT sla_excluded) AS success_count,
     COUNT(*) FILTER (WHERE first_token_ms IS NOT NULL) AS ttft_sample_count,
     COALESCE(SUM(tokens), 0) AS token_consumed,
 

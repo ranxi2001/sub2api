@@ -543,6 +543,9 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 			)
 			return s.forwardAsRawChatCompletionsWithStartTime(ctx, c, account, body, defaultMappedModel, startTime)
 		}
+		if completeErrorBody && IsUpstreamContextRejection(resp.StatusCode, respBody) {
+			return nil, writeContextRejection(c, resp.StatusCode, true, "", nil)
+		}
 		if foErr := s.failoverOpenAIUpstreamHTTPError(ctx, c, account, resp, respBody, upstreamMsg, upstreamModel); foErr != nil {
 			return nil, foErr
 		}
@@ -555,6 +558,9 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 		result, handleErr = s.handleChatStreamingResponse(resp, c, account, originalModel, billingModel, upstreamModel, startTime, len(body))
 	} else {
 		result, handleErr = s.handleChatBufferedStreamingResponse(resp, c, account, originalModel, billingModel, upstreamModel, startTime)
+	}
+	if result != nil && errors.Is(handleErr, errGatewayContextRejection) {
+		result.SLAExcluded = true
 	}
 	stampOpenAIResponsesUpstreamEndpoint(c, result)
 
@@ -850,6 +856,10 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 			writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", clientMsg)
 			return nil, fmt.Errorf("openai cyber_policy: %s", msg)
 		}
+		if explicitContextWindowError(payload) {
+			rejection := writeContextRejection(c, resp.StatusCode, true, account.Platform, payload)
+			return &OpenAIForwardResult{RequestID: requestID, Usage: usage, Model: originalModel, BillingModel: billingModel, UpstreamModel: upstreamModel, Duration: time.Since(startTime)}, rejection
+		}
 		message := openAICompatFailedResponseMessage(finalResponse)
 		if openAIStreamFailedEventShouldFailover(payload, message) {
 			return nil, s.newOpenAIStreamFailoverErrorWithModel(c, account, false, requestID, payload, message, upstreamModel, resp.Header)
@@ -1121,6 +1131,10 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 					// finalizeStream 的 [DONE] 同样发不出去，统一抑制。
 					clientDisconnected = true
 				}
+				return true
+			}
+			if explicitContextWindowError(payloadBytes) {
+				streamNonFailoverErr = writeContextRejection(c, resp.StatusCode, true, account.Platform, payloadBytes)
 				return true
 			}
 			shouldFailover := openAIStreamFailedEventShouldFailover(payloadBytes, message)

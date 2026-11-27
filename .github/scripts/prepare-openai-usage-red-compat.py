@@ -30,7 +30,7 @@ def prepare(tree, baseline):
     result = original
     layers = []
     for struct, fields in [('OpenAIUsage', FIELDS), ('OpenAIForwardResult', (
-            ('WanBilledSeconds', 'float64'), ('WanBaseCost', '*float64')))]:
+            ('WanBilledSeconds', 'float64'), ('WanBaseCost', '*float64'), ('SLAExcluded', 'bool')))]:
         match = re.search(rb'^type ' + struct.encode() + rb' struct \{\n(.*?)^\}', result, re.M | re.S)
         if not match:
             raise ValueError('historical layout not found: ' + struct)

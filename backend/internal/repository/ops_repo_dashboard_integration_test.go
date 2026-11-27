@@ -122,3 +122,31 @@ func TestOpsOutputTPSQueryDeadline(t *testing.T) {
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	require.Nil(t, stats)
 }
+
+func TestOpsContextRejectionPreservesBilledTokensOutsideSLA(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	user := mustCreateUser(t, client, &service.User{})
+	key := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID})
+	account := mustCreateAccount(t, client, &service.Account{Name: "context-window", Platform: service.PlatformOpenAI})
+	group := mustCreateGroup(t, client, &service.Group{Name: "context-window", Platform: service.PlatformOpenAI})
+	start := time.Date(2021, 3, 17, 10, 0, 0, 0, time.UTC)
+	end := start.Add(time.Hour)
+	t.Cleanup(func() {
+		_, _ = integrationDB.ExecContext(ctx, "DELETE FROM usage_logs WHERE user_id=$1", user.ID)
+		_, _ = integrationDB.ExecContext(ctx, "DELETE FROM ops_metrics_hourly WHERE bucket_start=$1", start)
+	})
+	for i, excluded := range []bool{false, true} {
+		_, err := integrationDB.ExecContext(ctx, `INSERT INTO usage_logs (user_id,api_key_id,account_id,group_id,request_id,model,input_tokens,created_at,sla_excluded) VALUES ($1,$2,$3,$4,$5,'fixture',10,$6,$7)`, user.ID, key.ID, account.ID, group.ID, fmt.Sprintf("context-%d-%d", key.ID, i), start, excluded)
+		require.NoError(t, err)
+	}
+	repo := NewOpsRepository(integrationDB).(*opsRepository)
+	success, tokens, err := repo.queryUsageCounts(ctx, &service.OpsDashboardFilter{GroupID: &group.ID}, start, end)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, success)
+	require.EqualValues(t, 20, tokens)
+	require.NoError(t, repo.UpsertHourlyMetrics(ctx, start, end))
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT success_count,token_consumed FROM ops_metrics_hourly WHERE bucket_start=$1 AND group_id=$2", start, group.ID).Scan(&success, &tokens))
+	require.EqualValues(t, 1, success)
+	require.EqualValues(t, 20, tokens)
+}

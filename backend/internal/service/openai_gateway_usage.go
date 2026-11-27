@@ -395,6 +395,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		s.excelOAuthReauth.recordConnectionUsage(ctx, account.ID, apiKey.ID, result.AuthConnectionID, requestID)
 	}
 	usageLog := &UsageLog{
+		SLAExcluded:              result.SLAExcluded,
 		CustomerCostDetails:      customerCostDetails,
 		Platform:                 usagePlatformForRequest(ctx, account, apiKey, input.QuotaPlatform),
 		UserID:                   user.ID,
