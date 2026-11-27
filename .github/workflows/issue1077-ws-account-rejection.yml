@@ -1,0 +1,84 @@
+name: Issue1077 WS account rejection
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - 'backend/internal/service/openai_ws*'
+      - 'backend/internal/service/openai_gateway_forward.go'
+      - 'backend/internal/service/regional_metering.go'
+      - 'backend/internal/service/openai_issue1077*'
+      - 'backend/internal/handler/openai_issue1077*'
+      - 'backend/internal/handler/openai_gateway_handler.go'
+      - 'backend/internal/handler/ops_error_logger.go'
+      - '.github/workflows/issue1077-ws-account-rejection.yml'
+permissions:
+  contents: read
+concurrency:
+  group: issue1077-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Record candidate and baseline
+        run: |
+          git rev-parse HEAD > "$RUNNER_TEMP/issue1077-head.txt"
+          git worktree add --detach "$RUNNER_TEMP/issue1077-base" d8f00260f44bf6a6d0385eaa92c74841ab5476d5
+          git -C "$RUNNER_TEMP/issue1077-base" rev-parse HEAD > "$RUNNER_TEMP/issue1077-base.txt"
+          cp backend/internal/service/openai_issue1077_test.go "$RUNNER_TEMP/issue1077-base/backend/internal/service/"
+          cp backend/internal/handler/openai_issue1077_test.go "$RUNNER_TEMP/issue1077-base/backend/internal/handler/"
+      - name: Baseline must fail the behavioral assertion, not compilation
+        run: |
+          set -euo pipefail
+          set +e
+          (cd "$RUNNER_TEMP/issue1077-base/backend" && go test -json -tags=unit,issue1077 ./internal/service ./internal/handler -run '^TestIssue1077(HandshakeAccountRejection|HandlerSamePOST)$' -count=1 -timeout=3m) > "$RUNNER_TEMP/issue1077-red.jsonl" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/issue1077-red.jsonl"
+          python3 - "$result" "$RUNNER_TEMP/issue1077-red.jsonl" <<'PY'
+          import json,sys
+          rows=[json.loads(line) for line in open(sys.argv[2]) if line.startswith('{')]
+          assert int(sys.argv[1])==1
+          assert not any(r.get('Action') in ('build-fail','skip') for r in rows)
+          assert any(r.get('Test')=='TestIssue1077HandshakeAccountRejection' and r.get('Action')=='fail' for r in rows)
+          output=''.join(r.get('Output','') for r in rows)
+          assert 'ISSUE1077_HANDSHAKE_ACCOUNT_REJECTION' in output
+          assert any(r.get('Test')=='TestIssue1077HandlerSamePOST/credential' and r.get('Action')=='fail' for r in rows)
+          assert 'B must be reached in the original POST' in output
+          PY
+      - name: Candidate regressions with race detector
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          (cd backend && go test -race -json -tags=unit,issue1077 ./internal/service ./internal/handler -run '^Test(Issue1077|OpenAIWSHTTPBridgeLaterTurn|ProxyOpenAIWSHTTPBridgeTurnLater|BuildOpenAIWSCurrentTurnRetryPayload|OpenAIWSSSEIncompleteRegionalHandlerOwnsSingleResponse)'  -count=1 -timeout=8m) | tee "$RUNNER_TEMP/issue1077-green.jsonl"
+      - name: Require named acceptance cases on the exact candidate
+        if: ${{ !cancelled() }}
+        run: |
+          python3 - "$RUNNER_TEMP/issue1077-green.jsonl" <<'PY'
+          import json,sys
+          rows=[json.loads(line) for line in open(sys.argv[1]) if line.startswith('{')]
+          assert not any(r.get('Action') in ('fail','build-fail','skip') for r in rows)
+          required=['TestIssue1077HandlerSamePOST/'+x for x in ('credential','quota','function','prewarm','metered','budget_zero','B_rejected','client_cancel','committed','relay','bare','proxy','quota_conflict','bound_vector_store','bound_container','cancel_hold_unknown','stream_quota')]
+          required += ['TestIssue1077HandlerBridgeLater401/automatic='+a+'/'+c for a in ('false','true') for c in ('success','bound_tool','bound_reference','orphan_tool','after_output','cancel','relay')]
+          required += ['TestIssue1077HandshakeAccountRejection','TestIssue1077StreamQuotaHasOneSafeTerminal','TestIssue1077StreamQuotaPreservesObservedUsage','TestIssue1077RegionalFinalizerOnlyCertifiedUnsentHandshake','TestIssue1077RegionalReplacementRequiresFreshBoundIdentity','TestIssue1077HandshakeContextGuards']
+          for name in required:
+              assert any(r.get('Test')==name and r.get('Action')=='pass' for r in rows),name
+          PY
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: issue1077-${{ github.event.pull_request.head.sha }}
+          path: |
+            ${{ runner.temp }}/issue1077-*.txt
+            ${{ runner.temp }}/issue1077-*.jsonl
+          if-no-files-found: error
