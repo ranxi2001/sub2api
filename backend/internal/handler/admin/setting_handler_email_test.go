@@ -18,6 +18,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type settingsTestEncryptor struct{}
+
+func (settingsTestEncryptor) Encrypt(value string) (string, error) { return "encrypted:" + value, nil }
+func (settingsTestEncryptor) Decrypt(value string) (string, error) {
+	return strings.TrimPrefix(value, "encrypted:"), nil
+}
+
 func bindSMTPRequest[T any](t *testing.T, body string) T {
 	t.Helper()
 
