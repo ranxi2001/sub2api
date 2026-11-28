@@ -172,6 +172,102 @@ describe('DeepSeek balance in the real usage cell', () => {
     wrapper.unmount()
   })
 
+  it.each([
+    ['newer snapshot', '2026-11-28T12:00:01Z', 1795867200, false],
+    ['equal timestamp', '2026-11-28T12:00:00Z', 1795867200, false],
+    ['older snapshot', '2026-11-28T11:59:59Z', 1795867200, true],
+    ['untimed snapshot', undefined, 1795867200, true],
+    ['invalid snapshot time', 'invalid', 1795867200, true],
+    ['untimed result', '2026-11-28T12:00:01Z', undefined, false]
+  ] as const)('F1 orders a deferred manual response against a %s', async (_name, updatedAt, fetchedAt, acceptManual) => {
+    let resolve!: (response: CNProviderBalanceResult) => void
+    queryBalance.mockImplementationOnce(() => new Promise<CNProviderBalanceResult>(done => { resolve = done }))
+    const wrapper = mount(AccountUsageCell, { props: { account: account({}, { deepseek_balance: 12.34 }) } })
+    await wrapper.get(probe).trigger('click')
+    // This snapshot reaches the reused row before the pending HTTP response.
+    await wrapper.setProps({ account: account({}, {
+      deepseek_balance: 0, deepseek_balance_currency: 'CNY', deepseek_balance_available: false,
+      deepseek_balance_updated_at: updatedAt
+    }) })
+    expect(wrapper.get(value).text()).toBe('CNY 0.00')
+    resolve({ ...result(99), fetched_at: fetchedAt } as CNProviderBalanceResult)
+    await flushPromises()
+    expect(wrapper.get(value).text()).toBe(acceptManual ? 'CNY 99.00' : 'CNY 0.00')
+    expect(wrapper.text().includes('admin.accounts.cnProviders.balanceLow')).toBe(!acceptManual)
+    expect(wrapper.get(probe).attributes('disabled')).toBeUndefined()
+    expect(queryBalance).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('F2 shows later reactive low transitions and recovery without changing the snapshot timestamp', async () => {
+    const extra = { deepseek_balance: 12.34, deepseek_balance_available: true,
+      deepseek_balance_low: false, deepseek_balance_updated_at: '2026-11-28T11:59:59Z' }
+    queryBalance.mockResolvedValue({ ...result(99), persisted: false })
+    const wrapper = mount(AccountUsageCell, { props: { account: account({}, extra) } })
+    await wrapper.get(probe).trigger('click'); await flushPromises()
+    expect(wrapper.text()).not.toContain('admin.accounts.cnProviders.balanceLow')
+    // Backend insufficient-balance writes only this marker, not updated_at.
+    await wrapper.setProps({ account: account({}, { ...extra, deepseek_balance_low: true }) })
+    expect(wrapper.text()).toContain('admin.accounts.cnProviders.balanceLow')
+    expect(wrapper.get(value).text()).toBe('CNY 99.00')
+    await wrapper.setProps({ account: account({}, { ...extra, deepseek_balance_low: false }) })
+    expect(wrapper.text()).not.toContain('admin.accounts.cnProviders.balanceLow')
+    await wrapper.setProps({ account: account({}, { ...extra, deepseek_balance_low: true }) })
+    expect(wrapper.text()).toContain('admin.accounts.cnProviders.balanceLow')
+    // A new healthy observation supersedes that already-observed low marker.
+    await wrapper.get(probe).trigger('click'); await flushPromises()
+    expect(wrapper.text()).not.toContain('admin.accounts.cnProviders.balanceLow')
+    await wrapper.setProps({ account: account({}, { ...extra, deepseek_balance_low: true }) })
+    expect(wrapper.text()).not.toContain('admin.accounts.cnProviders.balanceLow')
+    expect(queryBalance).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
+
+  it('F2 keeps a reactive low transition observed while a healthy query is pending', async () => {
+    let resolve!: (response: CNProviderBalanceResult) => void
+    queryBalance.mockImplementationOnce(() => new Promise<CNProviderBalanceResult>(done => { resolve = done }))
+    const wrapper = mount(AccountUsageCell, { props: { account: account({}, { deepseek_balance: 12.34, deepseek_balance_low: false }) } })
+    await wrapper.get(probe).trigger('click')
+    await wrapper.setProps({ account: account({}, { deepseek_balance: 12.34, deepseek_balance_low: true }) })
+    resolve(result(99)); await flushPromises()
+    expect(wrapper.text()).toContain('admin.accounts.cnProviders.balanceLow')
+    wrapper.unmount()
+  })
+
+  it('F2 preserves non-DeepSeek manual-result precedence over reactive markers', async () => {
+    queryBalance.mockResolvedValue({ ...result(99), provider: 'kimi' })
+    const original = { ...account(), platform: 'kimi', extra: { kimi_balance: 12.34, kimi_balance_low: false } } as Account
+    const wrapper = mount(AccountUsageCell, { props: { account: original } })
+    await wrapper.get(probe).trigger('click'); await flushPromises()
+    await wrapper.setProps({ account: { ...original, extra: { ...original.extra, kimi_balance_low: true } } })
+    expect(wrapper.get(value).text()).toBe('CNY 99.00')
+    expect(wrapper.text()).not.toContain('admin.accounts.cnProviders.balanceLow')
+    wrapper.unmount()
+  })
+
+  it.each([
+    ['padded adaptive custom override', { api_protocol: ' adaptive ', base_url: 'https://api.deepseek.com', api_base_urls: { chat_completions: ' https://relay.example.invalid ' } }, false],
+    ['padded adaptive official override', { api_protocol: ' adaptive ', base_url: 'https://relay.example.invalid', api_base_urls: { chat_completions: ' https://api.deepseek.com ' } }, true],
+    ['padded payg', { account_mode: ' payg ', base_url: 'https://api.deepseek.com' }, true],
+    ['padded coding', { account_mode: ' coding ', base_url: 'https://api.deepseek.com' }, false],
+    ['padded chat ignores override', { api_protocol: ' chat_completions ', base_url: 'https://relay.example.invalid', api_base_urls: { chat_completions: 'https://api.deepseek.com' } }, false],
+    ['padded responses ignores override', { api_protocol: ' responses ', base_url: 'https://api.deepseek.com', api_base_urls: { chat_completions: 'https://relay.example.invalid' } }, true],
+    ['padded custom Anthropic', { api_protocol: ' anthropic ', base_url: 'https://relay.example.invalid/anthropic' }, false],
+    ['unknown protocol uses chat default', { api_protocol: ' unknown ', api_base_urls: { chat_completions: 'https://relay.example.invalid' } }, true],
+    ['missing protocol uses custom base', { base_url: 'https://relay.example.invalid', api_base_urls: { chat_completions: 'https://api.deepseek.com' } }, false],
+    ['unknown mode uses default', { account_mode: ' unknown ', api_protocol: ' adaptive ', api_base_urls: { chat_completions: ' ' } }, true],
+    ['blank protocol and mode use defaults', { account_mode: ' ', api_protocol: ' ' }, true]
+  ] as const)('F3 normalizes routing for %s without unsupported Query', async (_name, credentials, allowed) => {
+    const wrapper = mount(AccountUsageCell, { props: { account: account(credentials), todayStats: stats } })
+    await flushPromises()
+    expect(wrapper.find(probe).exists()).toBe(allowed)
+    expect(wrapper.find(value).exists()).toBe(allowed)
+    expect(wrapper.text()).toContain('1.2K req')
+    expect(queryBalance).not.toHaveBeenCalled()
+    expect(getUsage).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it.each(['ollama_cloud_usage', 'opencode_go_usage'] as const)('keeps %s as the sole provider usage owner', async key => {
     const usage = key === 'ollama_cloud_usage'
       ? { eligible: true, configured: false, snapshot: { status: 'ok', data: { five_hour: { used_percent: 12 } } } }

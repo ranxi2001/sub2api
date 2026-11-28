@@ -633,14 +633,19 @@ const OFFICIAL_ACCOUNT_API_PLATFORMS = ['command_code', 'cline', 'mistral']
 
 function cnUsageCellAccountMode(account: CNUsageCellAccount): string {
   const mode = account.credentials?.account_mode
-  return typeof mode === 'string' ? mode : ''
+  const normalized = typeof mode === 'string' ? mode.trim() : ''
+  // Account.GetAccountMode accepts payg/coding; OpenCode's existing go/zen
+  // display modes remain available to the shared visibility helpers.
+  if (account.platform === 'opencode_go') return normalized
+  return normalized === 'payg' || normalized === 'coding' ? normalized : ''
 }
 
 /** 与后端 Account.GetAPIProtocol 一致：按模型分流的供应商未指定原生协议时为 adaptive。 */
 function accountUsesAdaptiveProtocol(platform: string, mode: string, protocol: unknown): boolean {
-  if (protocol === 'adaptive') return true
-  if (protocol === 'chat_completions' || protocol === 'anthropic') return false
-  if (protocol === 'responses' && cnSupportsNativeResponses(platform, mode)) return false
+  const normalized = typeof protocol === 'string' ? protocol.trim() : ''
+  if (normalized === 'adaptive') return true
+  if (normalized === 'chat_completions' || normalized === 'anthropic') return false
+  if (normalized === 'responses' && cnSupportsNativeResponses(platform, mode)) return false
   return providerRoutesByModel(platform)
 }
 

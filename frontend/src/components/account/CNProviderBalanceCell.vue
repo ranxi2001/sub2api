@@ -92,6 +92,25 @@ const accountIdentity = computed(() => JSON.stringify([
 let probeGeneration = 0
 
 const extraKey = (suffix: string) => `${props.account.platform}_${suffix}`
+const snapshotLow = computed(() => props.account.extra?.[extraKey('balance_low')] === true)
+const reactiveLowVersion = ref(0)
+const queriedLowVersion = ref(0)
+
+// Reactive insufficient-balance writes do not advance the balance timestamp.
+// A healthy query supersedes markers already present when it started, while
+// false -> true transitions observed during/after that query must remain visible.
+watch(snapshotLow, (low, previous) => {
+  if (props.account.platform === 'deepseek' && low && !previous) reactiveLowVersion.value++
+}, { flush: 'sync' })
+
+const snapshotSupersedes = (result: CNProviderBalanceResult): boolean => {
+  if (props.account.platform !== 'deepseek') return false
+  const raw = props.account.extra?.deepseek_balance_updated_at
+  const updated = typeof raw === 'string' ? Date.parse(raw) : Number.NaN
+  if (!Number.isFinite(updated)) return false // Legacy untimed snapshots cannot establish order.
+  // A dated snapshot wins ties and results without a valid observation time.
+  return !Number.isFinite(result.fetched_at) || updated >= result.fetched_at * 1000
+}
 
 // 落库快照（后端周期探测/响应式写入 account.Extra）。
 const snapshotBalance = computed(() => {
@@ -114,9 +133,12 @@ const snapshotBalances = computed<CNProviderBalanceEntry[]>(() => {
   })
 })
 const balanceLow = computed(() => {
-  if (data.value && data.value.success) return !data.value.available
+  if (data.value && data.value.success) {
+    if (props.account.platform === 'deepseek' && snapshotLow.value && reactiveLowVersion.value > queriedLowVersion.value) return true
+    return !data.value.available
+  }
   if (props.account.platform === 'deepseek' && props.account.extra?.deepseek_balance_available === false) return true
-  return props.account.extra?.[extraKey('balance_low')] === true
+  return snapshotLow.value
 })
 
 // 优先用探测结果，其次落库快照。多币种返回全部明细，否则主币种单条。
@@ -172,6 +194,7 @@ const handleProbe = async () => {
   if (loading.value || !probeAllowed.value) return
   const generation = ++probeGeneration
   const identity = accountIdentity.value
+  const lowVersion = reactiveLowVersion.value
   const isCurrent = () => generation === probeGeneration && identity === accountIdentity.value
   loading.value = true
   error.value = null
@@ -180,7 +203,10 @@ const handleProbe = async () => {
     if (!isCurrent()) return
     // 失败时保留快照展示（仅显示错误行），成功才覆盖。
     if (result.success) {
-      data.value = result
+      if (!snapshotSupersedes(result)) {
+        queriedLowVersion.value = lowVersion
+        data.value = result
+      }
     } else {
       error.value = result.error || t('common.error')
     }
@@ -195,7 +221,10 @@ watch(
   () => props.probedBalance,
   (val) => {
     if (val && val.success) {
-      data.value = val
+      if (!snapshotSupersedes(val)) {
+        queriedLowVersion.value = reactiveLowVersion.value
+        data.value = val
+      }
       error.value = null
     }
   },
@@ -205,10 +234,8 @@ watch(
 // A later periodic DeepSeek observation supersedes the local manual result.
 watch(
   () => props.account.extra?.deepseek_balance_updated_at,
-  (updatedAt) => {
-    if (props.account.platform !== 'deepseek' || !data.value || typeof updatedAt !== 'string') return
-    const updated = Date.parse(updatedAt)
-    if (Number.isFinite(updated) && updated >= data.value.fetched_at * 1000) {
+  () => {
+    if (data.value && snapshotSupersedes(data.value)) {
       data.value = null
       error.value = null
     }
