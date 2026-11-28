@@ -708,6 +708,11 @@
         :account="account"
         @updated="handleOpenCodeGoUsageUpdated"
       />
+      <!-- Keep PR1070's local usage row; restore a single supported balance cell. -->
+      <CNProviderBalanceCell
+        v-if="account.platform === 'deepseek' && cnBalanceCellVisible && !account.ollama_cloud_usage?.eligible && !account.opencode_go_usage?.eligible"
+        :account="account"
+      />
       <!-- Today stats row (requests, tokens, cost, user_cost) -->
       <div
         v-if="todayStats"
@@ -766,7 +771,7 @@
 
       <!-- No data at all -->
       <div
-        v-if="!todayStats && !todayStatsLoading && !hasApiKeyQuota && !account.ollama_cloud_usage?.eligible && !account.opencode_go_usage?.eligible"
+        v-if="!todayStats && !todayStatsLoading && !hasApiKeyQuota && !(account.platform === 'deepseek' && cnBalanceCellVisible) && !account.ollama_cloud_usage?.eligible && !account.opencode_go_usage?.eligible"
         class="text-xs text-gray-400"
       >-</div>
     </div>

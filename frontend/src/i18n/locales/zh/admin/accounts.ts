@@ -578,6 +578,8 @@ export default {
         probe: '查询',
         probeTooltip: '请求供应商额度端点，查询 5 小时 / 每周滚动窗口用量',
         balanceProbeTooltip: '请求供应商余额端点，查询账户余额',
+        balanceSnapshot: '余额快照',
+        balanceSnapshotTooltip: '已保存的余额快照，可能过期或来自之前的端点；未确认支持余额接口的自定义端点不提供查询。',
         balanceLow: '余额不足',
         noBalanceEndpoint: '该平台暂无余额查询接口',
       },
