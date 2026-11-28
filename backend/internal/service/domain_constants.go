@@ -260,13 +260,15 @@ const (
 	SettingKeyCyberPolicyUserAllowlist            = "cyber_policy_user_allowlist"           // Platform user IDs with log-only cyber handling
 
 	// 邮件服务设置
-	SettingKeySMTPHost     = "smtp_host"      // SMTP服务器地址
-	SettingKeySMTPPort     = "smtp_port"      // SMTP端口
-	SettingKeySMTPUsername = "smtp_username"  // SMTP用户名
-	SettingKeySMTPPassword = "smtp_password"  // SMTP密码（加密存储）
-	SettingKeySMTPFrom     = "smtp_from"      // 发件人地址
-	SettingKeySMTPFromName = "smtp_from_name" // 发件人名称
-	SettingKeySMTPUseTLS   = "smtp_use_tls"   // 是否使用TLS
+	SettingKeySMTPHost      = "smtp_host"      // SMTP服务器地址
+	SettingKeySMTPPort      = "smtp_port"      // SMTP端口
+	SettingKeySMTPUsername  = "smtp_username"  // SMTP用户名
+	SettingKeySMTPPassword  = "smtp_password"  // SMTP密码（加密存储）
+	SettingKeySMTPFrom      = "smtp_from"      // 发件人地址
+	SettingKeySMTPFromName  = "smtp_from_name" // 发件人名称
+	SettingKeySMTPUseTLS    = "smtp_use_tls"   // 是否使用TLS
+	SettingKeyEmailProvider = "email_provider" // 邮件发送服务商（smtp/resend）
+	SettingKeyResendAPIKey  = "resend_api_key" // Resend API 密钥（AES-GCM 加密存储）
 
 	// Cloudflare Turnstile 设置
 	SettingKeyTurnstileEnabled   = "turnstile_enabled"    // 是否启用 Turnstile 验证

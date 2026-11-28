@@ -29,6 +29,44 @@ func TestAccountOpsConfigWithoutSMTPService(t *testing.T) {
 	require.Contains(t, rec.Body.String(), `"smtp_configured":false`)
 }
 
+type opsHandlerMailSettings struct {
+	opsHandlerSettings
+	values map[string]string
+}
+
+func (s opsHandlerMailSettings) GetMultiple(_ context.Context, keys []string) (map[string]string, error) {
+	out := make(map[string]string)
+	for _, key := range keys {
+		out[key] = s.values[key]
+	}
+	return out, nil
+}
+
+type opsHandlerMailEncryptor struct{}
+
+func (opsHandlerMailEncryptor) Encrypt(string) (string, error) { return "fixture-cipher", nil }
+func (opsHandlerMailEncryptor) Decrypt(string) (string, error) { return "re_fixture", nil }
+
+func TestAccountOpsConfigReportsResendReadinessWithoutSMTP(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	settings := opsHandlerMailSettings{values: map[string]string{
+		service.SettingKeyEmailProvider: service.EmailProviderResend,
+		service.SettingKeyResendAPIKey:  "fixture-cipher",
+		service.SettingKeySMTPFrom:      "mail@example.com",
+	}}
+	email := service.NewEmailService(settings, nil)
+	email.SetSecretEncryptor(opsHandlerMailEncryptor{})
+	h := NewAccountOpsHandler(service.NewAccountOpsService(settings, nil, nil), email)
+	r := gin.New()
+	r.GET("/config", h.GetConfig)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest("GET", "/config", nil))
+	require.Equal(t, 200, rec.Code)
+	// Retain the legacy response field for existing clients.
+	require.Contains(t, rec.Body.String(), `"smtp_configured":true`)
+	require.NotContains(t, rec.Body.String(), "re_fixture")
+}
+
 type opsHandlerWritableSettings struct {
 	service.SettingRepository
 	raw      string

@@ -403,6 +403,9 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		SMTPFromName:                           settings[SettingKeySMTPFromName],
 		SMTPUseTLS:                             settings[SettingKeySMTPUseTLS] == "true",
 		SMTPPasswordConfigured:                 settings[SettingKeySMTPPassword] != "",
+		EmailProvider:                          normalizeEmailProvider(settings[SettingKeyEmailProvider]),
+		ResendAPIKeyConfigured:                 settings[SettingKeyResendAPIKey] != "",
+		ResendAPIKeyEncrypted:                  settings[SettingKeyResendAPIKey],
 		TurnstileEnabled:                       settings[SettingKeyTurnstileEnabled] == "true",
 		TurnstileSiteKey:                       settings[SettingKeyTurnstileSiteKey],
 		TurnstileSecretKeyConfigured:           settings[SettingKeyTurnstileSecretKey] != "",
@@ -1171,6 +1174,20 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	})
 
 	return result
+}
+
+const (
+	EmailProviderSMTP   = "smtp"
+	EmailProviderResend = "resend"
+)
+
+func normalizeEmailProvider(provider string) string {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case EmailProviderResend:
+		return EmailProviderResend
+	default:
+		return EmailProviderSMTP
+	}
 }
 
 func normalizeOpenAITTFTMode(mode string) string {

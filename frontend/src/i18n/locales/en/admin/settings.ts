@@ -1145,8 +1145,16 @@ export default {
         enabledHint: 'When enabled, the system sends reminders 7, 3, and 1 day before expiry.'
       },
       smtp: {
-        title: 'SMTP Settings',
-        description: 'Configure email sending for verification codes',
+        title: 'Email Delivery Settings',
+        description: 'Configure the service used to send account and notification emails',
+        provider: 'Email Provider',
+        smtpHint: 'Use your existing SMTP server. SMTP remains the default provider.',
+        resendHint: 'Send mail with Resend. Create an API key and verify the sender domain in Resend.',
+        resendAPIKey: 'Resend API Key',
+        resendKeyPlaceholder: 're_…',
+        resendKeyConfiguredPlaceholder: '********',
+        resendKeyHint: 'The key is encrypted on the server. It is never returned by the API.',
+        resendKeyConfiguredHint: 'API key configured. Leave empty to keep the current key.',
         testConnection: 'Test Connection',
         testing: 'Testing...',
         host: 'SMTP Host',

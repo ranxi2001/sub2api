@@ -514,6 +514,8 @@ export interface SystemSettings {
   smtp_from_email: string;
   smtp_from_name: string;
   smtp_use_tls: boolean;
+  email_provider: "smtp" | "resend";
+  resend_api_key_configured: boolean;
   // Cloudflare Turnstile settings
   turnstile_enabled: boolean;
   turnstile_site_key: string;
@@ -921,6 +923,8 @@ export interface UpdateSettingsRequest {
   smtp_from_email?: string;
   smtp_from_name?: string;
   smtp_use_tls?: boolean;
+  email_provider?: "smtp" | "resend";
+  resend_api_key?: string;
   turnstile_enabled?: boolean;
   turnstile_site_key?: string;
   turnstile_secret_key?: string;
@@ -1209,9 +1213,7 @@ export async function updateSettings(
   return data;
 }
 
-/**
- * Test SMTP connection request
- */
+/** Test SMTP connection request. Resend is validated by the test-email send action. */
 export interface TestSmtpRequest {
   smtp_host: string;
   smtp_port: number;
@@ -1240,6 +1242,8 @@ export async function testSmtpConnection(
  */
 export interface SendTestEmailRequest {
   email: string;
+  email_provider?: "smtp" | "resend";
+  resend_api_key?: string;
   smtp_host: string;
   smtp_port: number;
   smtp_username: string;

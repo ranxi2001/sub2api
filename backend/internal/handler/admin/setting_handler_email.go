@@ -85,14 +85,16 @@ func (h *SettingHandler) TestSMTPConnection(c *gin.Context) {
 
 // SendTestEmailRequest 发送测试邮件请求
 type SendTestEmailRequest struct {
-	Email        string `json:"email" binding:"required,email"`
-	SMTPHost     string `json:"smtp_host"`
-	SMTPPort     int    `json:"smtp_port"`
-	SMTPUsername string `json:"smtp_username"`
-	SMTPPassword string `json:"smtp_password"`
-	SMTPFrom     string `json:"smtp_from_email"`
-	SMTPFromName string `json:"smtp_from_name"`
-	SMTPUseTLS   *bool  `json:"smtp_use_tls"`
+	Email         string `json:"email" binding:"required,email"`
+	EmailProvider string `json:"email_provider"`
+	ResendAPIKey  string `json:"resend_api_key"`
+	SMTPHost      string `json:"smtp_host"`
+	SMTPPort      int    `json:"smtp_port"`
+	SMTPUsername  string `json:"smtp_username"`
+	SMTPPassword  string `json:"smtp_password"`
+	SMTPFrom      string `json:"smtp_from_email"`
+	SMTPFromName  string `json:"smtp_from_name"`
+	SMTPUseTLS    *bool  `json:"smtp_use_tls"`
 }
 
 // SendTestEmail 发送测试邮件
@@ -101,6 +103,14 @@ func (h *SettingHandler) SendTestEmail(c *gin.Context) {
 	var req SendTestEmailRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	provider := strings.TrimSpace(req.EmailProvider)
+	if provider == "" {
+		provider = service.EmailProviderSMTP
+	}
+	if provider != service.EmailProviderSMTP && provider != service.EmailProviderResend {
+		response.BadRequest(c, "email_provider must be smtp or resend")
 		return
 	}
 
@@ -137,7 +147,7 @@ func (h *SettingHandler) SendTestEmail(c *gin.Context) {
 	if req.SMTPFromName == "" && savedConfig != nil {
 		req.SMTPFromName = savedConfig.FromName
 	}
-	if req.SMTPHost == "" {
+	if provider == service.EmailProviderSMTP && req.SMTPHost == "" {
 		response.BadRequest(c, "SMTP host is required")
 		return
 	}
@@ -186,7 +196,33 @@ func (h *SettingHandler) SendTestEmail(c *gin.Context) {
 </html>
 `
 
-	if err := h.emailService.SendEmailWithConfig(config, req.Email, subject, body); err != nil {
+	if provider == service.EmailProviderResend {
+		var resendConfig *service.ResendConfig
+		if strings.TrimSpace(req.ResendAPIKey) != "" {
+			resendConfig = &service.ResendConfig{APIKey: strings.TrimSpace(req.ResendAPIKey), From: req.SMTPFrom, FromName: req.SMTPFromName}
+		} else {
+			var err error
+			resendConfig, err = h.emailService.GetResendConfig(c.Request.Context())
+			if err != nil {
+				response.BadRequest(c, "Failed to send test email: Resend is not configured")
+				return
+			}
+			if req.SMTPFrom != "" {
+				resendConfig.From = req.SMTPFrom
+			}
+			if req.SMTPFromName != "" {
+				resendConfig.FromName = req.SMTPFromName
+			}
+		}
+		if strings.TrimSpace(resendConfig.From) == "" {
+			response.BadRequest(c, "Resend sender email is required")
+			return
+		}
+		if err := h.emailService.SendEmailWithResendConfig(c.Request.Context(), resendConfig, req.Email, subject, body); err != nil {
+			response.BadRequest(c, "Failed to send test email: "+err.Error())
+			return
+		}
+	} else if err := h.emailService.SendEmailWithConfig(config, req.Email, subject, body); err != nil {
 		response.BadRequest(c, "Failed to send test email: "+err.Error())
 		return
 	}

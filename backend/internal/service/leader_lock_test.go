@@ -92,7 +92,7 @@ func TestSubscriptionExpiryService_ReminderSkipsScanWhenNotLeader(t *testing.T) 
 	_, _ = cache.TryAcquireLeaderLock(context.Background(), subscriptionExpiryReminderLeaderLockKey, "peer", time.Minute)
 
 	repo := &subscriptionExpiryRepoStub{}
-	settingRepo := &subscriptionExpirySettingRepoStub{values: map[string]string{SettingKeySMTPHost: "smtp.example.com"}}
+	settingRepo := &subscriptionExpirySettingRepoStub{values: map[string]string{SettingKeySMTPHost: "smtp.example.com", SettingKeySMTPFrom: "mail@example.com"}}
 	svc := NewSubscriptionExpiryService(repo, time.Minute)
 	svc.SetSettingRepository(settingRepo)
 	svc.SetNotificationEmailService(NewNotificationEmailService(settingRepo, NewEmailService(settingRepo, nil)))
@@ -105,7 +105,7 @@ func TestSubscriptionExpiryService_ReminderSkipsScanWhenNotLeader(t *testing.T) 
 
 func TestSubscriptionExpiryService_ReminderScansWhenLeader(t *testing.T) {
 	repo := &subscriptionExpiryRepoStub{}
-	settingRepo := &subscriptionExpirySettingRepoStub{values: map[string]string{SettingKeySMTPHost: "smtp.example.com"}}
+	settingRepo := &subscriptionExpirySettingRepoStub{values: map[string]string{SettingKeySMTPHost: "smtp.example.com", SettingKeySMTPFrom: "mail@example.com"}}
 	svc := NewSubscriptionExpiryService(repo, time.Minute)
 	svc.SetSettingRepository(settingRepo)
 	svc.SetNotificationEmailService(NewNotificationEmailService(settingRepo, NewEmailService(settingRepo, nil)))
@@ -127,7 +127,7 @@ func TestSubscriptionExpiryService_ReminderRunsEveryCycleSingleInstance(t *testi
 	for name, cache := range cases {
 		t.Run(name, func(t *testing.T) {
 			repo := &subscriptionExpiryRepoStub{}
-			settingRepo := &subscriptionExpirySettingRepoStub{values: map[string]string{SettingKeySMTPHost: "smtp.example.com"}}
+			settingRepo := &subscriptionExpirySettingRepoStub{values: map[string]string{SettingKeySMTPHost: "smtp.example.com", SettingKeySMTPFrom: "mail@example.com"}}
 			svc := NewSubscriptionExpiryService(repo, time.Minute)
 			svc.SetSettingRepository(settingRepo)
 			svc.SetNotificationEmailService(NewNotificationEmailService(settingRepo, NewEmailService(settingRepo, nil)))

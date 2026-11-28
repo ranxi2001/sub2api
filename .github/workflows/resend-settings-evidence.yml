@@ -1,0 +1,74 @@
+name: Resend settings rendered evidence
+
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - '.github/scripts/resend-settings-evidence.mjs'
+      - '.github/workflows/resend-settings-evidence.yml'
+      - 'frontend/src/views/admin/SettingsView.vue'
+      - 'frontend/src/views/admin/__tests__/SettingsView.spec.ts'
+      - 'frontend/src/components/layout/**'
+      - 'frontend/src/components/common/NewFeatureBadge.vue'
+      - 'frontend/src/stores/newFeatureNotices.ts'
+      - 'frontend/src/api/admin/settings.ts'
+      - 'frontend/src/i18n/locales/*/admin/settings.ts'
+      - 'frontend/src/style.css'
+      - 'frontend/src/styles/**'
+      - 'frontend/tailwind.config.js'
+      - 'frontend/postcss.config.js'
+      - 'frontend/package.json'
+      - 'frontend/pnpm-lock.yaml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: resend-settings-ui-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  settings-and-rendered-evidence:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+      NODE_OPTIONS: --max-old-space-size=6144
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - name: Actual SettingsView secret lifecycle and badge regressions
+        working-directory: frontend
+        run: pnpm exec vitest run src/views/admin/__tests__/SettingsView.spec.ts src/components/common/__tests__/NewFeatureBadge.spec.ts
+      - name: Install isolated remote browser
+        run: |
+          npm install --prefix "$RUNNER_TEMP/resend-browser" --no-save --ignore-scripts playwright@1.56.1
+          "$RUNNER_TEMP/resend-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Capture real before and after settings with full CSS
+        env:
+          PLAYWRIGHT_ROOT: ${{ runner.temp }}/resend-browser/node_modules/playwright
+          SCREENSHOT_DIR: ${{ runner.temp }}/resend-settings-evidence
+        run: |
+          set -euo pipefail
+          mkdir -p "$SCREENSHOT_DIR"
+          node .github/scripts/resend-settings-evidence.mjs 2>&1 | tee "$SCREENSHOT_DIR/render.log"
+          test -s "$SCREENSHOT_DIR/manifest.json"
+          test -z "$(git status --porcelain)"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: resend-settings-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/resend-settings-evidence
+          if-no-files-found: error

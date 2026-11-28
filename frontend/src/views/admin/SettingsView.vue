@@ -46,6 +46,12 @@
                   class="settings-tab-badge"
                 />
                 <NewFeatureBadge
+                  v-if="tab.key === 'email'"
+                  :notice-id="NEW_FEATURE_NOTICES.resendEmailProvider"
+                  :user-id="authStore.user?.id"
+                  class="settings-tab-badge"
+                />
+                <NewFeatureBadge
                   v-if="tab.key === 'features'"
                   :notice-id="NEW_FEATURE_NOTICES.protocolFeatureSwitches"
                   :user-id="authStore.user?.id"
@@ -9154,7 +9160,7 @@
             </div>
           </div>
 
-          <!-- SMTP Settings - Only show when email verification is enabled -->
+          <!-- Email provider settings - Only show when email verification is enabled -->
           <div v-if="form.email_verify_enabled" class="card">
             <div
               class="flex items-center justify-between border-b border-gray-100 px-6 py-4 dark:border-dark-700"
@@ -9163,11 +9169,17 @@
                 <h2 id="settings-section-smtp" tabindex="-1" class="text-lg font-semibold text-gray-900 dark:text-white">
                   {{ t("admin.settings.smtp.title") }}
                 </h2>
+                <NewFeatureBadge
+                  :notice-id="NEW_FEATURE_NOTICES.resendEmailProvider"
+                  :user-id="authStore.user?.id"
+                  class="mt-2"
+                />
                 <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
                   {{ t("admin.settings.smtp.description") }}
                 </p>
               </div>
               <button
+                v-if="form.email_provider === 'smtp'"
                 type="button"
                 @click="testSmtpConnection"
                 :disabled="testingSmtp || loadFailed"
@@ -9199,10 +9211,49 @@
                     : t("admin.settings.smtp.testConnection")
                 }}
               </button>
+              <button
+                v-else
+                type="button"
+                @click="sendTestEmail"
+                :disabled="sendingTestEmail || loadFailed"
+                class="btn btn-secondary btn-sm"
+              >
+                {{ sendingTestEmail ? t("admin.settings.testEmail.sending") : t("admin.settings.testEmail.sendTestEmail") }}
+              </button>
             </div>
             <div class="space-y-6 p-6">
+              <div>
+                <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {{ t("admin.settings.smtp.provider") }}
+                </label>
+                <select v-model="form.email_provider" class="input" data-testid="email-provider-select">
+                  <option value="smtp">SMTP</option>
+                  <option value="resend">Resend</option>
+                </select>
+                <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                  {{ form.email_provider === 'resend' ? t("admin.settings.smtp.resendHint") : t("admin.settings.smtp.smtpHint") }}
+                </p>
+              </div>
+              <div v-if="form.email_provider === 'resend'">
+                <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {{ t("admin.settings.smtp.resendAPIKey") }}
+                </label>
+                <input
+                  v-model="form.resend_api_key"
+                  type="password"
+                  class="input"
+                  autocomplete="new-password"
+                  autocapitalize="off"
+                  spellcheck="false"
+                  data-testid="resend-api-key"
+                  :placeholder="form.resend_api_key_configured ? t('admin.settings.smtp.resendKeyConfiguredPlaceholder') : t('admin.settings.smtp.resendKeyPlaceholder')"
+                />
+                <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                  {{ form.resend_api_key_configured ? t("admin.settings.smtp.resendKeyConfiguredHint") : t("admin.settings.smtp.resendKeyHint") }}
+                </p>
+              </div>
               <div class="grid grid-cols-1 gap-6 md:grid-cols-2">
-                <div>
+                <div v-if="form.email_provider === 'smtp'">
                   <label
                     class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
                   >
@@ -9215,7 +9266,7 @@
                     :placeholder="t('admin.settings.smtp.hostPlaceholder')"
                   />
                 </div>
-                <div>
+                <div v-if="form.email_provider === 'smtp'">
                   <label
                     class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
                   >
@@ -9230,7 +9281,7 @@
                     :placeholder="t('admin.settings.smtp.portPlaceholder')"
                   />
                 </div>
-                <div>
+                <div v-if="form.email_provider === 'smtp'">
                   <label
                     class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
                   >
@@ -9243,7 +9294,7 @@
                     :placeholder="t('admin.settings.smtp.usernamePlaceholder')"
                   />
                 </div>
-                <div>
+                <div v-if="form.email_provider === 'smtp'">
                   <label
                     class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
                   >
@@ -9301,7 +9352,7 @@
               </div>
 
               <!-- Use TLS Toggle -->
-              <div
+              <div v-if="form.email_provider === 'smtp'"
                 class="flex items-center justify-between border-t border-gray-100 pt-4 dark:border-dark-700"
               >
                 <div>
@@ -10406,6 +10457,7 @@ type SettingsForm = Omit<
   channel_monitor_show_quota: boolean;
   channel_monitor_hide_user_ranking: boolean;
   smtp_password: string;
+  resend_api_key: string;
   turnstile_secret_key: string;
   tencent_captcha_app_secret_key: string;
   tencent_captcha_cloud_secret_id: string;
@@ -10564,6 +10616,9 @@ const form = reactive<SettingsForm>({
   }>,
   frontend_url: "",
   smtp_host: "",
+  email_provider: "smtp",
+  resend_api_key: "",
+  resend_api_key_configured: false,
   smtp_port: 587,
   smtp_username: "",
   smtp_password: "",
@@ -11881,6 +11936,7 @@ async function loadSettings() {
     );
     registrationEmailSuffixWhitelistDraft.value = "";
     form.smtp_password = "";
+    form.resend_api_key = "";
     smtpPasswordManuallyEdited.value = false;
     form.turnstile_secret_key = "";
     form.tencent_captcha_app_secret_key = "";
@@ -12329,6 +12385,8 @@ async function saveSettings() {
       smtp_port: form.smtp_port,
       smtp_username: form.smtp_username,
       smtp_password: form.smtp_password || undefined,
+      email_provider: form.email_provider,
+      resend_api_key: form.resend_api_key || undefined,
       smtp_from_email: form.smtp_from_email,
       smtp_from_name: form.smtp_from_name,
       smtp_use_tls: form.smtp_use_tls,
@@ -12718,6 +12776,7 @@ async function saveSettings() {
     );
     registrationEmailSuffixWhitelistDraft.value = "";
     form.smtp_password = "";
+    form.resend_api_key = "";
     smtpPasswordManuallyEdited.value = false;
     form.turnstile_secret_key = "";
     form.aliyun_captcha_access_key_secret = "";
@@ -12839,6 +12898,8 @@ async function sendTestEmail() {
       : "";
     const result = await adminAPI.settings.sendTestEmail({
       email: testEmailAddress.value,
+      email_provider: form.email_provider,
+      resend_api_key: form.resend_api_key || undefined,
       smtp_host: form.smtp_host,
       smtp_port: form.smtp_port,
       smtp_username: form.smtp_username,

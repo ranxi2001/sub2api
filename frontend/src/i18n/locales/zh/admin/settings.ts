@@ -1140,8 +1140,16 @@ export default {
         enabledHint: '开启后，系统会在订阅到期前 7 天、3 天、1 天各发送一次提醒。'
       },
       smtp: {
-        title: 'SMTP 设置',
-        description: '配置用于发送验证码的邮件服务',
+        title: '邮件发送设置',
+        description: '配置用于发送账户邮件和通知邮件的服务',
+        provider: '邮件服务商',
+        smtpHint: '使用现有 SMTP 服务器。默认服务商仍为 SMTP。',
+        resendHint: '使用 Resend 发送邮件。请先创建 API Key 并在 Resend 验证发件域名。',
+        resendAPIKey: 'Resend API Key',
+        resendKeyPlaceholder: 're_…',
+        resendKeyConfiguredPlaceholder: '********',
+        resendKeyHint: '密钥在服务端加密保存，API 不会返回密钥内容。',
+        resendKeyConfiguredHint: 'API Key 已配置。留空即可保留现有密钥。',
         testConnection: '测试连接',
         testing: '测试中...',
         host: 'SMTP 主机',
