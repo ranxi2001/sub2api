@@ -357,7 +357,7 @@ func (s *EmailService) SendEmailWithResendConfig(ctx context.Context, config *Re
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(requestCtx.Err(), context.DeadlineExceeded) {
 			return errors.New("resend request timed out")
 		}
-		return errors.New("Resend request failed")
+		return errors.New("resend request failed")
 	}
 	defer func() { _ = response.Body.Close() }()
 	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64*1024))
@@ -366,15 +366,15 @@ func (s *EmailService) SendEmailWithResendConfig(ctx context.Context, config *Re
 	}
 	switch {
 	case response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden:
-		return errors.New("Resend authentication or permission failed")
+		return errors.New("resend authentication or permission failed")
 	case response.StatusCode == http.StatusTooManyRequests:
-		return errors.New("Resend rate limit exceeded")
+		return errors.New("resend rate limit exceeded")
 	case response.StatusCode == http.StatusBadRequest || response.StatusCode == http.StatusUnprocessableEntity:
-		return errors.New("Resend rejected the email request")
+		return errors.New("resend rejected the email request")
 	case response.StatusCode >= http.StatusInternalServerError:
-		return errors.New("Resend service is unavailable")
+		return errors.New("resend service is unavailable")
 	default:
-		return errors.New("Resend request failed")
+		return errors.New("resend request failed")
 	}
 }
 
