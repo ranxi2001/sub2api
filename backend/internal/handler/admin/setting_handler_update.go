@@ -547,7 +547,7 @@ func omittedSettingKeys(sentFields map[string]json.RawMessage) service.OmittedSe
 }
 
 func settingsAuditRequest(req UpdateSettingsRequest) UpdateSettingsRequest {
-	req.ResendAPIKeyChanged = req.ResendAPIKey != ""
+	req.ResendAPIKeyChanged = strings.TrimSpace(req.ResendAPIKey) != ""
 	req.ResendAPIKey = ""
 	req.TencentCaptchaAppSecretKey = strings.TrimSpace(req.TencentCaptchaAppSecretKey)
 	req.TencentCaptchaCloudSecretID = strings.TrimSpace(req.TencentCaptchaCloudSecretID)
