@@ -247,12 +247,12 @@
               :style="cacheRateBarStyle(row)"
               aria-hidden="true"
             ></span>
-            <span class="col-start-2 row-start-1 text-gray-400 dark:text-gray-500">{{ t(row.queue_timing?.status === 'measured' ? 'usage.latencyFirstToken' : 'requestTiming.legacyFirst') }}</span>
+            <span class="col-start-2 row-start-1 text-gray-400 dark:text-gray-500">{{ t('usage.latencyFirstToken') }}</span>
             <span v-if="firstTokenQueueInclusive(row) != null" class="col-start-3 row-start-1 font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[firstTokenSeverity(firstTokenQueueInclusive(row) ?? 0)]" :title="row.queue_timing?.status === 'measured' ? t('usage.latencyFirstTokenHint') : undefined">
               {{ formatDuration(firstTokenQueueInclusive(row)) }}
             </span>
             <span v-else class="col-start-3 row-start-1 text-gray-400 dark:text-gray-500">-</span>
-            <span class="col-start-2 row-start-2 text-gray-400 dark:text-gray-500">{{ t(row.queue_timing?.status === 'measured' ? 'usage.latencyDuration' : 'requestTiming.legacyTotal') }}</span>
+            <span class="col-start-2 row-start-2 text-gray-400 dark:text-gray-500">{{ t('usage.latencyDuration') }}</span>
             <span class="col-start-3 row-start-2 font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[durationSeverity(durationQueueInclusive(row) ?? 0)]" :title="row.queue_timing?.status === 'measured' ? t('usage.latencyDurationHint') : undefined">
               {{ formatDuration(durationQueueInclusive(row)) }}
             </span>

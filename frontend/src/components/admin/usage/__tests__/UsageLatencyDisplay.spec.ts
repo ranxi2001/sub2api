@@ -4,8 +4,6 @@ import { createI18n } from 'vue-i18n'
 import UsageTable from '../UsageTable.vue'
 import enDashboard from '@/i18n/locales/en/dashboard'
 import zhDashboard from '@/i18n/locales/zh/dashboard'
-import enTiming from '@/i18n/locales/en/requestTiming'
-import zhTiming from '@/i18n/locales/zh/requestTiming'
 import adminPage from '@/views/admin/UsageView.vue?raw'
 import userPage from '@/views/user/UsageView.vue?raw'
 import { serverLatency } from './fixtures/serverLatency'
@@ -16,8 +14,8 @@ const wrappers: ReturnType<typeof mount>[] = []
 afterEach(() => { wrappers.splice(0).forEach(wrapper => wrapper.unmount()); document.body.innerHTML = '' })
 
 const locales = {
-  en: { usage: enDashboard.usage, requestTiming: enTiming, empty: { noData: 'No data' }, common: { noData: 'No data' } },
-  zh: { usage: zhDashboard.usage, requestTiming: zhTiming, empty: { noData: '暂无数据' }, common: { noData: '暂无数据' } },
+  en: { usage: enDashboard.usage, empty: { noData: 'No data' }, common: { noData: 'No data' } },
+  zh: { usage: zhDashboard.usage, empty: { noData: '暂无数据' }, common: { noData: '暂无数据' } },
 }
 function global(locale: 'en' | 'zh') {
   return { plugins: [createI18n({ legacy: false, locale, messages: locales })] }
@@ -57,7 +55,7 @@ describe('server latency display without pre-forward wait disclosure', () => {
       })
     }
 
-    it(`keeps empty/unknown and historical values in ${locale}`, () => {
+    it(`keeps empty/unknown and historical values in ${locale}`, async () => {
       const wrapper = mount(UsageTable, {
         props: { columns: [{ key: 'latency', label: 'Latency' }], data: [{
           ...serverLatency, queue_timing: { ...serverLatency.queue_timing!, status: 'unknown' },
@@ -69,8 +67,12 @@ describe('server latency display without pre-forward wait disclosure', () => {
       expect(latency.querySelector('.row-start-1.col-start-3')?.textContent).toBe('-')
       expect(latency.querySelector('.row-start-2.col-start-3')?.textContent?.trim()).toBe('-')
       expect(latency.textContent).not.toContain('97ms')
-      expect(latency.querySelector('.row-start-1.col-start-2')?.textContent).toBe(locales[locale].requestTiming.legacyFirst)
+      expect(latency.querySelector('.row-start-1.col-start-2')?.textContent).toBe(locale === 'zh' ? '服务端首字' : 'Server TTFT')
       expect(latency.querySelector('.row-start-2.col-start-2')?.textContent).toBe(locale === 'zh' ? '服务端总耗时' : 'Server total')
+      await wrapper.setProps({ data: [{ ...serverLatency, queue_timing: null }] })
+      expect(latency.querySelector('.row-start-1.col-start-3')?.textContent?.trim()).toBe('1.92s')
+      expect(latency.querySelector('.row-start-2.col-start-3')?.textContent?.trim()).toBe('18.85s')
+
       const empty = mount(UsageTable, { props: { data: [], columns: [{ key: 'latency', label: 'Latency' }] }, global: global(locale) })
       wrappers.push(empty)
       expect(empty.text()).toContain(locales[locale].empty.noData)

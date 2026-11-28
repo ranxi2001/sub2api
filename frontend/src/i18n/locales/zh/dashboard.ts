@@ -459,7 +459,7 @@ export default {
     latency: '延迟',
     latencyFirstTokenShort: '首字',
     latencyFirstToken: '服务端首字',
-    latencyFirstTokenHint: '服务端首字使用实测服务端边界，包含记录口径内的准入和先前尝试，不是客户端端到端耗时。没有测量来源的记录保留旧口径。',
+    latencyFirstTokenHint: '服务端首字使用实测服务端边界，包含记录口径内的准入和先前尝试，不是客户端端到端耗时。',
     latencyDurationShort: '总耗时',
     latencyDurationHint: '服务端总耗时使用记录口径内的实测服务端边界，包含内部重试，不是客户端端到端耗时。平均 TPS 仍使用原总耗时。',
     latencyDuration: '服务端总耗时',

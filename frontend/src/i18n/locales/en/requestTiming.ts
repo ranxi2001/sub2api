@@ -24,8 +24,6 @@ export default {
   "missing": "Not collected",
   "yes": "Yes",
   "no": "No",
-  "legacyFirst": "Server TTFT (legacy)",
-  "legacyTotal": "Server total",
   "serverFirst": "Server TTFT",
   "serverTotal": "Server total",
   "requestTotal": "Application total duration",
