@@ -5,7 +5,7 @@
       <span
         data-test="cn-provider-balance-value"
         :class="['text-[10px] font-medium leading-4', platformTextClass(account.platform)]"
-        :title="t('admin.accounts.cnProviders.balanceProbeTooltip')"
+        :title="t(probeAllowed ? 'admin.accounts.cnProviders.balanceProbeTooltip' : 'admin.accounts.cnProviders.balanceSnapshotTooltip')"
       >
         {{ balanceLabel }}
       </span>
@@ -23,7 +23,7 @@
          buttons): the old chip doubled as the data display and a hidden click
          target, which users could not discover. The verb label makes the
          affordance explicit. -->
-    <div class="flex flex-wrap items-center gap-1.5">
+    <div v-if="probeAllowed" class="flex flex-wrap items-center gap-1.5">
       <button
         type="button"
         data-test="cn-provider-balance-probe"
@@ -49,6 +49,11 @@
         {{ t('admin.accounts.cnProviders.probe') }}
       </button>
     </div>
+    <div
+      v-else
+      class="text-[10px] text-gray-500 dark:text-gray-400"
+      :title="t('admin.accounts.cnProviders.balanceSnapshotTooltip')"
+    >{{ t('admin.accounts.cnProviders.balanceSnapshot') }}</div>
 
     <div v-if="error" class="truncate text-[10px] text-red-600 dark:text-red-400" :title="error">
       {{ truncatedError }}
@@ -63,7 +68,7 @@ import { adminAPI } from '@/api/admin'
 import type { CNProviderBalanceEntry, CNProviderBalanceResult } from '@/api/admin/cnProviders'
 import type { Account } from '@/types'
 import { platformTextClass } from '@/utils/platformColors'
-import { cnBalanceCellVisible } from './credentialsBuilder'
+import { cnBalanceCellVisible, cnBalanceProbeAllowed } from './credentialsBuilder'
 
 const props = defineProps<{
   account: Account
@@ -74,17 +79,43 @@ const { t } = useI18n()
 
 // 仅 kimi / deepseek payg 账号有公开余额端点（智谱 payg 无）。
 const visible = computed(() => cnBalanceCellVisible(props.account))
+const probeAllowed = computed(() => cnBalanceProbeAllowed(props.account))
 
 const loading = ref(false)
 const error = ref<string | null>(null)
 const data = ref<CNProviderBalanceResult | null>(null)
+// Invalidate local responses when a reused row changes credentials or routing.
+// This key stays in memory; it is never logged or sent to the server.
+const accountIdentity = computed(() => JSON.stringify([
+  props.account.id, props.account.platform, props.account.type, props.account.credentials
+]))
+let probeGeneration = 0
 
 const extraKey = (suffix: string) => `${props.account.platform}_${suffix}`
+const snapshotLow = computed(() => props.account.extra?.[extraKey('balance_low')] === true)
+const reactiveLowVersion = ref(0)
+const queriedLowVersion = ref(0)
+
+// Reactive insufficient-balance writes do not advance the balance timestamp.
+// A healthy query supersedes markers already present when it started, while
+// false -> true transitions observed during/after that query must remain visible.
+watch(snapshotLow, (low, previous) => {
+  if (props.account.platform === 'deepseek' && low && !previous) reactiveLowVersion.value++
+}, { flush: 'sync' })
+
+const snapshotSupersedes = (result: CNProviderBalanceResult): boolean => {
+  if (props.account.platform !== 'deepseek') return false
+  const raw = props.account.extra?.deepseek_balance_updated_at
+  const updated = typeof raw === 'string' ? Date.parse(raw) : Number.NaN
+  if (!Number.isFinite(updated)) return false // Legacy untimed snapshots cannot establish order.
+  // A dated snapshot wins ties and results without a valid observation time.
+  return !Number.isFinite(result.fetched_at) || updated >= result.fetched_at * 1000
+}
 
 // 落库快照（后端周期探测/响应式写入 account.Extra）。
 const snapshotBalance = computed(() => {
   const v = props.account.extra?.[extraKey('balance')]
-  return typeof v === 'number' ? v : null
+  return typeof v === 'number' && Number.isFinite(v) ? v : null
 })
 const snapshotCurrency = computed(() => {
   const v = props.account.extra?.[extraKey('balance_currency')]
@@ -97,13 +128,17 @@ const snapshotBalances = computed<CNProviderBalanceEntry[]>(() => {
   return v.flatMap((item): CNProviderBalanceEntry[] => {
     if (!item || typeof item !== 'object') return []
     const { currency, balance } = item as Record<string, unknown>
-    if (typeof currency !== 'string' || typeof balance !== 'number') return []
+    if (typeof currency !== 'string' || typeof balance !== 'number' || !Number.isFinite(balance)) return []
     return [{ currency, balance }]
   })
 })
 const balanceLow = computed(() => {
-  if (data.value && data.value.success) return !data.value.available
-  return props.account.extra?.[extraKey('balance_low')] === true
+  if (data.value && data.value.success) {
+    if (props.account.platform === 'deepseek' && snapshotLow.value && reactiveLowVersion.value > queriedLowVersion.value) return true
+    return !data.value.available
+  }
+  if (props.account.platform === 'deepseek' && props.account.extra?.deepseek_balance_available === false) return true
+  return snapshotLow.value
 })
 
 // 优先用探测结果，其次落库快照。多币种返回全部明细，否则主币种单条。
@@ -156,21 +191,29 @@ const truncatedError = computed(() => {
 })
 
 const handleProbe = async () => {
-  if (loading.value) return
+  if (loading.value || !probeAllowed.value) return
+  const generation = ++probeGeneration
+  const identity = accountIdentity.value
+  const lowVersion = reactiveLowVersion.value
+  const isCurrent = () => generation === probeGeneration && identity === accountIdentity.value
   loading.value = true
   error.value = null
   try {
     const result = await adminAPI.cnProviders.queryBalance(props.account.id)
+    if (!isCurrent()) return
     // 失败时保留快照展示（仅显示错误行），成功才覆盖。
     if (result.success) {
-      data.value = result
+      if (!snapshotSupersedes(result)) {
+        queriedLowVersion.value = lowVersion
+        data.value = result
+      }
     } else {
       error.value = result.error || t('common.error')
     }
   } catch (e) {
-    error.value = extractErrorMessage(e)
+    if (isCurrent()) error.value = extractErrorMessage(e)
   } finally {
-    loading.value = false
+    if (isCurrent()) loading.value = false
   }
 }
 
@@ -178,19 +221,35 @@ watch(
   () => props.probedBalance,
   (val) => {
     if (val && val.success) {
-      data.value = val
+      if (!snapshotSupersedes(val)) {
+        queriedLowVersion.value = reactiveLowVersion.value
+        data.value = val
+      }
       error.value = null
     }
   },
   { immediate: true }
 )
 
+// A later periodic DeepSeek observation supersedes the local manual result.
 watch(
-  () => props.account.id,
+  () => props.account.extra?.deepseek_balance_updated_at,
   () => {
+    if (data.value && snapshotSupersedes(data.value)) {
+      data.value = null
+      error.value = null
+    }
+  }
+)
+
+watch(
+  accountIdentity,
+  () => {
+    probeGeneration++
     data.value = null
     error.value = null
     loading.value = false
-  }
+  },
+  { flush: 'sync' }
 )
 </script>

@@ -623,6 +623,7 @@ export interface CNUsageCellAccount {
   platform: string
   type: string
   credentials?: Record<string, unknown>
+  extra?: Record<string, unknown>
 }
 
 // Command Code、Cline、Mistral 的积分/预算与用量接口只查官方主机上的 API Key 账号（与后端
@@ -632,14 +633,19 @@ const OFFICIAL_ACCOUNT_API_PLATFORMS = ['command_code', 'cline', 'mistral']
 
 function cnUsageCellAccountMode(account: CNUsageCellAccount): string {
   const mode = account.credentials?.account_mode
-  return typeof mode === 'string' ? mode : ''
+  const normalized = typeof mode === 'string' ? mode.trim() : ''
+  // Account.GetAccountMode accepts payg/coding; OpenCode's existing go/zen
+  // display modes remain available to the shared visibility helpers.
+  if (account.platform === 'opencode_go') return normalized
+  return normalized === 'payg' || normalized === 'coding' ? normalized : ''
 }
 
 /** 与后端 Account.GetAPIProtocol 一致：按模型分流的供应商未指定原生协议时为 adaptive。 */
 function accountUsesAdaptiveProtocol(platform: string, mode: string, protocol: unknown): boolean {
-  if (protocol === 'adaptive') return true
-  if (protocol === 'chat_completions' || protocol === 'anthropic') return false
-  if (protocol === 'responses' && cnSupportsNativeResponses(platform, mode)) return false
+  const normalized = typeof protocol === 'string' ? protocol.trim() : ''
+  if (normalized === 'adaptive') return true
+  if (normalized === 'chat_completions' || normalized === 'anthropic') return false
+  if (normalized === 'responses' && cnSupportsNativeResponses(platform, mode)) return false
   return providerRoutesByModel(platform)
 }
 
@@ -684,7 +690,27 @@ export function cnBalanceCellVisible(account: CNUsageCellAccount): boolean {
   const { platform } = account
   const mode = cnUsageCellAccountMode(account)
   if (OFFICIAL_ACCOUNT_API_PLATFORMS.includes(platform)) return officialAccountAPISupported(account, mode)
-  return (platform === 'kimi' || platform === 'deepseek') && mode !== 'coding'
+  if (platform === 'deepseek') {
+    if (account.type !== 'apikey' || mode === 'coding') return false
+    if (cnBalanceProbeAllowed(account)) return true
+    // Legacy snapshots have no endpoint provenance. Retain valid saved values as
+    // read-only history, including zero, without inferring custom API support.
+    const extra = account.extra
+    if (typeof extra?.deepseek_balance === 'number' && Number.isFinite(extra.deepseek_balance)) return true
+    return Array.isArray(extra?.deepseek_balances) && extra.deepseek_balances.some(entry => {
+      if (!entry || typeof entry !== 'object') return false
+      const { currency, balance } = entry as Record<string, unknown>
+      return typeof currency === 'string' && typeof balance === 'number' && Number.isFinite(balance)
+    })
+  }
+  return platform === 'kimi' && mode !== 'coding'
+}
+
+/** Saved DeepSeek balances do not authorize probes against unproven custom URLs. */
+export function cnBalanceProbeAllowed(account: CNUsageCellAccount): boolean {
+  if (account.platform !== 'deepseek') return cnBalanceCellVisible(account)
+  const mode = cnUsageCellAccountMode(account)
+  return mode !== 'coding' && officialAccountAPISupported(account, mode)
 }
 
 /**

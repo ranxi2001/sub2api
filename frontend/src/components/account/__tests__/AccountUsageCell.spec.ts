@@ -119,7 +119,7 @@ describe('AccountUsageCell', () => {
   it('shows the standard API key usage row for a DeepSeek key', async () => {
     const wrapper = mount(AccountUsageCell, {
       props: {
-        account: makeAccount({ platform: 'deepseek', type: 'apikey', extra: {} }),
+        account: makeAccount({ platform: 'deepseek', type: 'apikey', credentials: { base_url: 'https://relay.example.invalid' }, extra: {} }),
         todayStatsLoading: true
       },
       global: { stubs: cnUsageCellStubs }

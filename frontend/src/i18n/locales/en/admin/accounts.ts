@@ -277,6 +277,8 @@ export default {
         probe: 'Query',
         probeTooltip: 'Query the provider quota endpoint for 5-hour / weekly rolling window usage',
         balanceProbeTooltip: 'Query the provider balance endpoint for the account balance',
+        balanceSnapshot: 'Saved balance',
+        balanceSnapshotTooltip: 'Saved balance snapshot; may be outdated or belong to a previous endpoint. Query is unavailable for unverified custom endpoints.',
         balanceLow: 'Insufficient balance',
         noBalanceEndpoint: 'This platform has no balance query endpoint',
       },
