@@ -222,7 +222,7 @@ type ResendConfig struct {
 
 func (s *EmailService) EncryptResendAPIKey(apiKey string) (string, error) {
 	if s == nil || s.secretEncryptor == nil {
-		return "", errors.New("Resend API key encryption is unavailable")
+		return "", errors.New("resend API key encryption is unavailable")
 	}
 	return s.secretEncryptor.Encrypt(strings.TrimSpace(apiKey))
 }
@@ -240,7 +240,7 @@ func (s *EmailService) GetResendConfig(ctx context.Context) (*ResendConfig, erro
 	}
 	apiKey, err := s.secretEncryptor.Decrypt(settings[SettingKeyResendAPIKey])
 	if err != nil || strings.TrimSpace(apiKey) == "" {
-		return nil, errors.New("Resend API key could not be read")
+		return nil, errors.New("resend API key could not be read")
 	}
 	return &ResendConfig{APIKey: apiKey, From: strings.TrimSpace(settings[SettingKeySMTPFrom]), FromName: strings.TrimSpace(settings[SettingKeySMTPFromName])}, nil
 }
@@ -355,11 +355,11 @@ func (s *EmailService) SendEmailWithResendConfig(ctx context.Context, config *Re
 	response, err := client.Do(req)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(requestCtx.Err(), context.DeadlineExceeded) {
-			return errors.New("Resend request timed out")
+			return errors.New("resend request timed out")
 		}
 		return errors.New("Resend request failed")
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64*1024))
 	if response.StatusCode >= 200 && response.StatusCode < 300 {
 		return nil
