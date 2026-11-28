@@ -454,7 +454,7 @@ export default {
     latency: 'Latency',
     latencyFirstTokenShort: 'First token',
     latencyFirstToken: 'Server TTFT',
-    latencyFirstTokenHint: 'Server TTFT uses sampled server boundaries, including admission and earlier attempts within the recorded scope. This is not client end-to-end time. Records without a measured source retain their legacy timer.',
+    latencyFirstTokenHint: 'Server TTFT uses sampled server boundaries, including admission and earlier attempts within the recorded scope. This is not client end-to-end time.',
     latencyDurationShort: 'Total',
     latencyDurationHint: 'Server total uses sampled server boundaries within the recorded scope, including internal retries. This is not client end-to-end time. Average TPS uses the unchanged legacy duration.',
     latencyDuration: 'Server total',
