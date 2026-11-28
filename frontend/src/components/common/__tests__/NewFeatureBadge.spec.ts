@@ -23,6 +23,7 @@ describe('NewFeatureBadge', () => {
 
 
   it.each([
+    ['Resend email provider', NEW_FEATURE_NOTICES.resendEmailProvider],
     ['API key multi-group site policy', NEW_FEATURE_NOTICES.apiKeyMultiGroupPolicy],
     ['admin key full access', NEW_FEATURE_NOTICES.adminKeyFullAccess],
     ['cross-platform gateway accounts', NEW_FEATURE_NOTICES.crossPlatformGatewayAccounts],

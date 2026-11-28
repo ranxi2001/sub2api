@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/qqbot"
 	"github.com/stretchr/testify/require"
 )
 
@@ -108,4 +110,29 @@ func TestEmailCheckConfiguredUsesSelectedProviderWithoutSMTP(t *testing.T) {
 	require.ErrorIs(t, email.CheckConfigured(ctx), ErrEmailNotConfigured, "selected Resend must not fall back to SMTP")
 	require.NoError(t, settings.Set(ctx, SettingKeyEmailProvider, EmailProviderSMTP))
 	require.NoError(t, email.CheckConfigured(ctx))
+}
+
+func TestQQBotOptionsReportsSelectedProviderReadiness(t *testing.T) {
+	ctx := context.Background()
+	settings := newNotificationEmailMemorySettingRepo()
+	require.NoError(t, settings.SetMultiple(ctx, map[string]string{
+		SettingKeyEmailProvider: EmailProviderResend,
+		SettingKeyResendAPIKey:  "encrypted:re_fixture",
+		SettingKeySMTPFrom:      "mail@example.com",
+	}))
+	email := NewEmailService(settings, nil)
+	email.SetSecretEncryptor(resendTestEncryptor{})
+	provider := &qqBotSiteAI{
+		users:    qqSetupUsers{user: &User{ID: 7, Status: StatusActive}},
+		groups:   qqSetupGroups{},
+		settings: &SettingService{settingRepo: settings, cfg: &config.Config{}},
+		email:    email,
+	}
+	options, err := provider.Options(ctx, 7, qqbot.Config{})
+	require.NoError(t, err)
+	require.True(t, options.EmailConfigured)
+	require.NoError(t, settings.Delete(ctx, SettingKeyResendAPIKey))
+	options, err = provider.Options(ctx, 7, qqbot.Config{})
+	require.NoError(t, err)
+	require.False(t, options.EmailConfigured)
 }

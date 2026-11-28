@@ -7,8 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"net/mail"
 	"net/http"
+	"net/mail"
 	"strings"
 	"testing"
 

@@ -1145,7 +1145,7 @@ export default {
         enabledHint: 'When enabled, the system sends reminders 7, 3, and 1 day before expiry.'
       },
       smtp: {
-        title: 'SMTP Settings',
+        title: 'Email Delivery Settings',
         description: 'Configure the service used to send account and notification emails',
         provider: 'Email Provider',
         smtpHint: 'Use your existing SMTP server. SMTP remains the default provider.',

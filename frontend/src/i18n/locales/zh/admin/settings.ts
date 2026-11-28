@@ -1140,7 +1140,7 @@ export default {
         enabledHint: '开启后，系统会在订阅到期前 7 天、3 天、1 天各发送一次提醒。'
       },
       smtp: {
-        title: 'SMTP 设置',
+        title: '邮件发送设置',
         description: '配置用于发送账户邮件和通知邮件的服务',
         provider: '邮件服务商',
         smtpHint: '使用现有 SMTP 服务器。默认服务商仍为 SMTP。',
