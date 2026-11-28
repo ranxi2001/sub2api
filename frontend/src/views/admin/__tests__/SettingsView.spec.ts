@@ -35,6 +35,7 @@ beforeEach(() => {
 const {
   getSettings,
   updateSettings,
+  sendTestEmail,
   getWebSearchEmulationConfig,
   updateWebSearchEmulationConfig,
   getAdminApiKey,
@@ -67,6 +68,7 @@ const {
 } = vi.hoisted(() => ({
   getSettings: vi.fn(),
   updateSettings: vi.fn(),
+  sendTestEmail: vi.fn(),
   getWebSearchEmulationConfig: vi.fn(),
   updateWebSearchEmulationConfig: vi.fn(),
   getAdminApiKey: vi.fn(),
@@ -118,6 +120,7 @@ vi.mock("@/api", () => ({
     settings: {
       getSettings,
       updateSettings,
+      sendTestEmail,
       getWebSearchEmulationConfig,
       updateWebSearchEmulationConfig,
       getAdminApiKey,
@@ -688,27 +691,97 @@ describe("admin SettingsView email domain quota copy", () => {
 
 describe("admin SettingsView Resend provider", () => {
   beforeEach(() => {
-    getSettings.mockReset().mockResolvedValue({
+    localStorage.removeItem("sub2api:new-feature-notices:v1:41");
+    let saved = {
       ...baseSettingsResponse,
       email_verify_enabled: true,
       email_provider: "smtp",
-      resend_api_key_configured: true,
+      resend_api_key_configured: false,
+    };
+    getSettings.mockReset().mockImplementation(async () => structuredClone(saved));
+    updateSettings.mockReset().mockImplementation(async (payload) => {
+      const publicPayload = JSON.parse(JSON.stringify(payload));
+      const configured = saved.resend_api_key_configured || Boolean(publicPayload.resend_api_key);
+      // The server never echoes write-only secrets in PUT or GET responses.
+      delete publicPayload.resend_api_key;
+      delete publicPayload.smtp_password;
+      saved = { ...saved, ...publicPayload, resend_api_key_configured: configured };
+      return structuredClone(saved);
     });
-    updateSettings.mockReset().mockImplementation(async (payload) => ({
-      ...baseSettingsResponse,
-      email_verify_enabled: true,
-      resend_api_key_configured: true,
-      ...payload,
-    }));
+    sendTestEmail.mockReset().mockResolvedValue({ message: "Fixture test email accepted" });
+    getWebSearchEmulationConfig.mockResolvedValue({ enabled: false, providers: [] });
+    updateWebSearchEmulationConfig.mockResolvedValue({ enabled: false, providers: [] });
+    getGroups.mockResolvedValue([]);
+    getProviders.mockResolvedValue({ data: [] });
+    fetchPublicSettings.mockResolvedValue(undefined);
+    adminSettingsFetch.mockResolvedValue(undefined);
   });
 
-  it("shows Resend configuration only after provider selection and keeps the API key out of settings reads", async () => {
+  async function openEmailTab(wrapper: ReturnType<typeof mountView>) {
+    await wrapper.get('#settings-tab-email').trigger('click');
+    await flushPromises();
+  }
+
+  it("saves explicit provider/key, clears the key, reloads configured-only, omits blank saves, and tests saved or replacement keys", async () => {
     const wrapper = mountView();
     await flushPromises();
-    const emailTab = wrapper.findAll('[role="tab"]').find((node) => node.text().includes("admin.settings.tabs.email"));
-    expect(emailTab).toBeDefined();
-    await emailTab?.trigger("click");
+    await openEmailTab(wrapper);
+    expect(wrapper.find('[data-testid="resend-api-key"]').exists()).toBe(false);
+    await wrapper.get('[data-testid="email-provider-select"]').setValue('resend');
+    const key = wrapper.get<HTMLInputElement>('[data-testid="resend-api-key"]');
+    expect(key.attributes('type')).toBe('password');
+    await key.setValue('re_fictional_first');
+    await wrapper.get('form').trigger('submit');
     await flushPromises();
+    expect(updateSettings).toHaveBeenCalledTimes(1);
+    expect(updateSettings.mock.calls[0]![0]).toMatchObject({ email_provider: 'resend', resend_api_key: 're_fictional_first' });
+    expect(key.element.value).toBe('');
+    expect(key.attributes('placeholder')).toBe('admin.settings.smtp.resendKeyConfiguredPlaceholder');
+    const response = await getSettings();
+    expect(response).toMatchObject({ email_provider: 'resend', resend_api_key_configured: true });
+    expect(response).not.toHaveProperty('resend_api_key');
+    expect(JSON.stringify(response)).not.toContain('re_fictional_first');
+    wrapper.unmount();
+
+    const reloaded = mountView();
+    await flushPromises();
+    await openEmailTab(reloaded);
+    expect(reloaded.get<HTMLSelectElement>('[data-testid="email-provider-select"]').element.value).toBe('resend');
+    const reloadedKey = reloaded.get<HTMLInputElement>('[data-testid="resend-api-key"]');
+    expect(reloadedKey.element.value).toBe('');
+    expect(reloadedKey.attributes('placeholder')).toBe('admin.settings.smtp.resendKeyConfiguredPlaceholder');
+    await reloaded.get('form').trigger('submit');
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledTimes(2);
+    const blankSave = JSON.parse(JSON.stringify(updateSettings.mock.calls[1]![0]));
+    expect(blankSave.email_provider).toBe('resend');
+    expect(blankSave).not.toHaveProperty('resend_api_key');
+    expect(await getSettings()).toMatchObject({ resend_api_key_configured: true });
+
+    const testCard = reloaded.get('#settings-section-test-email').element.closest('.card')!;
+    const recipient = reloaded.findAll('input').find(node => testCard.contains(node.element) && node.attributes('type') === 'email')!;
+    const send = reloaded.findAll('button').find(node => testCard.contains(node.element))!;
+    await recipient.setValue('recipient@example.net');
+    await send.trigger('click');
+    await flushPromises();
+    expect(sendTestEmail).toHaveBeenCalledTimes(1);
+    const savedKeyTest = JSON.parse(JSON.stringify(sendTestEmail.mock.calls[0]![0]));
+    expect(savedKeyTest).toMatchObject({ email: 'recipient@example.net', email_provider: 'resend' });
+    expect(savedKeyTest).not.toHaveProperty('resend_api_key');
+    await reloadedKey.setValue('re_fictional_replacement');
+    await send.trigger('click');
+    await flushPromises();
+    expect(sendTestEmail).toHaveBeenCalledTimes(2);
+    expect(sendTestEmail.mock.calls[1]![0]).toMatchObject({ email: 'recipient@example.net', email_provider: 'resend', resend_api_key: 're_fictional_replacement' });
+    expect(await getSettings()).not.toHaveProperty('resend_api_key');
+  });
+
+  it.each([0, 1])("dismisses Resend at entry %s and preserves A/B/C notice persistence", async (index) => {
+    const old = NEW_FEATURE_NOTICES.protocolFeatureSwitches;
+    localStorage.setItem('sub2api:new-feature-notices:v1:41', JSON.stringify([old]));
+    const wrapper = mountView();
+    await flushPromises();
+    await openEmailTab(wrapper);
 
     const provider = wrapper.get<HTMLSelectElement>('[data-testid="email-provider-select"]');
     expect(provider.element.value).toBe("smtp");
@@ -720,11 +793,21 @@ describe("admin SettingsView Resend provider", () => {
       .filter((badge) => badge.props("noticeId") === NEW_FEATURE_NOTICES.resendEmailProvider)
       .flatMap((badge) => badge.findAll('[data-testid="new-feature-badge"]'));
     expect(emailNoticeBadges()).toHaveLength(2);
-    await emailNoticeBadges()[1]!.trigger("click");
+    await emailNoticeBadges()[index]!.trigger("click");
     await flushPromises();
     expect(emailNoticeBadges()).toHaveLength(0);
     expect(JSON.parse(localStorage.getItem("sub2api:new-feature-notices:v1:41") ?? "[]"))
       .toContain(NEW_FEATURE_NOTICES.resendEmailProvider);
+    wrapper.unmount();
+    const reloaded = mountView();
+    await flushPromises();
+    await openEmailTab(reloaded);
+    expect(reloaded.findAllComponents(NewFeatureBadge)
+      .filter(b => [old, NEW_FEATURE_NOTICES.resendEmailProvider].includes(b.props('noticeId')))
+      .flatMap(b => b.findAll('[data-testid="new-feature-badge"]'))).toHaveLength(0);
+    const future = mount(NewFeatureBadge, { props: { noticeId: 'fixture-future-mail-provider-C', userId: 41 }, global: { plugins: [createPinia()] } });
+    expect(future.find('[data-testid="new-feature-badge"]').exists()).toBe(true);
+    expect(updateSettings).not.toHaveBeenCalled();
   });
 
   it("registers the new notice separately and provides English and Chinese setup guidance", () => {

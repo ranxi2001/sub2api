@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net/mail"
 	"net/http"
 	"strings"
 	"testing"
@@ -38,7 +39,10 @@ func TestSendEmailWithResendConfigUsesFixedEndpointAndExpectedPayload(t *testing
 	require.Equal(t, "Bearer re_test", captured.Header.Get("Authorization"))
 	require.Equal(t, "application/json", captured.Header.Get("Content-Type"))
 	require.Equal(t, []string{"user@example.net"}, payload.To)
-	require.Equal(t, "Sub2API <mail@example.com>", payload.From)
+	from, err := mail.ParseAddress(payload.From)
+	require.NoError(t, err)
+	require.Equal(t, "mail@example.com", from.Address)
+	require.Equal(t, "Sub2API", from.Name)
 	require.Equal(t, "Verify", payload.Subject)
 	require.Equal(t, "<p>Hello</p>", payload.HTML)
 }

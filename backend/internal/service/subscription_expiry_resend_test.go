@@ -35,7 +35,8 @@ func TestSubscriptionExpiryService_SelectedProviderDeliversAndPreservesSuppressi
 				email.SetResendHTTPTransport(resendRoundTripperFunc(func(req *http.Request) (*http.Response, error) {
 					var payload resendSendEmailRequest
 					require.NoError(t, json.NewDecoder(req.Body).Decode(&payload))
-					require.Equal(t, []string{"due@example.net"}, payload.To)
+					require.Len(t, payload.To, 1)
+					require.Contains(t, []string{"due@example.net", "three@example.net", "one@example.net"}, payload.To[0])
 					require.Contains(t, payload.HTML, "Fixture group")
 					calls++
 					return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"id":"fixture"}`))}, nil
@@ -58,6 +59,8 @@ func TestSubscriptionExpiryService_SelectedProviderDeliversAndPreservesSuppressi
 				sub(2, "optout@example.net", 3*24*time.Hour-time.Hour),
 				sub(3, "already@example.net", 24*time.Hour-time.Hour),
 				sub(4, "notdue@example.net", 5*24*time.Hour-time.Hour),
+				sub(5, "three@example.net", 3*24*time.Hour-time.Hour),
+				sub(6, "one@example.net", 24*time.Hour-time.Hour),
 			}}
 			event := NotificationEmailEventSubscriptionExpiryReminder
 			require.NoError(t, settings.Set(ctx, notificationEmailPreferenceKey(event, "optout@example.net"), "unsubscribed"))
@@ -67,13 +70,13 @@ func TestSubscriptionExpiryService_SelectedProviderDeliversAndPreservesSuppressi
 			svc.SetNotificationEmailService(NewNotificationEmailService(settings, email))
 
 			svc.sendExpiryReminders(ctx)
-			require.EqualValues(t, 1, deliveries())
+			require.EqualValues(t, 3, deliveries())
 			key := notificationEmailDeliveryKey(event, "user_subscription", strconv.FormatInt(repo.subs[0].ID, 10), "due@example.net", "7d")
 			_, err := settings.GetValue(ctx, key)
 			require.NoError(t, err)
 			svc.sendExpiryReminders(ctx)
 			require.Equal(t, 2, repo.listCalls)
-			require.EqualValues(t, 1, deliveries(), "second scan must not resend")
+			require.EqualValues(t, 3, deliveries(), "second scan must not resend")
 
 			require.NoError(t, settings.Set(ctx, SettingKeySubscriptionExpiryNotifyEnabled, "false"))
 			svc.sendExpiryReminders(ctx)
@@ -95,6 +98,12 @@ func TestEmailCheckConfiguredUsesSelectedProviderWithoutSMTP(t *testing.T) {
 	require.NoError(t, email.CheckConfigured(ctx))
 	require.NoError(t, settings.Delete(ctx, SettingKeyResendAPIKey))
 	require.ErrorIs(t, email.CheckConfigured(ctx), ErrEmailNotConfigured)
+	repo := &subscriptionExpiryRepoStub{}
+	expiry := NewSubscriptionExpiryService(repo, time.Minute)
+	expiry.SetSettingRepository(settings)
+	expiry.SetNotificationEmailService(NewNotificationEmailService(settings, email))
+	expiry.sendExpiryReminders(ctx)
+	require.Zero(t, repo.listCalls, "missing selected provider credentials must skip the scan")
 	require.NoError(t, settings.Set(ctx, SettingKeySMTPHost, "smtp.example.com"))
 	require.ErrorIs(t, email.CheckConfigured(ctx), ErrEmailNotConfigured, "selected Resend must not fall back to SMTP")
 	require.NoError(t, settings.Set(ctx, SettingKeyEmailProvider, EmailProviderSMTP))

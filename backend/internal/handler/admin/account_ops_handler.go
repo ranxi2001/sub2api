@@ -59,8 +59,7 @@ func (h *AccountOpsHandler) GetConfig(c *gin.Context) {
 	}
 	ready := false
 	if h.email != nil {
-		smtp, smtpErr := h.email.GetSMTPConfig(c.Request.Context())
-		ready = smtpErr == nil && smtp != nil && smtp.Host != "" && smtp.From != ""
+		ready = h.email.CheckConfigured(c.Request.Context()) == nil
 	}
 	dropped, failures := h.svc.RuntimeCounters()
 	response.Success(c, gin.H{"config": cfg, "smtp_configured": ready, "dropped_signals": dropped, "storage_failures": failures, "encryption_key_configured": h.svc.EncryptionKeyConfigured()})
