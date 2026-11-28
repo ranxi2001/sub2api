@@ -114,7 +114,7 @@ func TestSendEmailUsesSMTPWhenProviderIsMissing(t *testing.T) {
 	svc := NewEmailService(repo, nil)
 	err := svc.SendEmail(context.Background(), "invalid", "Subject", "Body")
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "SMTP")
+	require.Contains(t, err.Error(), "smtp")
 }
 
 type resendSettingsTestRepository struct{ values map[string]string }

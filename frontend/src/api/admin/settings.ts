@@ -1213,12 +1213,8 @@ export async function updateSettings(
   return data;
 }
 
-/**
- * Test SMTP connection request
- */
+/** Test SMTP connection request. Resend is validated by the test-email send action. */
 export interface TestSmtpRequest {
-  email_provider?: "smtp" | "resend";
-  resend_api_key?: string;
   smtp_host: string;
   smtp_port: number;
   smtp_username: string;

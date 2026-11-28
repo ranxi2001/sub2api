@@ -89,7 +89,7 @@ func TestSendTestEmailResendUsesMockTransportWithoutSMTPConfiguration(t *testing
 	emailService := service.NewEmailService(repo, nil)
 	emailService.SetSecretEncryptor(settingsTestEncryptor{})
 	var sent bool
-	emailService.SetResendHTTPTransport(resendRoundTripperFunc(func(req *http.Request) (*http.Response, error) {
+	emailService.SetResendHTTPTransport(emailTestRoundTripper(func(req *http.Request) (*http.Response, error) {
 		sent = req.URL.String() == "https://api.resend.com/emails" && req.Header.Get("Authorization") == "Bearer re_test"
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"id":"email_test"}`)), Header: make(http.Header)}, nil
 	}))
@@ -120,20 +120,4 @@ func doSendTestEmail(t *testing.T, h *SettingHandler, body string) *httptest.Res
 	c.Request.Header.Set("Content-Type", "application/json")
 	h.SendTestEmail(c)
 	return rec
-}
-
-func TestSendTestEmailResendUsesMockTransportWithoutSMTPConfiguration(t *testing.T) {
-	repo := &settingHandlerRepoStub{values: map[string]string{service.SettingKeySiteName: "Example"}}
-	settingService := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
-	emailService := service.NewEmailService(repo, nil)
-	var sent bool
-	emailService.SetResendHTTPTransport(emailTestRoundTripper(func(req *http.Request) (*http.Response, error) {
-		sent = req.URL.String() == "https://api.resend.com/emails" && req.Header.Get("Authorization") == "Bearer re_test"
-		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"id":"email_test"}`)), Header: make(http.Header)}, nil
-	}))
-	h := NewSettingHandler(settingService, emailService, nil, nil, nil, nil, nil)
-	rec := doSendTestEmail(t, h, `{"email":"admin@example.net","email_provider":"resend","resend_api_key":"re_test","smtp_from_email":"mail@example.com"}`)
-	require.Equal(t, http.StatusOK, rec.Code)
-	require.True(t, sent)
-	require.NotContains(t, rec.Body.String(), "re_test")
 }

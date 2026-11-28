@@ -448,7 +448,7 @@ const baseSettingsResponse = {
   custom_endpoints: [],
   frontend_url: "",
   smtp_host: "",
-  email_provider: "smtp" as const,
+  email_provider: "smtp",
   resend_api_key_configured: false,
   smtp_port: 587,
   smtp_username: "",
