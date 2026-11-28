@@ -110,8 +110,7 @@ func qqBotSiteImageModelCandidates(g Group, accounts []Account) []string {
 
 func (p *qqBotSiteAI) Options(ctx context.Context, owner int64, c qqbot.Config) (qqbot.SiteAIOptions, error) {
 	out := qqbot.SiteAIOptions{Groups: []qqbot.SiteAIGroup{}, ImageGroups: []qqbot.SiteAIGroup{}, FrontendURL: p.settings.GetFrontendURL(ctx)}
-	mail, mailErr := p.email.GetSMTPConfig(ctx)
-	out.EmailConfigured = mailErr == nil && mail != nil && mail.Host != "" && mail.From != ""
+	out.EmailConfigured = p.email.CheckConfigured(ctx) == nil
 	user, err := p.users.GetByID(ctx, owner)
 	if err != nil {
 		return out, err

@@ -14,6 +14,7 @@ import (
 
 type subscriptionExpiryRepoStub struct {
 	listCalls int
+	subs      []UserSubscription
 }
 
 func (r *subscriptionExpiryRepoStub) Create(context.Context, *UserSubscription) error {
@@ -66,7 +67,7 @@ func (r *subscriptionExpiryRepoStub) ListByGroupID(context.Context, int64, pagin
 
 func (r *subscriptionExpiryRepoStub) List(context.Context, pagination.PaginationParams, *int64, *int64, string, string, string, string) ([]UserSubscription, *pagination.PaginationResult, error) {
 	r.listCalls++
-	return nil, &pagination.PaginationResult{Page: 1, Pages: 1}, nil
+	return r.subs, &pagination.PaginationResult{Page: 1, Pages: 1}, nil
 }
 
 func (r *subscriptionExpiryRepoStub) ExistsByUserIDAndGroupID(context.Context, int64, int64) (bool, error) {
@@ -195,7 +196,7 @@ func TestSubscriptionExpiryService_ExpiryReminderSettingReadErrorFailsClosed(t *
 	require.False(t, svc.expiryReminderEnabled(context.Background()))
 }
 
-func TestSubscriptionExpiryService_MissingSMTPSkipsReminderScanAndLogsOncePerInterval(t *testing.T) {
+func TestSubscriptionExpiryService_MissingEmailSkipsReminderScanAndLogsOncePerInterval(t *testing.T) {
 	repo := &subscriptionExpiryRepoStub{}
 	settingRepo := &subscriptionExpirySettingRepoStub{values: map[string]string{}}
 	emailService := NewEmailService(settingRepo, nil)
@@ -217,7 +218,7 @@ func TestSubscriptionExpiryService_MissingSMTPSkipsReminderScanAndLogsOncePerInt
 	svc.sendExpiryReminders(context.Background())
 
 	require.Zero(t, repo.listCalls)
-	require.Equal(t, 1, bytes.Count(logs.Bytes(), []byte("SMTP is not configured")))
+	require.Equal(t, 1, bytes.Count(logs.Bytes(), []byte("Email is not configured")))
 }
 
 func TestSubscriptionExpiryService_SMTPConfigReadErrorSkipsReminderScan(t *testing.T) {

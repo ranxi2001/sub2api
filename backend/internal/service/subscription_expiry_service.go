@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	subscriptionExpiryReminderSMTPWarningInterval = time.Minute
+	subscriptionExpiryReminderEmailWarningInterval = time.Minute
 	// subscriptionExpiryReminderLeaderLockKey gates the per-cycle reminder scan so
 	// that only one instance walks all active subscriptions and sends reminder
 	// emails, avoiding redundant full scans and duplicate emails.
@@ -39,8 +39,8 @@ type SubscriptionExpiryService struct {
 	db         *sql.DB
 	instanceID string
 
-	smtpWarningMu   sync.Mutex
-	lastSMTPWarning time.Time
+	emailWarningMu   sync.Mutex
+	lastEmailWarning time.Time
 }
 
 func NewSubscriptionExpiryService(userSubRepo UserSubscriptionRepository, interval time.Duration) *SubscriptionExpiryService {
@@ -125,7 +125,7 @@ func (s *SubscriptionExpiryService) sendExpiryReminders(ctx context.Context) {
 	if !s.expiryReminderEnabled(ctx) {
 		return
 	}
-	if !s.smtpConfigured(ctx) {
+	if !s.emailConfigured(ctx) {
 		return
 	}
 
@@ -166,25 +166,25 @@ func (s *SubscriptionExpiryService) expiryReminderEnabled(ctx context.Context) b
 	return !isFalseSettingValue(value)
 }
 
-func (s *SubscriptionExpiryService) smtpConfigured(ctx context.Context) bool {
+func (s *SubscriptionExpiryService) emailConfigured(ctx context.Context) bool {
 	if s == nil || s.notificationEmailService == nil || s.notificationEmailService.emailService == nil {
 		return false
 	}
-	_, err := s.notificationEmailService.emailService.GetSMTPConfig(ctx)
+	err := s.notificationEmailService.emailService.CheckConfigured(ctx)
 	if err == nil {
 		return true
 	}
 	if errors.Is(err, ErrEmailNotConfigured) {
-		s.smtpWarningMu.Lock()
-		defer s.smtpWarningMu.Unlock()
+		s.emailWarningMu.Lock()
+		defer s.emailWarningMu.Unlock()
 		now := time.Now()
-		if s.lastSMTPWarning.IsZero() || now.Sub(s.lastSMTPWarning) >= subscriptionExpiryReminderSMTPWarningInterval {
-			log.Printf("[SubscriptionExpiry] SMTP is not configured; skipping expiry reminders")
-			s.lastSMTPWarning = now
+		if s.lastEmailWarning.IsZero() || now.Sub(s.lastEmailWarning) >= subscriptionExpiryReminderEmailWarningInterval {
+			log.Printf("[SubscriptionExpiry] Email is not configured; skipping expiry reminders")
+			s.lastEmailWarning = now
 		}
 		return false
 	}
-	log.Printf("[SubscriptionExpiry] Read SMTP configuration failed; skipping expiry reminders: %v", err)
+	log.Printf("[SubscriptionExpiry] Read email configuration failed; skipping expiry reminders: %v", err)
 	return false
 }
 

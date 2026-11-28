@@ -245,6 +245,36 @@ func (s *EmailService) GetResendConfig(ctx context.Context) (*ResendConfig, erro
 	return &ResendConfig{APIKey: apiKey, From: strings.TrimSpace(settings[SettingKeySMTPFrom]), FromName: strings.TrimSpace(settings[SettingKeySMTPFromName])}, nil
 }
 
+// CheckConfigured checks the selected provider without sending a message.
+// Callers must not require SMTP settings when Resend is selected.
+func (s *EmailService) CheckConfigured(ctx context.Context) error {
+	if s == nil || s.settingRepo == nil {
+		return ErrEmailNotConfigured
+	}
+	settings, err := s.settingRepo.GetMultiple(ctx, []string{SettingKeyEmailProvider})
+	if err != nil {
+		return fmt.Errorf("get email provider: %w", err)
+	}
+	if normalizeEmailProvider(settings[SettingKeyEmailProvider]) == EmailProviderResend {
+		config, err := s.GetResendConfig(ctx)
+		if err != nil {
+			return err
+		}
+		if config.From == "" {
+			return ErrEmailNotConfigured
+		}
+		return nil
+	}
+	config, err := s.GetSMTPConfig(ctx)
+	if err != nil {
+		return err
+	}
+	if config.From == "" {
+		return ErrEmailNotConfigured
+	}
+	return nil
+}
+
 // SendEmail 发送邮件（使用数据库中保存的配置）
 func (s *EmailService) SendEmail(ctx context.Context, to, subject, body string) error {
 	if s == nil || s.settingRepo == nil {
